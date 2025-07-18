@@ -1,0 +1,4 @@
+@PACKAGE_INIT@
+foreach(COMPONENT ${aember-libs_FIND_COMPONENTS})
+    include(${CMAKE_CURRENT_LIST_DIR}/${COMPONENT}/${COMPONENT}Config.cmake)
+endforeach()
