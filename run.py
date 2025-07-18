@@ -191,7 +191,7 @@ def main():
             f"cmake "
             f"-DCMAKE_BUILD_TYPE=Release "
             f"-DCMAKE_INSTALL_PREFIX=build/install "
-            f"-DCMAKE_TOOLCHAIN_FILE={os.getcwd()}"
+            f"-DCMAKE_TOOLCHAIN_FILE={os.getcwd()}/tools/toolchains/x86_64-gnu.cmake"
             f"/vcpkg/scripts/buildsystems/vcpkg.cmake "
             f"-DVCPKG_OVERLAY_PORTS={os.getcwd()}/vcpkg_overlays "
             f"-DVCPKG_TARGET_TRIPLET=x64-linux "
