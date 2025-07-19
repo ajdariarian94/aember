@@ -1,13 +1,12 @@
+#!/usr/bin/env python3
+
 import argparse
-import getpass
 import os
-import shutil
-import signal
 import subprocess
 import sys
-from typing import List
-
 from enum import Enum
+
+from aember import configure, build
 
 IMAGE_NAME = "aember"
 BASE_IMAGE = "ubuntu:24.04"
@@ -22,84 +21,6 @@ class Commands(str, Enum):
     pack = "pack"
     run_aember = "run_aember"
     debug_aember = "debug_aember"
-
-
-def build_docker_image():
-    docker_cmd = f"""docker build -t {IMAGE_NAME} \
-        --build-arg BASE_IMAGE={BASE_IMAGE} \
-        --build-arg UID={os.getuid()} \
-        --build-arg GID={os.getgid()} \
-        --build-arg USERNAME={getpass.getuser()} \
-        --network=host \
-    """
-    process = subprocess.Popen(
-        f"{docker_cmd} .", shell=True, encoding="utf-8", errors="replace"
-    )
-
-    process.wait()
-
-def run_docker_container(command: str, no_tty=False, no_gpu=False, env: List[str] = {}):
-    docker_path = os.getcwd()
-    local_path = os.getcwd()
-    no_tty_flag = "t" if not no_tty else ""
-    no_gpu_flag = (
-        "--runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=all" if not no_gpu else ""
-    )
-
-    process = subprocess.Popen(
-        f"docker ps -q -f name={IMAGE_NAME}",
-        shell=True,
-        encoding="utf-8",
-        errors="replace",
-        stdout=subprocess.PIPE,
-    )
-    output = process.stdout.read()
-
-    process.wait()
-    extra = ""
-    for i in env:
-        extra = f"{extra} -e {i}"
-
-    if not output:
-        docker_cmd = f"""docker run -i{no_tty_flag} --rm --net host \
-            {no_gpu_flag} \
-            -e DBUS_SESSION_BUS_ADDRESS \
-            -v /tmp/.X11-unix:/tmp/.X11-unix \
-            -v /dev/bus/usb:/dev/bus/usb \
-            -e DISPLAY=$DISPLAY \
-            --group-add video \
-            {extra} \
-            --user {os.getuid()}:{os.getgid()} \
-            --ipc=host \
-            --cap-add=CAP_SYS_PTRACE \
-            --ulimit memlock=-1 \
-            --ulimit stack=67108864 \
-            --workdir {docker_path} \
-            -v /run/user/{os.getuid()}/bus:/run/user/{os.getuid()}/bus \
-            -v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket \
-            -v {local_path}:{docker_path} \
-            -v {os.getcwd()}/keypairs:/home/{getpass.getuser()}/.config/.mono/keypairs \
-            --privileged \
-            --name {IMAGE_NAME} \
-            {IMAGE_NAME}"""
-    else:
-        docker_cmd = f"docker exec -i{no_tty_flag} {IMAGE_NAME}"
-
-    def signal_handler(sig, frame):
-        subprocess.run(f"docker kill {IMAGE_NAME}", shell=True)
-        process.terminate()
-        exit(0)
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    process = subprocess.Popen(
-        f"{docker_cmd} {command}", shell=True, encoding="utf-8", errors="replace"
-    )
-
-    process.wait()
-
-    return process.returncode
-
 
 def main():
     parser = argparse.ArgumentParser(description="CybeeAI helper script")
@@ -167,60 +88,23 @@ def main():
         description="Pack artifacts"
     )
 
-    subparsers.add_parser(
-        f"{Commands.run_aember.value}",
-        description="Run Aember"
-    )
+    #subparsers.add_parser(
+    #    f"{Commands.run_aember.value}",
+    #    description="Run Aember"
+    #)
 
-    subparsers.add_parser(
-        f"{Commands.debug_aember.value}",
-        description="Debug Aember"
-    )
+    #subparsers.add_parser(
+    #    f"{Commands.debug_aember.value}",
+    #    description="Debug Aember"
+    #)
 
-    [args, unknown] = parser.parse_known_args()
+    [args, _] = parser.parse_known_args()
 
-    if args.env is None:
-        args.env = []
 
-    if args.command == Commands.build_docker:
-        build_docker_image()
-    elif args.command == Commands.run:
-        run_docker_container(" ".join(unknown), args.no_tty, args.no_gpu, args.env)
-    elif args.command == Commands.configure:
-        command = (
-            f"cmake "
-            f"-DCMAKE_BUILD_TYPE=Release "
-            f"-DCMAKE_INSTALL_PREFIX=build/install "
-            f"-DCMAKE_TOOLCHAIN_FILE={os.getcwd()}/tools/toolchains/x86_64-gnu.cmake"
-            f"/vcpkg/scripts/buildsystems/vcpkg.cmake "
-            f"-DVCPKG_OVERLAY_PORTS={os.getcwd()}/vcpkg_overlays "
-            f"-DVCPKG_TARGET_TRIPLET=x64-linux "
-            f"-DVCPKG_HOST_TRIPLET=x64-linux "
-            f"-B build/x86_64-gnu -S ."
-            )
-
-        configuration_result = run_docker_container(
-            command,
-            args.no_tty,
-            args.no_gpu,
-            args.env,
-        )
-
-        if configuration_result != 0:
-            print("Configure failed!")
-            sys.exit(1)
-
+    if args.command == Commands.configure:
+        configure()
     elif args.command == Commands.build:
-        build_result = run_docker_container(
-            "cmake --build build/x86_64-gnu --parallel",
-            args.no_tty,
-            args.no_gpu,
-            args.env,
-        )
-
-        if build_result != 0:
-            print("Build failed!")
-            sys.exit(1)
+        build()
     elif args.command == Commands.pack:
         build_dir = f"{os.getcwd()}/build"
 

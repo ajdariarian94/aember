@@ -1,31 +1,34 @@
-############################################################
-# Base image for Linux (common dependencies)
-############################################################
-
-ARG BASE_IMAGE=ubuntu:24.04
-
+# ---- Base image and argument setup ----
+ARG BASE_IMAGE=ubuntu:noble
 FROM ${BASE_IMAGE} AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Build arguments for matching host user
 ARG UID=1000
 ARG GID=1000
-ARG USERNAME=dev
+ARG USERNAME
 
-RUN getent group ${GID} || groupadd -g ${GID} ${USERNAME}
-RUN id -u ${UID} &>/dev/null || useradd -u ${UID} -g ${GID} ${USERNAME}
+# Create group and user only if they don't exist already
+RUN if ! getent group "${GID}" >/dev/null 2>&1; then \
+        groupadd -g "${GID}" "${USERNAME}"; \
+    else \
+        echo "Group with GID ${GID} already exists, skipping groupadd"; \
+    fi && \
+    if ! id -u "${UID}" >/dev/null 2>&1; then \
+        useradd -m -u "${UID}" -g "${GID}" "${USERNAME}"; \
+    else \
+        echo "User with UID ${UID} already exists, skipping useradd"; \
+    fi
 
-# Install base dependencies
+# ---- Install system dependencies ----
 RUN apt update && apt install -y \
     build-essential \
     clang \
     clang-tools \
     clang-tidy \
     git \
-    ninja-build
-
-# Install the development additional dependencies
-RUN apt update && apt install -y \
+    ninja-build \
     curl \
     cppcheck \
     doxygen \
@@ -36,15 +39,26 @@ RUN apt update && apt install -y \
     g++-aarch64-linux-gnu \
     lcov \
     nsis \
-    valgrind \ 
-    liblxc-dev \ 
-    libmbedtls-dev \ 
-    zlib1g-dev      
-   
-RUN dpkg --add-architecture i386
-
-# Install additional tools
-RUN apt update && apt install -y \
+    valgrind \
+    liblxc-dev \
+    libmbedtls-dev \
+    zlib1g-dev \
+    meson-1.5 \
+    libdbus-1-dev \
+    docbook2x \
+    autoconf \
+    automake \
+    autoconf-archive \
+    bison \
+    flex \
+    libtool \
+    mono-complete \
+    pkgconf \
+    libaudit-dev \
+    libcap-dev \
+    libsystemd-dev \
+    apt-transport-https \
+    software-properties-common \
     zip \
     unzip \
     tar \
@@ -52,58 +66,43 @@ RUN apt update && apt install -y \
     wget \
     locales \
     fontconfig \
-    wine64 \
-    wine32 
-    
+    bash-completion \
+    figlet \
+    ruby \
+    python3 \
+    python3-pip \
+    python3.12-venv \
+    sudo \
+    lsb-release && \
+    gem install lolcat
 
-RUN apt update && apt install -y \ 
-    meson-1.5 \
-    libdbus-1-dev \
-    docbook2x
+# Add Kitware APT repo for latest CMake
+RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
+    gpg --dearmor - | \
+    tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null && \
+    apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
+    apt update && apt install -y cmake
 
-# Tools used from Vcpkg
-RUN apt update && apt install -y \
-    autoconf \
-    automake \
-    autoconf-archive \
-    bison \
-    flex  \
-    libtool \
-    mono-complete \
-    pkgconf
-
-# Install Linux only dependencies
-RUN apt update && apt install -y \
-    libaudit-dev \
-    libcap-dev \
-    libsystemd-dev
-
-# Install Powershell
-RUN apt update && apt install -y \
-    apt-transport-https \
-    software-properties-common
-
-# Install Python and PyInstaller
-#RUN apt update && apt install -y \
-#    python3 \
-#    python3-pip && \
-#    pip3 install pyinstaller
-
-# Remove apt list
-RUN rm -rf /var/lib/apt/lists/*
-
-# Setup default font and locale
+# Set up locale
 RUN locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 
+# ---- Setup virtual environment ----
+RUN python3 -m venv /venv
+RUN /venv/bin/pip install --upgrade pip
 
-# Install newest version of cmake
-RUN apt update && apt install -y software-properties-common lsb-release && apt clean all
-RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
-RUN apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main"
-RUN apt update && apt install -y cmake
+# Copy Python dependencies and install
+COPY ./requirements.txt /usr
+RUN /venv/bin/pip install --no-cache-dir -r /usr/requirements.txt
 
+# Fix permissions (user was created earlier)
+RUN chown -R ${UID}:${GID} /venv && chmod -R 755 /venv
 
+# Clean up APT cache
+RUN rm -rf /var/lib/apt/lists/*
+
+# ---- Set default user and working directory ----
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
+    
