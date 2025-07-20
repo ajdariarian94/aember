@@ -37,6 +37,10 @@ target_link_libraries(${PROJECT_NAME}
     aember-libs::device_health
 )
 
+target_include_directories(${PROJECT_NAME}
+  PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_INSTALL_PREFIX}/include>
+)
 
 ################################################################################
 #
