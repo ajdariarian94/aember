@@ -7,14 +7,13 @@ from python.base import (
     run_docker
 )
 
-
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Docker control script for aember")
 
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("build_docker")
-    subparsers.add_parser("run")
+    subparsers.add_parser("build_docker", help="Build the Docker container")
+    subparsers.add_parser("run", help="Run the Docker container")
 
     [args, _] = parser.parse_known_args()
 

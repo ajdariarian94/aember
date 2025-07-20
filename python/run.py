@@ -6,7 +6,7 @@ import subprocess
 import sys
 from enum import Enum
 
-from aember import configure, build
+from build import configure, build
 
 IMAGE_NAME = "aember"
 BASE_IMAGE = "ubuntu:24.04"

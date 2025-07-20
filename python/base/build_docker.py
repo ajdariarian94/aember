@@ -1,14 +1,14 @@
 import getpass
-import os
 import subprocess
 
-IMAGE_NAME = "aember"
-BASE_IMAGE = "ubuntu:24.04"
+from python.config import load_config
 
 def build_docker():
+    config = load_config()
+
     docker_cmd = (
-        f"docker build --rm -t {IMAGE_NAME} "
-        f"--build-arg BASE_IMAGE={BASE_IMAGE} "
+        f"docker build --rm -t {config["image_image"]} "
+        f"--build-arg BASE_IMAGE={config["base_image"]} "
         f"--build-arg USERNAME={getpass.getuser()} "
         f"--network=host ."
     )
