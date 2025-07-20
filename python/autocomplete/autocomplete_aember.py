@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 
-import os
 import sys
-import glob
 
 def autocomplete():
     options = [
         "configure",
-        "build"
+        "build",
+        "clean",
+        "execute",
+        "pack"
     ]
-
 
     args = sys.argv[1:]
 
