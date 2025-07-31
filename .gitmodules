@@ -1,3 +1,6 @@
 [submodule "vcpkg"]
 	path = vcpkg
 	url = https://github.com/ajdariarian94/vcpkg
+[submodule "python"]
+	path = python
+	url = https://github.com/ajdariarian94/python.git
