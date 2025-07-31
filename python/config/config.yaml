@@ -1,5 +1,0 @@
-image_image: aember
-base_image: ubuntu:24.04
-
-uid: 1000
-gid: 1000
