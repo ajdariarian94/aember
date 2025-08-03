@@ -28,9 +28,9 @@ class Heartbeat {
    * @param interval Time interval between heartbeats.
    * @param callback Function to be called with heartbeat data.
    */
-  explicit Heartbeat(
-      const std::function<void(const nlohmann::json&)>& callback,
-      const std::chrono::milliseconds& interval = std::chrono::milliseconds(1000));
+  explicit Heartbeat(const std::function<void(const nlohmann::json&)>& callback,
+                     const std::chrono::milliseconds& interval =
+                         std::chrono::milliseconds(1000));
 
   /**
    * @brief Destructor for Heartbeat.

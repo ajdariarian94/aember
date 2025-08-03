@@ -1,6 +1,6 @@
 /**
  * @file heartbeat.cpp
- * @author Arian Ajdari 
+ * @author Arian Ajdari
  * @brief Library implementation for Heartbeat
  * @version 0.1
  * @date 2025-07-18
