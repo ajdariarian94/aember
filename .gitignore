@@ -6,6 +6,8 @@ build
 
 keypairs
 
+.ruff_cache
+
 
 # Ignore Python bytecode
 **/__pycache__/

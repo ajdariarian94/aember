@@ -27,7 +27,7 @@ include(ExternalProject)
 #   VCPKG_INSTALLED_DIR
 #   VCPKG_MANIFEST_INSTALL
 
-ExternalProject_Add(aember-libs
+externalproject_add(aember-libs
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libraries
   BUILD_ALWAYS TRUE
   CMAKE_ARGS
@@ -43,7 +43,7 @@ ExternalProject_Add(aember-libs
     -DVERSION=${PROJECT_VERSION}
 )
 
-ExternalProject_Add(executables
+externalproject_add(executables
   DEPENDS aember-libs
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/executables
   BUILD_ALWAYS TRUE

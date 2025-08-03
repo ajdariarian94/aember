@@ -2,10 +2,8 @@
 
 import argparse
 
-from python.base import (
-    build_docker,
-    run_docker
-)
+from python.base import build_docker, run_docker
+
 
 def main():
     parser = argparse.ArgumentParser(description="Docker control script for aember")

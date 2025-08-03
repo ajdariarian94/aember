@@ -1,0 +1,12 @@
+linelength=88
+
+filter=+all
+
+# Optionally, explicitly enable everything and disable very noisy or irrelevant rules
+# For example, remove ignores:
+# -package/stdargs
+# -convention/filename
+# -readability/wonkycase
+
+# So, your filters become something like:
+filter=+linelength,+package/consistency,+package/stdargs,+convention/filename,+readability/logic,+readability/mixedcase,+readability/wonkycase,+syntax,+whitespace/eol,+whitespace/extra,+whitespace/indent,+whitespace/mismatch,+whitespace/newline,+whitespace/tabs
