@@ -8,7 +8,6 @@ cmake_minimum_required(VERSION 3.19.5)
 project(
   aember-libs
   VERSION ${VERSION}
-  HOMEPAGE_URL "to be determined"
   DESCRIPTION "aember-libs project"
   LANGUAGES CXX)
 

@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.19.5)
 project(
   aember
   VERSION 0.9.9
-  HOMEPAGE_URL "https://github.com/cybee-ai/cybee"
+  HOMEPAGE_URL "https://github.com/ajdariarian94/aember.git"
   DESCRIPTION "aember superbuild project"
   LANGUAGES C CXX)
 
