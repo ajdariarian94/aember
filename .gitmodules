@@ -4,3 +4,6 @@
 [submodule "python"]
 	path = python
 	url = git@github-ajdariarian94:ajdariarian94/python.git
+[submodule "poky"]
+	path = poky
+	url = git@github.com:ajdariarian94/poky.git
