@@ -3,11 +3,9 @@ LICENSE = "CLOSED"
 
 SRC_URI = "file://aember"
 
-S = "${WORKDIR}"
-
 do_install() {
-    install -d ${D}/
-    install -m 0755 ${WORKDIR}/aember ${D}/aember
+    install -d ${D}${bindir}
+    install -m 0755 ${WORKDIR}/aember ${D}${bindir}/aember
 }
 
-FILES:${PN} = "/aember"
+FILES:${PN} = "${bindir}/aember"
