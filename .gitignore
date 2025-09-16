@@ -18,6 +18,7 @@ keypairs
 resources/poky/poky-cache
 resources/poky/poky-recipes/**/cache
 
+**/conf/bblayers.conf
 **/conf/conf-notes.txt
 **/conf/conf-summary.txt
 **/conf/templateconf.cfg
