@@ -23,6 +23,7 @@ RUN if ! getent group "${GID}" >/dev/null 2>&1; then \
 
 # ---- Install system dependencies ----
 RUN apt update && apt install -y    \
+    apt-utils                       \
     build-essential                 \
     clang                           \
     clang-tools                     \
@@ -34,6 +35,7 @@ RUN apt update && apt install -y    \
     doxygen                         \
     gawk                            \
     gdb                             \
+    gnupg                           \
     graphviz                        \
     gcc-aarch64-linux-gnu           \
     g++-aarch64-linux-gnu           \
@@ -77,10 +79,13 @@ RUN apt update && apt install -y    \
     qemu-system-x86                 \
     qemu-utils                      \
     qemu-system                     \
+    chrpath                         \
+    diffstat                        \
+    zstd                            \
     lsb-release &&                  \
     gem install lolcat
 
-# Add Kitware APT repo for latest CMake
+ # Add Kitware APT repo for latest CMake
 RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
     gpg --dearmor - | \
     tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null && \

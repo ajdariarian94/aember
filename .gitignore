@@ -13,3 +13,24 @@ keypairs
 **/__pycache__/
 *.py[cod]
 
+#Ignore yocto resources
+# Build directory
+resources/poky/poky-cache
+resources/poky/poky-recipes/**/cache
+
+**/conf/bblayers.conf
+**/conf/conf-notes.txt
+**/conf/conf-summary.txt
+**/conf/templateconf.cfg
+
+
+*.log
+*.lock
+*.sock
+*.wic
+*.iso
+*.img
+*.vmlinuz
+*.cpio.gz
+
+
