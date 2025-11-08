@@ -8,7 +8,6 @@ keypairs
 
 .ruff_cache
 
-
 # Ignore Python bytecode
 **/__pycache__/
 *.py[cod]
@@ -18,11 +17,13 @@ keypairs
 resources/poky/poky-cache
 resources/poky/poky-recipes/**/cache
 
+**/aember-image/recipes-core/aember/files/aember
+
 **/conf/bblayers.conf
 **/conf/conf-notes.txt
 **/conf/conf-summary.txt
+**/conf/local.conf
 **/conf/templateconf.cfg
-
 
 *.log
 *.lock
@@ -32,5 +33,3 @@ resources/poky/poky-recipes/**/cache
 *.img
 *.vmlinuz
 *.cpio.gz
-
-
