@@ -1,9 +1,9 @@
 [submodule "vcpkg"]
 	path = vcpkg
-	url = git@github-ajdariarian94:ajdariarian94/vcpkg.git
+	url = git@aember:ajdariarian94/vcpkg.git
 [submodule "python"]
 	path = python
-	url = git@github-ajdariarian94:ajdariarian94/python.git
+	url = git@aember:ajdariarian94/python.git
 [submodule "poky"]
 	path = poky
-	url = git@github.com:ajdariarian94/poky.git
+	url = git@aember:ajdariarian94/poky.git
