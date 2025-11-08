@@ -81,9 +81,20 @@ RUN apt update && apt install -y    \
     qemu-system                     \
     chrpath                         \
     diffstat                        \
+    xterm                           \
+    kitty                           \
     zstd                            \
     lsb-release &&                  \
     gem install lolcat
+
+RUN apt update && apt install -y \
+    libgl1-mesa-dri \
+    libegl-mesa0 \
+    libglx-mesa0 \
+    libwayland-egl1-mesa \
+    libwayland-client0 \
+    libwayland-cursor0 \
+    libglfw3
 
  # Add Kitware APT repo for latest CMake
 RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
