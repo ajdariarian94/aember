@@ -7,7 +7,7 @@
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
-#include <aember-libs/device_health/heartbeat.h>  // for cybee::device_health::Heartbeat
+#include <aember-libs/device_health/heartbeat.h>  // for aember::device_health::Heartbeat
 
 #include <spdlog/spdlog.h>    // for spdlog::error, spdlog::info
 #include <nlohmann/json.hpp>  // for nlohmann::json

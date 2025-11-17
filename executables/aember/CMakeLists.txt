@@ -9,7 +9,7 @@ project(
   aember
   VERSION ${VERSION}
   HOMEPAGE_URL
-    "https://github.com/cybee-ai/cybee/tree/main/executables/cybee-xdr"
+    "https://github.com/ajdariarian94/aember/tree/main/executables/aember"
   DESCRIPTION "aember executable"
   LANGUAGES CXX)
 
