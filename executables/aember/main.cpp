@@ -1,7 +1,6 @@
 #include <aember-libs/device-health/heartbeat.h>
 #include <aember-libs/utils/logging/logging.h>
 
-
 aember::utils::Logger log_{"aember"};
 
 void HeartbeatCallback(const nlohmann::json& heartbeat) {

@@ -16,10 +16,8 @@ target_include_directories(
   ${COMPONENT} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-target_link_libraries(${COMPONENT} PUBLIC 
-  aember-libs::utils::logging
-  nlohmann_json::nlohmann_json
-)
+target_link_libraries(${COMPONENT} PUBLIC aember-libs::utils::logging
+                                          nlohmann_json::nlohmann_json)
 
 set_target_properties(
   ${COMPONENT} PROPERTIES VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}

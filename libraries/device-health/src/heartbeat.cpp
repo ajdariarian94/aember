@@ -16,7 +16,10 @@ namespace aember::device_health {
 
 Heartbeat::Heartbeat(const std::function<void(const nlohmann::json&)>& callback,
                      const std::chrono::milliseconds& interval)
-    : running_(false), interval_(interval), callback_(callback), log_("heartbeat") {}
+    : running_(false),
+      interval_(interval),
+      callback_(callback),
+      log_("heartbeat") {}
 
 Heartbeat::~Heartbeat() {
   Stop();
