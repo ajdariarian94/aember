@@ -7,7 +7,7 @@
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
-#include <aember-libs/device_health/heartbeat.h>  // for aember::device_health::Heartbeat
+#include <aember-libs/device-health/heartbeat.h>  // for aember::device_health::Heartbeat
 
 #include <spdlog/spdlog.h>    // for spdlog::error, spdlog::info
 #include <nlohmann/json.hpp>  // for nlohmann::json
@@ -16,13 +16,14 @@ namespace aember::device_health {
 
 Heartbeat::Heartbeat(const std::function<void(const nlohmann::json&)>& callback,
                      const std::chrono::milliseconds& interval)
-    : running_(false), interval_(interval), callback_(callback) {}
+    : running_(false), interval_(interval), callback_(callback), log_("heartbeat") {}
 
 Heartbeat::~Heartbeat() {
   Stop();
 }
 
 void Heartbeat::Start() {
+  log_.info("Starting heartbeat");
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (running_) { return; }
@@ -55,7 +56,7 @@ void Heartbeat::Run() {
 void Heartbeat::Beep() {
   try {
     nlohmann::json heartbeat_data;
-    heartbeat_data["status"] = "alive";
+    heartbeat_data["status"] = "online";
     heartbeat_data["timestamp"] =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now().time_since_epoch())
@@ -63,7 +64,7 @@ void Heartbeat::Beep() {
 
     callback_(heartbeat_data);
   } catch (const std::exception& e) {
-    spdlog::error("Error in Beep: {}", e.what());
+    log_.error("Error in Beep: {}", e.what());
   }
 }
 

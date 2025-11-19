@@ -14,7 +14,7 @@ project(
   LANGUAGES CXX)
 
 # Dependencies
-find_package(aember-libs REQUIRED COMPONENTS device_health)
+find_package(aember-libs REQUIRED COMPONENTS device-health)
 
 find_package(spdlog REQUIRED)
 
@@ -27,7 +27,7 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -no-pie")
 
 add_executable(${PROJECT_NAME} main.cpp)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE aember-libs::device_health)
+target_link_libraries(${PROJECT_NAME} PRIVATE aember-libs::device-health)
 
 target_include_directories(
   ${PROJECT_NAME} PRIVATE $<BUILD_INTERFACE:${CMAKE_INSTALL_PREFIX}/include>)

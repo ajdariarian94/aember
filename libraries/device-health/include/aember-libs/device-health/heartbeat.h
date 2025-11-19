@@ -9,6 +9,8 @@
  */
 #pragma once
 
+#include <aember-libs/utils/logging/logging.h>
+
 #include <nlohmann/json.hpp>  // for nlohmann::json
 
 #include <atomic>              // for std::atomic_bool
@@ -64,6 +66,8 @@ class Heartbeat {
   std::thread check_thread_;
   std::condition_variable cv_;
   std::mutex mutex_;
+
+  aember::utils::Logger log_;
 };
 
 }  // namespace aember::device_health

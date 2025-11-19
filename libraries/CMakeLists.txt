@@ -21,7 +21,8 @@ find_package(nlohmann_json REQUIRED)
 find_package(spdlog REQUIRED)
 
 # Common
-add_subdirectory(device_health)
+add_subdirectory(device-health)
+add_subdirectory(utils)
 
 # ##############################################################################
 #
