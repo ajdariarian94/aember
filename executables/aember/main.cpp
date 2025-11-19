@@ -1,9 +1,11 @@
-#include <aember-libs/device_health/heartbeat.h>
+#include <aember-libs/device-health/heartbeat.h>
+#include <aember-libs/utils/logging/logging.h>
 
-#include <spdlog/spdlog.h>
+
+aember::utils::Logger log_{"aember"};
 
 void HeartbeatCallback(const nlohmann::json& heartbeat) {
-  spdlog::info(heartbeat.dump());
+  log_.info(heartbeat.dump());
 }
 
 int main(int /*argc*/, char** /*argv*/) {

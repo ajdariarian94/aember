@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(aember-libs REQUIRED COMPONENTS utils)
+find_dependency(nlohmann_json REQUIRED)
+include(${CMAKE_CURRENT_LIST_DIR}/${COMPONENT}Targets.cmake)
