@@ -108,6 +108,7 @@ RUN locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 
+
 # ---- Setup virtual environment ----
 RUN python3 -m venv /venv
 RUN /venv/bin/pip install --upgrade pip
@@ -116,6 +117,17 @@ RUN /venv/bin/pip install --upgrade pip
 COPY ./requirements.txt /usr
 RUN /venv/bin/pip install --no-cache-dir -r /usr/requirements.txt
 
+# ---- Clone and build BusyBox ----
+RUN git clone https://github.com/mirror/busybox.git /tmp/busybox && \
+    cd /tmp/busybox && \
+    make defconfig && \
+    sed -i 's/^CONFIG_TC=.*/# CONFIG_TC is not set/' .config && \
+    sed -i 's/^CONFIG_IFCONFIG=.*/# CONFIG_IFCONFIG is not set/' .config && \
+    sed -i 's/^CONFIG_ROUTE=.*/# CONFIG_ROUTE is not set/' .config && \
+    make -j$(nproc)
+    
+RUN cp /tmp/busybox/busybox /usr/local/bin/busybox
+    
 # Fix permissions (user was created earlier)
 RUN chown -R ${UID}:${GID} /venv && chmod -R 755 /venv
 

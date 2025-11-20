@@ -1,0 +1,12 @@
+#!/bin/sh
+
+echo "[init] Creating mount points..."
+mkdir -p /proc /sys /dev /tmp /mnt
+
+echo "[init] Mounting filesystems..."
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+echo "[init] Launching Aember as PID 1..."
+exec /usr/bin/aember
