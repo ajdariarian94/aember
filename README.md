@@ -9,7 +9,6 @@ Before building or running AEMBER, ensure you have:
 - 🐧 **Linux**
 - 🐳 **Docker**
 
-
 ## 🏗️ Building Docker Image
 
 AEMBER ships with a ready‑made Docker environment containing everything.

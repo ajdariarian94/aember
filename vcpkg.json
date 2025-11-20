@@ -2,7 +2,6 @@
   "name": "aember",
   "version": "1.0.0",
   "dependencies": [
-    "abseil",
     "nlohmann-json",
     "spdlog"
   ]

@@ -18,12 +18,7 @@ find_package(aember-libs REQUIRED COMPONENTS device-health)
 
 find_package(spdlog REQUIRED)
 
-# Force static linking of stdlib (if available)
-set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-set(BUILD_SHARED_LIBS OFF)
-
-# Add static flags explicitly
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -no-pie")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -no-pie")
 
 add_executable(${PROJECT_NAME} main.cpp)
 
