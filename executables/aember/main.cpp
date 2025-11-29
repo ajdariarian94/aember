@@ -1,22 +1,9 @@
-#include <aember-libs/device-health/heartbeat.h>
-#include <aember-libs/utils/logging/logging.h>
-
-#include <optional>
-
-aember::utils::Logger log_{"aember"};
-
-void HeartbeatCallback(const nlohmann::json& heartbeat) {
-  log_.info(heartbeat.dump());
-}
-
-std::optional<aember::device_health::Heartbeat> device_health;
+#include <aember-libs/aember-init/aember-init.h>
 
 int main(int /*argc*/, char** /*argv*/) {
-  device_health.emplace(HeartbeatCallback);
+  aember::aember_init::AemberInit aember_init{};
 
-  device_health->Start();
-
-  while (true) { std::this_thread::sleep_for(std::chrono::seconds(1)); }
+  aember_init.Start();
 
   return 0;
 }
