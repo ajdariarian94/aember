@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Build arguments for matching host user
 ARG UID=1000
 ARG GID=1000
-ARG USERNAME
+ARG USERNAME=ubuntu
 
 # Create group and user only if they don't exist already
 RUN if ! getent group "${GID}" >/dev/null 2>&1; then \
@@ -84,6 +84,7 @@ RUN apt update && apt install -y    \
     xterm                           \
     kitty                           \
     zstd                            \
+    x11-utils                       \
     lsb-release &&                  \
     gem install lolcat
 

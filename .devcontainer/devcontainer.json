@@ -1,0 +1,30 @@
+{
+    "name": "aember-dev",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    },
+    "runArgs": [
+        "--net=host",
+        "--privileged",
+        "-e", "DISPLAY",
+        "-v", "/tmp/.X11-unix:/tmp/.X11-unix",
+        "-v", "${env:HOME}/.ssh:/home/ubuntu/.ssh:ro"
+    ],
+    "workspaceFolder": "/aember_ws",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/aember_ws,type=bind",
+    "remoteUser": "ubuntu",
+    "postStartCommand": "/aember_ws/tools/scripts/init.sh",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-vscode.cpptools",
+                "ms-azuretools.vscode-docker"
+            ],
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "bash"
+            }
+        }
+    }
+}
