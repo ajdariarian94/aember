@@ -9,12 +9,12 @@
         "--privileged",
         "-e", "DISPLAY",
         "-v", "/tmp/.X11-unix:/tmp/.X11-unix",
-        "-v", "${env:HOME}/.ssh:/home/ubuntu/.ssh:ro"
+        "-v", "${env:HOME}/.ssh:/home/dev/.ssh:ro"
     ],
-    "workspaceFolder": "/aember_ws",
-    "workspaceMount": "source=${localWorkspaceFolder},target=/aember_ws,type=bind",
-    "remoteUser": "ubuntu",
-    "postStartCommand": "/aember_ws/tools/scripts/init.sh",
+    "workspaceFolder": "/aember_ws/aember",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/aember_ws/aember,type=bind",
+    "remoteUser": "dev",
+    "postStartCommand": "/aember_ws/aember/tools/scripts/init.sh",
     "customizations": {
         "vscode": {
             "extensions": [

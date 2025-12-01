@@ -2,7 +2,7 @@
 # Setup autocomplete for aember (idempotent)
 
 BASHRC="$HOME/.bashrc"
-WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)/aember_ws"
+WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)/aember_ws/aember"
 AUTOCOMPLETE_SCRIPT="$WORKSPACE_DIR/python/autocomplete/autocomplete_aember.py"
 
 # Append to .bashrc once

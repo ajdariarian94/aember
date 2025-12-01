@@ -7,18 +7,20 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Build arguments for matching host user
 ARG UID=1000
 ARG GID=1000
-ARG USERNAME=ubuntu
+ARG USERNAME=dev
 
 # Create group and user only if they don't exist already
-RUN if ! getent group "${GID}" >/dev/null 2>&1; then \
-        groupadd -g "${GID}" "${USERNAME}"; \
-    else \
-        echo "Group with GID ${GID} already exists, skipping groupadd"; \
-    fi && \
-    if ! id -u "${UID}" >/dev/null 2>&1; then \
+# Create or reuse user with desired UID/GID
+RUN \
+    EXISTING_USER="$(getent passwd ${UID} | cut -d: -f1)" && \
+    if [ -n "$EXISTING_USER" ] && [ "$EXISTING_USER" != "${USERNAME}" ]; then \
+        echo "Renaming existing user $EXISTING_USER to ${USERNAME}"; \
+        usermod -l "${USERNAME}" "$EXISTING_USER"; \
+        usermod -d /home/${USERNAME} -m "${USERNAME}"; \
+    elif [ -z "$EXISTING_USER" ]; then \
+        echo "Creating new user ${USERNAME}"; \
+        groupadd -f -g "${GID}" "${USERNAME}" || true; \
         useradd -m -u "${UID}" -g "${GID}" "${USERNAME}"; \
-    else \
-        echo "User with UID ${UID} already exists, skipping useradd"; \
     fi
 
 # ---- Install system dependencies ----
