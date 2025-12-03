@@ -8,20 +8,21 @@ Before building or running AEMBER, ensure you have:
 
 - 🐧 **Linux**
 - 🐳 **Docker**
+- 🖥️ **Visual Studio Code** with the **Dev Containers** extension installed
 
-## 🏗️ Building Docker Image
+Run the following:
+
+```sh
+./tools/scripts/prerequisites.sh 
+```
+
+## 🏗️ Running AEMBER
 
 AEMBER ships with a ready‑made Docker environment containing everything.
 
-```sh
-python3 init.py build_docker
-```
+Press **F1** (or **Ctrl+Shift+P**) and type:
 
-After the build succeeds:
-
-```sh
-python3 init.py run
-```
+<i>**Dev Containers: Open Folder in Container**</i>
 
 This drops you into a fully configured environment.
 
