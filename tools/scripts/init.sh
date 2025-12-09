@@ -43,5 +43,7 @@ done
 source "$HOME/.bashrc"
 source /venv/bin/activate
 
+aember --install-completion  
+
 # Show banner
 figlet -f big aember | lolcat

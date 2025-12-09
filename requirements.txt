@@ -9,3 +9,4 @@ ruff==0.0.*
 cmakelint==1.4.*
 clang-format==18.1.*
 cmake-format==0.6.*
+typer==0.20.*
