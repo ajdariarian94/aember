@@ -11,13 +11,12 @@ endif()
 # Normal GNU compilers
 set(CMAKE_C_COMPILER gcc)
 set(CMAKE_CXX_COMPILER g++)
-set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 
 # Extra compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra" CACHE STRING "" FORCE)
 
 # Install prefix (absolute path so it's always correct)
-set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../../build/install/${TRIPLET}" CACHE PATH "Install prefix" FORCE)
+#set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../../build/install/${TRIPLET}" CACHE PATH "Install prefix" FORCE)
 
 # Keep normal subdirectories under the prefix
 set(CMAKE_INSTALL_INCLUDEDIR "include" CACHE PATH "Install include dir" FORCE)
