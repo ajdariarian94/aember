@@ -152,8 +152,8 @@ RUN mkdir -p /tmp/busybox-aarch64 && cp -r /tmp/busybox-src/* /tmp/busybox-aarch
             s/^CONFIG_SHA256_HWACCEL=.*/# CONFIG_SHA256_HWACCEL is not set/' .config && \
     yes "" | make CROSS_COMPILE=aarch64-linux-gnu- oldconfig && \
     make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) && \
-    mkdir -p /usr/local/bin/aarch64-linux && \
-    cp busybox /usr/local/bin/aarch64-linux/busybox
+    mkdir -p /usr/local/bin/arm64-linux && \
+    cp busybox /usr/local/bin/arm64-linux/busybox
 
 # ---- Build BusyBox for ARM32 (armhf) ----
 RUN mkdir -p /tmp/busybox-armhf && cp -r /tmp/busybox-src/* /tmp/busybox-armhf && \
