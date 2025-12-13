@@ -153,7 +153,8 @@ RUN mkdir -p /tmp/busybox-aarch64 && cp -r /tmp/busybox-src/* /tmp/busybox-aarch
     yes "" | make CROSS_COMPILE=aarch64-linux-gnu- oldconfig && \
     make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) && \
     mkdir -p /usr/local/bin/arm64-linux && \
-    cp busybox /usr/local/bin/arm64-linux/busybox
+    cp busybox /usr/local/bin/arm64-linux/busybox && \
+    cp /usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1
 
 # ---- Build BusyBox for ARM32 (armhf) ----
 RUN mkdir -p /tmp/busybox-armhf && cp -r /tmp/busybox-src/* /tmp/busybox-armhf && \
@@ -170,7 +171,8 @@ RUN mkdir -p /tmp/busybox-armhf && cp -r /tmp/busybox-src/* /tmp/busybox-armhf &
     yes "" | make CROSS_COMPILE=arm-linux-gnueabihf- oldconfig && \
     make CROSS_COMPILE=arm-linux-gnueabihf- -j$(nproc) && \
     mkdir -p /usr/local/bin/arm-linux && \
-    cp busybox /usr/local/bin/arm-linux/busybox
+    cp busybox /usr/local/bin/arm-linux/busybox && \
+    cp /usr/arm-linux-gnueabihf/lib/ld-linux-armhf.so.3 /lib/ld-linux-armhf.so.3 
 
 # Fix permissions (user was created earlier)
 RUN chown -R ${UID}:${GID} /venv && chmod -R 755 /venv
