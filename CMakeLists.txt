@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.19.5)
 # ##############################################################################
 project(
   aember
-  VERSION 0.1.2
+  VERSION 0.1.3
   HOMEPAGE_URL "https://github.com/ajdariarian94/aember.git"
   DESCRIPTION "aember superbuild project"
   LANGUAGES C CXX)
