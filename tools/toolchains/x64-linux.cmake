@@ -15,9 +15,6 @@ set(CMAKE_CXX_COMPILER g++)
 # Extra compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra" CACHE STRING "" FORCE)
 
-# Install prefix (absolute path so it's always correct)
-#set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../../build/install/${TRIPLET}" CACHE PATH "Install prefix" FORCE)
-
 # Keep normal subdirectories under the prefix
 set(CMAKE_INSTALL_INCLUDEDIR "include" CACHE PATH "Install include dir" FORCE)
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE PATH "Install lib dir" FORCE)
