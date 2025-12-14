@@ -1,6 +1,6 @@
 [submodule "vcpkg"]
 	path = vcpkg
 	url = git@aember:ajdariarian94/vcpkg.git
-[submodule "python"]
-	path = python
-	url = git@aember:ajdariarian94/python.git
+[submodule "aember-cli.git"]
+	path = aember-cli
+	url = git@aember:ajdariarian94/aember-cli.git
