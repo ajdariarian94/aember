@@ -42,4 +42,4 @@ PS1="$FIXED_PS1"
 
 # --- Symlink aember in /venv/bin ---
 mkdir -p /venv/bin
-ln -sf "$WORKSPACE_DIR/python/run.py" /venv/bin/aember
+ln -sf "$WORKSPACE_DIR/aember-cli/run.py" /venv/bin/aember
