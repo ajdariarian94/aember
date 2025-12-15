@@ -41,7 +41,7 @@ void AemberInit::Start() {
 
   signal_handler_.Register(SIGCHLD, [this](int) {
     log_.debug("SIGCHLD received");
-    // ChildSupervisor will handle reaping
+    child_supervisor_.HandleSIGCHLD();
   });
 
   signal_handler_.Start();
@@ -64,6 +64,8 @@ void AemberInit::Stop() {
 
   // Stop signal handling first
   signal_handler_.Stop();
+
+  child_supervisor_.StopAll();
 
   // Wake up RunLoop if blocked
   cv_.notify_all();
