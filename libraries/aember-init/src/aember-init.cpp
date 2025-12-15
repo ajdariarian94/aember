@@ -22,6 +22,8 @@ AemberInit::~AemberInit() {
 void AemberInit::Start() {
   if (running_.load()) return;
 
+  aember::utils::init_early_logging();
+
   log_.info("Initializing Aember");
 
   running_.store(true);
@@ -52,7 +54,7 @@ void AemberInit::Stop() {
 }
 
 void AemberInit::HeartbeatCallback(const nlohmann::json& heartbeat_payload) {
-  log_.info(heartbeat_payload.dump());
+  log_.info("{}", heartbeat_payload.dump());
 }
 
 void AemberInit::RunLoop() {
