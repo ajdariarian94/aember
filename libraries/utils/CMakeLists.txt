@@ -29,6 +29,25 @@ set_target_properties(${LOGGING_TARGET}
                       PROPERTIES EXPORT_NAME ${COMPONENT}::${LOGGING_COMPONENT})
 
 # -----------------------------------------------------------------------------
+# Signal subcomponent
+# -----------------------------------------------------------------------------
+
+set(SIGNAL_COMPONENT "signal")
+set(SIGNAL_TARGET "${COMPONENT}_${SIGNAL_COMPONENT}") # utils_signal
+
+add_library(${SIGNAL_TARGET} STATIC src/signal/signal.cpp)
+
+add_library(${PROJECT_NAME}::${COMPONENT}::${SIGNAL_COMPONENT} ALIAS
+            ${SIGNAL_TARGET})
+
+target_include_directories(
+  ${SIGNAL_TARGET} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+set_target_properties(${SIGNAL_TARGET}
+                      PROPERTIES EXPORT_NAME ${COMPONENT}::${SIGNAL_COMPONENT})
+
+# -----------------------------------------------------------------------------
 # Umbrella component target (empty)
 # -----------------------------------------------------------------------------
 
@@ -64,7 +83,7 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Install targets
 install(
-  TARGETS ${COMPONENT} ${LOGGING_TARGET}
+  TARGETS ${COMPONENT} ${LOGGING_TARGET} ${SIGNAL_TARGET}
   EXPORT ${COMPONENT}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

@@ -24,33 +24,59 @@ void AemberInit::Start() {
 
   aember::utils::init_early_logging();
 
+  signal_handler_.Register(SIGTERM, [this](int) {
+    log_.info("SIGTERM received");
+    Stop();
+  });
+
+  signal_handler_.Register(SIGINT, [this](int) {
+    log_.info("SIGINT received");
+    Stop();
+  });
+
+  signal_handler_.Register(SIGHUP, [this](int) {
+    log_.info("SIGHUP received (reload)");
+    // reload config later
+  });
+
+  signal_handler_.Register(SIGCHLD, [this](int) {
+    log_.debug("SIGCHLD received");
+    child_supervisor_.HandleSIGCHLD();
+  });
+
+  signal_handler_.Start();
+
   log_.info("Initializing Aember");
 
   running_.store(true);
 
-  // Initialize heartbeat (no beeping)
   heartbeat_.emplace(
       std::bind(&AemberInit::HeartbeatCallback, this, std::placeholders::_1));
   heartbeat_->Start();
 
-  // Run loop in the same thread (blocks here)
   RunLoop();
 
-  // After RunLoop exits, clean up
   Stop();
 }
 
 void AemberInit::Stop() {
-  if (!running_.load()) return;
+  if (!running_.exchange(false)) return;
 
-  running_.store(false);
+  // Stop signal handling first
+  signal_handler_.Stop();
 
-  // Wake the RunLoop thread so it stops
+  child_supervisor_.StopAll();
+
+  // Wake up RunLoop if blocked
   cv_.notify_all();
 
-  if (worker_thread_.joinable()) { worker_thread_.join(); }
+  // Stop and clean up heartbeat
+  if (heartbeat_) {
+    heartbeat_->Stop();
+    heartbeat_.reset();
+  }
 
-  heartbeat_.reset();
+  log_.info("Aember stopped");
 }
 
 void AemberInit::HeartbeatCallback(const nlohmann::json& heartbeat_payload) {

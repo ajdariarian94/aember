@@ -9,8 +9,10 @@
  */
 #pragma once
 
+#include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/device-health/heartbeat.h>
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/signal/signal.h>
 
 #include <nlohmann/json.hpp>  // for nlohmann::json
 
@@ -62,6 +64,10 @@ class AemberInit {
 
   std::optional<aember::device_health::Heartbeat> heartbeat_;
   void HeartbeatCallback(const nlohmann::json& heartbeat_payload);
+
+  aember::utils::SignalHandler signal_handler_;
+
+  aember::child_supervisor::ChildSupervisor child_supervisor_;
 
   aember::utils::Logger log_;
 };

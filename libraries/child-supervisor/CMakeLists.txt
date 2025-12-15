@@ -1,4 +1,4 @@
-set(COMPONENT "aember-init")
+set(COMPONENT "child-supervisor")
 
 set(${COMPONENT}_${PROJECT_NAME}_VERSION ${VERSION})
 
@@ -8,7 +8,7 @@ set(${COMPONENT}_${PROJECT_NAME}_VERSION ${VERSION})
 #
 # ##############################################################################
 
-add_library(${COMPONENT} STATIC src/aember-init.cpp)
+add_library(${COMPONENT} STATIC src/child-supervisor.cpp)
 
 add_library(${PROJECT_NAME}::${COMPONENT} ALIAS ${COMPONENT})
 
@@ -16,9 +16,7 @@ target_include_directories(
   ${COMPONENT} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-target_link_libraries(
-  ${COMPONENT} PUBLIC aember-libs::child-supervisor aember-libs::device-health
-                      aember-libs::utils::logging aember-libs::utils::signal)
+target_link_libraries(${COMPONENT} PUBLIC aember-libs::utils::logging)
 
 set_target_properties(
   ${COMPONENT} PROPERTIES VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}
