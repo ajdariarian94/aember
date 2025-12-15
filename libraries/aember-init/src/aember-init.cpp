@@ -62,10 +62,17 @@ void AemberInit::Start() {
 void AemberInit::Stop() {
   if (!running_.exchange(false)) return;
 
+  // Stop signal handling first
   signal_handler_.Stop();
 
+  // Wake up RunLoop if blocked
   cv_.notify_all();
-  heartbeat_.reset();
+
+  // Stop and clean up heartbeat
+  if (heartbeat_) {
+    heartbeat_->Stop();
+    heartbeat_.reset();
+  }
 
   log_.info("Aember stopped");
 }
