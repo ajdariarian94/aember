@@ -18,17 +18,17 @@
     "customizations": {
         "vscode": {
             "extensions": [
+                "matepek.vscode-catch2-test-adapter",
                 "ms-python.python",
                 "ms-python.vscode-pylance",
                 "ms-vscode.cpptools",
                 "ms-vscode.cmake-tools",
                 "ms-azuretools.vscode-docker",
-                "hbenl.vscode-test-explorer",             // TestMate / Test Explorer
-                "github.vscode-pull-request-github",      // GitHub PR and Issues
-                "github.copilot",                          // GitHub Copilot
-                "twxs.cmake",                              // CMakeLists.txt support
-                "vector-of-bool.cmake-tools",              // Another CMake helper
-                "ms-vscode.cpptools-extension-pack"       // Extra C++ tools
+                "hbenl.vscode-test-explorer",
+                "github.vscode-pull-request-github",
+                "github.copilot",
+                "vector-of-bool.cmake-tools",
+                "ms-vscode.cpptools-extension-pack"
             ],
             "settings": {
                 "terminal.integrated.defaultProfile.linux": "bash",

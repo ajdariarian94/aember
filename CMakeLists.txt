@@ -37,8 +37,7 @@ ExternalProject_Add(
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
              -DBUILD_TESTS=${BUILD_TESTS}
-             -DVERSION=${PROJECT_VERSION}
-  TEST_COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --stop-on-failure)
+             -DVERSION=${PROJECT_VERSION})
 
 ExternalProject_Add(
   executables
