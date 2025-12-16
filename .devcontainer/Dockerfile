@@ -180,6 +180,10 @@ RUN chown -R ${UID}:${GID} /venv && chmod -R 755 /venv
 # Clean up APT cache
 RUN rm -rf /var/lib/apt/lists/*
 
+# Allow dev user to sudo
+RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
+    && chmod 0440 /etc/sudoers.d/${USERNAME}
+
 # ---- Set default user and working directory ----
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
