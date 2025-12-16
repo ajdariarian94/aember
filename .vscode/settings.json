@@ -1,0 +1,10 @@
+{
+  "testMate.cpp.test.advancedExecutables": [
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/logging-unittest",
+      "runTask": {
+        "beforeEach": ["run-test-in-chroot"]
+      }
+    }
+  ]
+}
