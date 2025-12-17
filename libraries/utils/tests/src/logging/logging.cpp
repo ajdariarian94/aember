@@ -7,7 +7,7 @@
 
 namespace fs = std::filesystem;
 
-namespace aember_test::utils::logging {
+namespace aember_test::utils {
 
 void LoggingTest::SetUp() {
   // Initialize logging once per test binary
@@ -23,9 +23,8 @@ void LoggingTest::SetUp() {
 
 void LoggingTest::TearDown() {
   // Only flush logs to file
-  spdlog::apply_all([](const std::shared_ptr<spdlog::logger>& logger) {
-    logger->flush();
-  });
+  spdlog::apply_all(
+      [](const std::shared_ptr<spdlog::logger>& logger) { logger->flush(); });
 }
 
 aember::utils::Logger LoggingTest::make_logger(const std::string& name) {
@@ -64,14 +63,12 @@ TEST_F(LoggingTest, MultipleLoggersShareSinks) {
   log2.info("from logger two");
 
   // Flush all sinks so writes are guaranteed
-  spdlog::apply_all([](const std::shared_ptr<spdlog::logger>& logger){
-      logger->flush();
-  });
+  spdlog::apply_all(
+      [](const std::shared_ptr<spdlog::logger>& logger) { logger->flush(); });
 
   ASSERT_TRUE(fs::exists(log_file_path_));
   ASSERT_GT(fs::file_size(log_file_path_), 0);
 }
-
 
 TEST_F(LoggingTest, EnablingFileLoggingTwiceIsSafe) {
   EXPECT_NO_THROW(aember::utils::enable_file_logging(log_file_path_));
@@ -81,11 +78,10 @@ TEST_F(LoggingTest, EnablingFileLoggingTwiceIsSafe) {
   log.info("double enable safe");
 
   // Flush all sinks so writes are guaranteed
-  spdlog::apply_all([](const std::shared_ptr<spdlog::logger>& logger){
-      logger->flush();
-  });
+  spdlog::apply_all(
+      [](const std::shared_ptr<spdlog::logger>& logger) { logger->flush(); });
 
   ASSERT_TRUE(fs::exists(log_file_path_));
 }
 
-}  // namespace aember_test::utils::logging
+}  // namespace aember_test::utils

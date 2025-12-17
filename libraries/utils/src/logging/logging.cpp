@@ -22,8 +22,7 @@ static constexpr const char* LOG_PATTERN =
     "[%Y-%m-%d %H:%M:%S] %^[%l]%$ [%n] %v";
 
 static void apply_formatter(const spdlog::sink_ptr& sink) {
-  sink->set_formatter(
-      std::make_unique<spdlog::pattern_formatter>(LOG_PATTERN));
+  sink->set_formatter(std::make_unique<spdlog::pattern_formatter>(LOG_PATTERN));
 }
 
 void init_early_logging() {
@@ -36,9 +35,8 @@ void init_early_logging() {
 
   global_sinks.push_back(stdout_sink);
 
-  auto root_logger =
-      std::make_shared<spdlog::logger>("root", global_sinks.begin(),
-                                       global_sinks.end());
+  auto root_logger = std::make_shared<spdlog::logger>(
+      "root", global_sinks.begin(), global_sinks.end());
 
   spdlog::set_default_logger(root_logger);
   spdlog::set_level(spdlog::level::info);
@@ -49,9 +47,8 @@ void enable_file_logging(const std::string& log_file_path) {
 
   if (file_logging_enabled) return;
 
-  auto file_sink =
-      std::make_shared<spdlog::sinks::basic_file_sink_mt>(
-          log_file_path, /*truncate=*/false);
+  auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
+      log_file_path, /*truncate=*/false);
 
   apply_formatter(file_sink);
   global_sinks.push_back(file_sink);

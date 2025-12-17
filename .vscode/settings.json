@@ -5,6 +5,12 @@
       "runTask": {
         "before": ["run-test-in-chroot-logging"]
       }
+    },
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/signal-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-signal"]
+      }
     }
   ]
 }

@@ -6,7 +6,7 @@
 
 #include <string>
 
-namespace aember_test::utils::logging {
+namespace aember_test::utils {
 
 class LoggingTest : public ::testing::Test {
  protected:
@@ -20,4 +20,4 @@ class LoggingTest : public ::testing::Test {
   std::string log_file_path_;
 };
 
-}  // namespace aember_test::utils::logging
+}  // namespace aember_test::utils
