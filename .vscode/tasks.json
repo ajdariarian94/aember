@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "run-test-in-chroot",
+      "label": "run-test-in-chroot-logging",
       "type": "shell",
       "command": "sudo",
       "args": [

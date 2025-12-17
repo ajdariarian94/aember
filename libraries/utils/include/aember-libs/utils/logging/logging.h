@@ -10,18 +10,20 @@ namespace aember::utils {
 
 /**
  * Initialize early logging (stdout only).
- * Call once during early init.
+ * Must be called once during early init.
  */
 void init_early_logging();
 
 /**
  * Enable file logging after pivot_root.
  * Safe to call once real root is mounted.
+ * Affects all existing and future loggers.
  */
 void enable_file_logging(const std::string& log_file_path);
 
 /**
  * Lightweight per-component logger.
+ * Always inherits global sink configuration.
  */
 class Logger {
  public:
