@@ -17,6 +17,12 @@
       "runTask": {
         "before": ["run-test-in-chroot-heartbeat"]
       }
+    },
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/child-supervisor-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-child-supervisor"]
+      }
     }
   ]
 }
