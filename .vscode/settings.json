@@ -11,6 +11,12 @@
       "runTask": {
         "before": ["run-test-in-chroot-signal"]
       }
+    },
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/heartbeat-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-heartbeat"]
+      }
     }
   ]
 }
