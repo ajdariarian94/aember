@@ -1,0 +1,28 @@
+{
+  "testMate.cpp.test.advancedExecutables": [
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/logging-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-logging"]
+      }
+    },
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/signal-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-signal"]
+      }
+    },
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/heartbeat-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-heartbeat"]
+      }
+    },
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/child-supervisor-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-child-supervisor"]
+      }
+    }
+  ]
+}

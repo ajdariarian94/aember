@@ -26,12 +26,12 @@ class ChildSupervisor {
   // Stop supervising (used during shutdown)
   void StopAll();
 
+  void ReapChildren();
+
  private:
   struct ChildInfo {
     std::string name;
   };
-
-  void ReapChildren();
 
   std::unordered_map<pid_t, ChildInfo> children_;
   std::mutex children_mutex_;

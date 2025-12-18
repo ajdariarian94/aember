@@ -2,6 +2,7 @@
   "name": "aember",
   "version": "1.0.0",
   "dependencies": [
+    "gtest",
     "nlohmann-json",
     "spdlog"
   ]
