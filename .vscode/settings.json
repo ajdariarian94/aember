@@ -1,15 +1,9 @@
 {
   "testMate.cpp.test.advancedExecutables": [
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/logging-unittest",
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/child-supervisor-unittest",
       "runTask": {
-        "before": ["run-test-in-chroot-logging"]
-      }
-    },
-    {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/signal-unittest",
-      "runTask": {
-        "before": ["run-test-in-chroot-signal"]
+        "before": ["run-test-in-chroot-child-supervisor"]
       }
     },
     {
@@ -19,9 +13,21 @@
       }
     },
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/child-supervisor-unittest",
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/logging-unittest",
       "runTask": {
-        "before": ["run-test-in-chroot-child-supervisor"]
+        "before": ["run-test-in-chroot-logging"]
+      }
+    },
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/mount-manager-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-mount-manager"]
+      }
+    },
+    {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/signal-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-signal"]
       }
     }
   ]

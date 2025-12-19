@@ -11,6 +11,7 @@
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/device-health/heartbeat.h>
+#include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/signal/signal.h>
 
@@ -64,6 +65,8 @@ class AemberInit {
 
   std::optional<aember::device_health::Heartbeat> heartbeat_;
   void HeartbeatCallback(const nlohmann::json& heartbeat_payload);
+
+  std::optional<aember::mount_manager::MountManager> mount_manager_;
 
   aember::utils::SignalHandler signal_handler_;
 

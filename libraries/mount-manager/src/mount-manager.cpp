@@ -1,0 +1,221 @@
+#include <aember-libs/mount-manager/mount-manager.h>
+
+#include <errno.h>
+#include <string.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <algorithm>
+#include <fstream>
+
+namespace aember::mount_manager {
+
+MountManager::MountManager() : log_("mount-manager") {
+  log_.info("MountManager initialized");
+}
+
+MountManager::~MountManager() {
+  // Don't unmount in destructor - let the system handle it
+  // or call UnmountAll explicitly if needed
+}
+
+std::vector<MountPoint> MountManager::GetEarlyMounts() const {
+  std::vector<MountPoint> mounts;
+
+  // /dev/pts - Pseudo-terminals
+  mounts.emplace_back("devpts",
+                      "/dev/pts",
+                      "devpts",
+                      MS_NOEXEC | MS_NOSUID,
+                      "mode=0620,gid=5,ptmxmode=0666");
+
+  // /dev/shm - Shared memory
+  mounts.emplace_back("tmpfs",
+                      "/dev/shm",
+                      "tmpfs",
+                      MS_NOEXEC | MS_NOSUID | MS_NODEV,
+                      "mode=1777");
+
+  // /run - Runtime data
+  mounts.emplace_back("tmpfs",
+                      "/run",
+                      "tmpfs",
+                      MS_NOEXEC | MS_NOSUID | MS_NODEV,
+                      "mode=0755,size=10%");
+
+  // /tmp - Temporary files
+  mounts.emplace_back(
+      "tmpfs", "/tmp", "tmpfs", MS_NOEXEC | MS_NOSUID | MS_NODEV, "mode=1777");
+
+  // /sys/fs/cgroup - Control groups (cgroup2)
+  mounts.emplace_back("cgroup2",
+                      "/sys/fs/cgroup",
+                      "cgroup2",
+                      MS_NOEXEC | MS_NOSUID | MS_NODEV,
+                      "nsdelegate");
+
+  return mounts;
+}
+
+bool MountManager::EnsureDirectory(const std::string& path, mode_t mode) {
+  struct stat st;
+  if (stat(path.c_str(), &st) == 0) {
+    if (S_ISDIR(st.st_mode)) {
+      return true;  // Directory exists
+    } else {
+      log_.error("Path '{}' exists but is not a directory", path);
+      return false;
+    }
+  }
+
+  // Create directory with parents
+  std::string current_path;
+  for (size_t i = 0; i < path.length(); ++i) {
+    if (path[i] == '/' && i > 0) {
+      if (stat(current_path.c_str(), &st) != 0) {
+        if (mkdir(current_path.c_str(), mode) != 0 && errno != EEXIST) {
+          log_.error("Failed to create directory '{}': {}",
+                     current_path,
+                     strerror(errno));
+          return false;
+        }
+      }
+    }
+    current_path += path[i];
+  }
+
+  // Create final directory
+  if (mkdir(path.c_str(), mode) != 0 && errno != EEXIST) {
+    log_.error("Failed to create directory '{}': {}", path, strerror(errno));
+    return false;
+  }
+
+  log_.debug("Created directory '{}'", path);
+  return true;
+}
+
+bool MountManager::Mount(const MountPoint& mp) {
+  // Check if already mounted
+  if (IsMounted(mp.target)) {
+    log_.debug("'{}' is already mounted, skipping", mp.target);
+    return true;
+  }
+
+  // Ensure mount point exists
+  if (!EnsureDirectory(mp.target)) { return false; }
+
+  log_.info("Mounting {} on {} (type: {})", mp.source, mp.target, mp.fstype);
+
+  const char* data_ptr = mp.data.empty() ? nullptr : mp.data.c_str();
+
+  if (mount(mp.source.c_str(),
+            mp.target.c_str(),
+            mp.fstype.c_str(),
+            mp.flags,
+            data_ptr) != 0) {
+    log_.error(
+        "Failed to mount {} on {}: {}", mp.source, mp.target, strerror(errno));
+    return false;
+  }
+
+  // Track mounted filesystem
+  mounted_targets_.push_back(mp.target);
+
+  log_.info("Successfully mounted {} on {}", mp.source, mp.target);
+  return true;
+}
+
+bool MountManager::MountEarlyFilesystems() {
+  log_.info("Mounting early boot filesystems...");
+
+  auto mounts = GetEarlyMounts();
+  bool all_success = true;
+
+  for (const auto& mp : mounts) {
+    if (!Mount(mp)) {
+      log_.warn("Failed to mount {}, continuing anyway", mp.target);
+      all_success = false;
+    }
+  }
+
+  if (all_success) {
+    log_.info("All early filesystems mounted successfully");
+  } else {
+    log_.warn("Some early filesystems failed to mount");
+  }
+
+  return all_success;
+}
+
+bool MountManager::Unmount(const std::string& target, bool force) {
+  log_.info("Unmounting {}{}", target, force ? " (forced)" : "");
+
+  int flags = force ? MNT_FORCE : 0;
+
+  if (umount2(target.c_str(), flags) != 0) {
+    if (errno == EINVAL || errno == ENOENT) {
+      log_.debug("{} was not mounted", target);
+      return true;
+    }
+    log_.error("Failed to unmount {}: {}", target, strerror(errno));
+    return false;
+  }
+
+  // Remove from tracked mounts
+  auto it = std::find(mounted_targets_.begin(), mounted_targets_.end(), target);
+  if (it != mounted_targets_.end()) { mounted_targets_.erase(it); }
+
+  log_.info("Successfully unmounted {}", target);
+  return true;
+}
+
+void MountManager::UnmountAll(bool force) {
+  log_.info("Unmounting all tracked filesystems...");
+
+  // Unmount in reverse order (LIFO)
+  for (auto it = mounted_targets_.rbegin(); it != mounted_targets_.rend();
+       ++it) {
+    Unmount(*it, force);
+  }
+
+  mounted_targets_.clear();
+}
+
+bool MountManager::IsMounted(const std::string& target) {
+  return CheckMountStatus(target);
+}
+
+bool MountManager::CheckMountStatus(const std::string& target) {
+  std::ifstream mounts("/proc/mounts");
+  if (!mounts.is_open()) {
+    log_.warn("Could not open /proc/mounts to check mount status");
+    return false;
+  }
+
+  std::string line;
+  while (std::getline(mounts, line)) {
+    // Format: device mountpoint fstype options dump pass
+    size_t first_space = line.find(' ');
+    if (first_space == std::string::npos) continue;
+
+    size_t second_space = line.find(' ', first_space + 1);
+    if (second_space == std::string::npos) continue;
+
+    std::string mountpoint =
+        line.substr(first_space + 1, second_space - first_space - 1);
+
+    // Handle escaped spaces in mount points
+    size_t pos = 0;
+    while ((pos = mountpoint.find("\\040", pos)) != std::string::npos) {
+      mountpoint.replace(pos, 4, " ");
+      pos += 1;
+    }
+
+    if (mountpoint == target) { return true; }
+  }
+
+  return false;
+}
+
+}  // namespace aember::mount_manager
