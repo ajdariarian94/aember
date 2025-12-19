@@ -24,6 +24,7 @@ find_package(spdlog REQUIRED)
 add_subdirectory(aember-init)
 add_subdirectory(child-supervisor)
 add_subdirectory(device-health)
+add_subdirectory(mount-manager)
 add_subdirectory(utils)
 
 # ##############################################################################
