@@ -27,6 +27,11 @@ alias la='ls -A'
 alias l='ls -CF'
 alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
 
+# Git alias to run as dev user automatically
+alias git='sudo -E -u dev git'
+
+export HOME=/home/dev
+
 # Enable bash-completion
 if [ -f /etc/bash_completion ]; then
     . /etc/bash_completion
@@ -44,6 +49,8 @@ source "$HOME/.bashrc"
 source /venv/bin/activate
 
 aember --install-completion  
+
+sudo rm -rf /root/.config/git
 
 # Show banner
 figlet -f big aember | lolcat

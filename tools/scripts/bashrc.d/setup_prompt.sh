@@ -13,7 +13,7 @@ BOLD='\033[1m'
 RESET_COLOR='\033[0m'
 
 # Correctly formatted PS1 with non-printing segments \[ \]
-FIXED_PS1="\[${BOLD}\]\[${USER_COLOR}\]\u\[${RESET_COLOR}\]@\
+FIXED_PS1="\[${BOLD}\]\[${USER_COLOR}\]dev\[${RESET_COLOR}\]@\
 \[${BOLD}\]\[${DOCKER_COLOR}\]aember-container\[${RESET_COLOR}\]:\
 \[${BOLD}\]\[${PATH_COLOR}\]\w\[${RESET_COLOR}\]\
 \[${COMMAND_COLOR}\]\$ \[${RESET_COLOR}\]"
