@@ -13,7 +13,7 @@
     ],
     "workspaceFolder": "/aember_ws/aember",
     "workspaceMount": "source=${localWorkspaceFolder},target=/aember_ws/aember,type=bind",
-    "remoteUser": "dev",
+    "remoteUser": "root",
     "postStartCommand": "/aember_ws/aember/tools/scripts/init.sh",
     "customizations": {
         "vscode": {
