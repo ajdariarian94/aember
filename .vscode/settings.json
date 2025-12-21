@@ -25,6 +25,12 @@
       }
     },
     {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/service-manager-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-service-manager"]
+      }
+    },
+    {
       "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/service-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-service"]

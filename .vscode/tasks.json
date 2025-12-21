@@ -46,6 +46,17 @@
       "problemMatcher": []
     },
     {
+      "label": "run-test-in-chroot-service-manager",
+      "type": "shell",
+      "command": "sudo",
+      "args": [
+        "chroot",
+        "${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root",
+        "/usr/bin/service-manager-unittest"
+      ],
+      "problemMatcher": []
+    },
+    {
       "label": "run-test-in-chroot-service",
       "type": "shell",
       "command": "sudo",
