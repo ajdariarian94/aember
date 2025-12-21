@@ -1,4 +1,4 @@
-set(COMPONENT "aember-init")
+set(COMPONENT "service-manager")
 
 set(${COMPONENT}_${PROJECT_NAME}_VERSION ${VERSION})
 
@@ -8,7 +8,7 @@ set(${COMPONENT}_${PROJECT_NAME}_VERSION ${VERSION})
 #
 # ##############################################################################
 
-add_library(${COMPONENT} STATIC src/aember-init.cpp)
+add_library(${COMPONENT} STATIC src/service.cpp src/service-manager.cpp)
 
 add_library(${PROJECT_NAME}::${COMPONENT} ALIAS ${COMPONENT})
 
@@ -16,11 +16,8 @@ target_include_directories(
   ${COMPONENT} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-target_link_libraries(
-  ${COMPONENT}
-  PUBLIC aember-libs::child-supervisor aember-libs::device-health
-         aember-libs::mount-manager aember-libs::service-manager
-         aember-libs::utils::logging aember-libs::utils::signal)
+target_link_libraries(${COMPONENT} PUBLIC aember-libs::child-supervisor
+                                          aember-libs::utils::logging)
 
 set_target_properties(
   ${COMPONENT} PROPERTIES VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}
@@ -52,3 +49,14 @@ install(
   FILE ${COMPONENT}Targets.cmake
   NAMESPACE ${PROJECT_NAME}::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT})
+
+# -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
+
+if(BUILD_TESTS)
+  include(CTest)
+  enable_testing()
+
+  # add_subdirectory(tests)
+endif()
