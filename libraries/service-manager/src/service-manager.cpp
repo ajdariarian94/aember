@@ -169,11 +169,32 @@ bool ServiceManager::StopServiceInternal(const std::string& name) {
     return true;
   }
 
+  // If the service is in FAILED state or process is already dead, just mark as
+  // stopped
+  if (current_state == ServiceState::FAILED) {
+    ChangeServiceState(name, ServiceState::STOPPED);
+    service->SetPid(-1);
+    return true;
+  }
+
   ChangeServiceState(name, ServiceState::STOPPING);
 
   pid_t pid = service->GetPid();
   if (pid > 0) {
     log_.info("Stopping service '{}' (pid {})", name, pid);
+
+    // Check if process is still alive first
+    if (kill(pid, 0) != 0) {
+      // Process is already dead
+      log_.debug("Service '{}' process already exited", name);
+      ChangeServiceState(name, ServiceState::STOPPED);
+      service->SetPid(-1);
+
+      // Remove from pid tracking
+      auto pid_it = pid_to_service_.find(pid);
+      if (pid_it != pid_to_service_.end()) { pid_to_service_.erase(pid_it); }
+      return true;
+    }
 
     // Send SIGTERM
     if (kill(pid, SIGTERM) != 0) {
@@ -213,19 +234,26 @@ void ServiceManager::StartAll() {
 }
 
 void ServiceManager::StopAll() {
-  log_.info("Stopping all services");
-
   std::vector<std::string> service_names = GetServiceNames();
+
+  if (service_names.empty()) {
+    log_.debug("No services to stop");
+    return;
+  }
+
+  log_.info("Stopping {} services", service_names.size());
 
   // Stop in reverse order
   for (auto it = service_names.rbegin(); it != service_names.rend(); ++it) {
     StopService(*it);
   }
 
-  // Wait for all services to stop (with timeout)
-  auto timeout = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  // Wait for all services to stop (with shorter timeout)
+  auto timeout = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  bool all_stopped = false;
+
   while (std::chrono::steady_clock::now() < timeout) {
-    bool all_stopped = true;
+    all_stopped = true;
 
     for (const auto& name : service_names) {
       auto state = GetServiceState(name);
@@ -235,9 +263,36 @@ void ServiceManager::StopAll() {
       }
     }
 
-    if (all_stopped) break;
+    if (all_stopped) {
+      log_.info("All services stopped successfully");
+      return;
+    }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+
+  if (!all_stopped) {
+    log_.warn("Some services did not stop within timeout, force stopping");
+
+    // Force stop any remaining services
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& name : service_names) {
+      auto it = services_.find(name);
+      if (it != services_.end()) {
+        auto service = it->second;
+        if (service->GetState() != ServiceState::STOPPED &&
+            service->GetState() != ServiceState::FAILED) {
+          pid_t pid = service->GetPid();
+          if (pid > 0) {
+            log_.warn("Force killing service '{}' (pid {})", name, pid);
+            kill(pid, SIGKILL);
+          }
+
+          service->SetState(ServiceState::STOPPED);
+          service->SetPid(-1);
+        }
+      }
+    }
   }
 }
 
@@ -276,60 +331,66 @@ std::shared_ptr<Service> ServiceManager::GetService(
 
 void ServiceManager::HandleServiceExit(pid_t pid, int exit_code) {
   std::unique_lock<std::mutex> lock(mutex_);
-
+  
   auto it = pid_to_service_.find(pid);
   if (it == pid_to_service_.end()) {
     log_.debug("Process {} exited but not tracked by service manager", pid);
     return;
   }
-
+  
   std::string service_name = it->second;
   pid_to_service_.erase(it);
-
+  
   auto service_it = services_.find(service_name);
   if (service_it == services_.end()) {
     log_.warn("Service '{}' not found for pid {}", service_name, pid);
     return;
   }
-
+  
   auto service = service_it->second;
   service->SetExitCode(exit_code);
   service->SetPid(-1);
-
+  
   const auto& config = service->GetConfig();
-
-  if (exit_code == 0) {
-    log_.info("Service '{}' exited cleanly", service_name);
+  
+  // Check if service was being stopped (STOPPING state)
+  bool was_stopping = (service->GetState() == ServiceState::STOPPING);
+  
+  // Exit codes 128-165 are typically signals (128 + signal number)
+  // 143 = SIGTERM (128 + 15), 137 = SIGKILL (128 + 9)
+  bool killed_by_signal = (exit_code >= 128 && exit_code <= 165);
+  
+  if (exit_code == 0 || (was_stopping && killed_by_signal)) {
+    // Clean exit, or was intentionally stopped
+    log_.info("Service '{}' exited{}", service_name, 
+              killed_by_signal ? " (stopped by signal)" : " cleanly");
     ChangeServiceState(service_name, ServiceState::STOPPED);
   } else {
     log_.warn("Service '{}' exited with code {}", service_name, exit_code);
     ChangeServiceState(service_name, ServiceState::FAILED);
   }
-
-  // Check if we should restart
-  bool should_restart = false;
-
-  if (config.restart_policy == RestartPolicy::ALWAYS) {
-    should_restart = true;
-  } else if (config.restart_policy == RestartPolicy::ON_FAILURE &&
-             exit_code != 0) {
-    should_restart = true;
-  }
-
-  if (should_restart &&
-      service->GetRestartCount() < config.max_restart_attempts) {
-    service->IncrementRestartCount();
-    log_.info("Scheduling restart for service '{}' (attempt {}/{})",
-              service_name,
-              service->GetRestartCount(),
-              config.max_restart_attempts);
-
-    lock.unlock();
-    ScheduleRestart(service_name);
-  } else if (should_restart) {
-    log_.error("Service '{}' exceeded max restart attempts ({})",
-               service_name,
-               config.max_restart_attempts);
+  
+  // Check if we should restart (only if not intentionally stopped)
+  if (!was_stopping) {
+    bool should_restart = false;
+    
+    if (config.restart_policy == RestartPolicy::ALWAYS) {
+      should_restart = true;
+    } else if (config.restart_policy == RestartPolicy::ON_FAILURE && exit_code != 0 && !killed_by_signal) {
+      should_restart = true;
+    }
+    
+    if (should_restart && service->GetRestartCount() < config.max_restart_attempts) {
+      service->IncrementRestartCount();
+      log_.info("Scheduling restart for service '{}' (attempt {}/{})",
+                service_name, service->GetRestartCount(), config.max_restart_attempts);
+      
+      lock.unlock();
+      ScheduleRestart(service_name);
+    } else if (should_restart) {
+      log_.error("Service '{}' exceeded max restart attempts ({})",
+                 service_name, config.max_restart_attempts);
+    }
   }
 }
 

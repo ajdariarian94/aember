@@ -26,16 +26,14 @@ class ServiceManagerTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    if (manager_) {
-      manager_->StopAll();
-      manager_.reset();
-    }
-
+    // Just reset - destructor will handle StopAll
+    manager_.reset();
     supervisor_.reset();
 
-    // Clean up any remaining child processes
-    while (waitpid(-1, nullptr, WNOHANG) > 0) {
-      // Reap all children
+    // Clean up any remaining zombie processes
+    int status;
+    while (waitpid(-1, &status, WNOHANG) > 0) {
+      // Reap all zombies
     }
   }
 
