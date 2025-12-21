@@ -122,11 +122,12 @@ TEST_F(ServiceManagerTest, StopServiceBasic) {
   pid_t pid = service->GetPid();
 
   EXPECT_TRUE(manager_->StopService("test-service"));
-  
+
   // Manually reap the process and notify service manager
   int status;
   waitpid(pid, &status, 0);
-  int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+  int exit_code =
+      WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
   manager_->HandleServiceExit(pid, exit_code);
 
   EXPECT_TRUE(
@@ -374,7 +375,7 @@ TEST_F(ServiceManagerTest, RestartPolicyOnFailure) {
     manager_->HandleServiceExit(pid, exit_code);
 
     // Wait for restart delay + processing time
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    std::this_thread::sleep_for(std::chrono::seconds(3));
   }
 
   // Should have attempted restarts
@@ -436,12 +437,12 @@ TEST_F(ServiceManagerTest, StopAll) {
                           std::chrono::seconds(5)));
 }
 
-/**TEST_F(ServiceManagerTest, ServiceDependenciesBasic) {
+TEST_F(ServiceManagerTest, ServiceDependenciesBasic) {
   auto config1 = CreateTestConfig("service1", "/bin/sleep");
-  config1.args = {"1"};  // Change from 10 to 1 second
+  config1.args = {"10"};
 
   auto config2 = CreateTestConfig("service2", "/bin/sleep");
-  config2.args = {"1"};  // Change from 10 to 1 second
+  config2.args = {"10"};
   config2.dependencies = {"service1"};
 
   manager_->AddService(config1);
@@ -455,21 +456,24 @@ TEST_F(ServiceManagerTest, StopAll) {
   EXPECT_TRUE(WaitForServiceState(
       "service2", aember::service_manager::ServiceState::RUNNING));
 
-  // Explicitly stop all services
+  // Stop all services
   manager_->StopAll();
 
-  // Wait for them to stop
+  // Reap all running services
+  ReapAllRunningServices();
+
+  // Verify they stopped
   EXPECT_TRUE(
       WaitForServiceState("service1",
                           aember::service_manager::ServiceState::STOPPED,
-                          std::chrono::seconds(3)));
+                          std::chrono::seconds(1)));
   EXPECT_TRUE(
       WaitForServiceState("service2",
                           aember::service_manager::ServiceState::STOPPED,
-                          std::chrono::seconds(3)));
-}**/
+                          std::chrono::seconds(1)));
+}
 
-/**TEST_F(ServiceManagerTest, ServiceDependenciesMissing) {
+TEST_F(ServiceManagerTest, ServiceDependenciesMissing) {
   auto config = CreateTestConfig("service1", "/bin/sleep");
   config.args = {"10"};
   config.dependencies = {"non-existent"};
@@ -478,9 +482,9 @@ TEST_F(ServiceManagerTest, StopAll) {
 
   // Should fail to start due to missing dependency
   EXPECT_FALSE(manager_->StartService("service1"));
-}**/
+}
 
-/**TEST_F(ServiceManagerTest, MultipleServicesIndependent) {
+TEST_F(ServiceManagerTest, MultipleServicesIndependent) {
   auto config1 = CreateTestConfig("service1", "/bin/sleep");
   config1.args = {"1"};
 
@@ -497,8 +501,24 @@ TEST_F(ServiceManagerTest, StopAll) {
   auto service2 = manager_->GetService("service2");
 
   EXPECT_NE(service1->GetPid(), service2->GetPid());
+
+  pid_t pid1 = service1->GetPid();
+  pid_t pid2 = service2->GetPid();
+
   // Cleanup
   manager_->StopAll();
-}**/
+
+  // Manually reap processes
+  int status;
+  waitpid(pid1, &status, 0);
+  int exit_code1 =
+      WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+  manager_->HandleServiceExit(pid1, exit_code1);
+
+  waitpid(pid2, &status, 0);
+  int exit_code2 =
+      WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+  manager_->HandleServiceExit(pid2, exit_code2);
+}
 
 }  // namespace aember_test::service_manager

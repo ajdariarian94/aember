@@ -67,6 +67,41 @@ class ServiceManagerTest : public ::testing::Test {
         });
   }
 
+  // Add to test fixture header
+  void ReapAllRunningServices() {
+    std::set<pid_t> pids;
+
+    for (const auto& name : manager_->GetServiceNames()) {
+      auto service = manager_->GetService(name);
+      if (service && service->GetPid() > 0) { pids.insert(service->GetPid()); }
+    }
+
+    // Reap all PIDs
+    while (!pids.empty()) {
+      int status;
+      pid_t reaped = waitpid(-1, &status, WNOHANG);
+
+      if (reaped > 0 && pids.count(reaped)) {
+        int exit_code =
+            WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+        manager_->HandleServiceExit(reaped, exit_code);
+        pids.erase(reaped);
+      } else if (reaped <= 0) {
+        // Try blocking wait on first remaining PID
+        if (!pids.empty()) {
+          pid_t try_pid = *pids.begin();
+          reaped = waitpid(try_pid, &status, 0);
+          if (reaped > 0) {
+            int exit_code = WIFEXITED(status) ? WEXITSTATUS(status)
+                                              : 128 + WTERMSIG(status);
+            manager_->HandleServiceExit(reaped, exit_code);
+            pids.erase(reaped);
+          }
+        }
+      }
+    }
+  }
+
   struct StateChange {
     std::string name;
     aember::service_manager::ServiceState old_state;

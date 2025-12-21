@@ -74,72 +74,64 @@ bool ServiceManager::StartService(const std::string& name) {
 
 bool ServiceManager::StartServiceInternal(const std::string& name,
                                           bool is_restart) {
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::vector<std::string> dependencies;
+  ServiceConfig config_copy;
 
-  auto it = services_.find(name);
-  if (it == services_.end()) {
-    log_.error("Service '{}' not found", name);
-    return false;
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+
+    auto it = services_.find(name);
+    if (it == services_.end()) {
+      log_.error("Service '{}' not found", name);
+      return false;
+    }
+
+    auto service = it->second;
+    auto state = service->GetState();
+
+    if (state == ServiceState::RUNNING || state == ServiceState::STARTING) {
+      return true;
+    }
+
+    if (!CheckDependencies(name)) {
+      log_.error("Cannot start service '{}': dependencies not met", name);
+      return false;
+    }
+
+    dependencies = service->GetConfig().dependencies;
+    config_copy = service->GetConfig();
+
+    ChangeServiceState(name, ServiceState::STARTING);
   }
 
-  auto service = it->second;
-  ServiceState current_state = service->GetState();
-
-  if (current_state == ServiceState::RUNNING) {
-    log_.info("Service '{}' is already running", name);
-    return true;
-  }
-
-  if (current_state == ServiceState::STARTING) {
-    log_.info("Service '{}' is already starting", name);
-    return true;
-  }
-
-  // Check dependencies
-  if (!CheckDependencies(name)) {
-    log_.error("Cannot start service '{}': dependencies not met", name);
-    return false;
-  }
-
-  // Start dependencies first
-  lock.unlock();
-  if (!StartServiceDependencies(name)) {
-    log_.error("Failed to start dependencies for service '{}'", name);
-    return false;
-  }
-  lock.lock();
-
-  ChangeServiceState(name, ServiceState::STARTING);
-
-  const auto& config = service->GetConfig();
+  // Start dependencies without holding mutex
+  for (const auto& dep : dependencies) { StartService(dep); }
 
   log_.info("Starting service '{}'{}", name, is_restart ? " (restart)" : "");
 
-  // Spawn the process
-  lock.unlock();
-  pid_t pid = SpawnProcess(config);
-  lock.lock();
-
+  pid_t pid = SpawnProcess(config_copy);
   if (pid < 0) {
-    log_.error("Failed to spawn process for service '{}'", name);
+    std::lock_guard<std::mutex> lock(mutex_);
     ChangeServiceState(name, ServiceState::FAILED);
     return false;
   }
 
-  service->SetPid(pid);
-  service->SetStartTime();
-  if (is_restart) { service->SetLastRestartTime(); }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
 
-  // Register with child supervisor
-  lock.unlock();
+    auto service = services_[name];
+    service->SetPid(pid);
+    service->SetStartTime();
+    if (is_restart) {
+      service->SetLastRestartTime();
+      service->IncrementRestartCount();  // increment on actual start
+    }
+
+    pid_to_service_[pid] = name;
+    ChangeServiceState(name, ServiceState::RUNNING);
+  }
+
   child_supervisor_.AddChild(pid, name);
-  lock.lock();
-
-  pid_to_service_[pid] = name;
-
-  ChangeServiceState(name, ServiceState::RUNNING);
-
-  log_.info("Service '{}' started with pid {}", name, pid);
   return true;
 }
 
@@ -331,65 +323,68 @@ std::shared_ptr<Service> ServiceManager::GetService(
 
 void ServiceManager::HandleServiceExit(pid_t pid, int exit_code) {
   std::unique_lock<std::mutex> lock(mutex_);
-  
+
   auto it = pid_to_service_.find(pid);
   if (it == pid_to_service_.end()) {
     log_.debug("Process {} exited but not tracked by service manager", pid);
     return;
   }
-  
+
   std::string service_name = it->second;
   pid_to_service_.erase(it);
-  
+
   auto service_it = services_.find(service_name);
   if (service_it == services_.end()) {
     log_.warn("Service '{}' not found for pid {}", service_name, pid);
     return;
   }
-  
+
   auto service = service_it->second;
   service->SetExitCode(exit_code);
   service->SetPid(-1);
-  
+
   const auto& config = service->GetConfig();
-  
-  // Check if service was being stopped (STOPPING state)
+
   bool was_stopping = (service->GetState() == ServiceState::STOPPING);
-  
-  // Exit codes 128-165 are typically signals (128 + signal number)
-  // 143 = SIGTERM (128 + 15), 137 = SIGKILL (128 + 9)
   bool killed_by_signal = (exit_code >= 128 && exit_code <= 165);
-  
+
   if (exit_code == 0 || (was_stopping && killed_by_signal)) {
-    // Clean exit, or was intentionally stopped
-    log_.info("Service '{}' exited{}", service_name, 
+    log_.info("Service '{}' exited{}",
+              service_name,
               killed_by_signal ? " (stopped by signal)" : " cleanly");
     ChangeServiceState(service_name, ServiceState::STOPPED);
   } else {
     log_.warn("Service '{}' exited with code {}", service_name, exit_code);
     ChangeServiceState(service_name, ServiceState::FAILED);
   }
-  
-  // Check if we should restart (only if not intentionally stopped)
+
+  // Schedule restart only on failure and increment restart count here
   if (!was_stopping) {
     bool should_restart = false;
-    
+
     if (config.restart_policy == RestartPolicy::ALWAYS) {
       should_restart = true;
-    } else if (config.restart_policy == RestartPolicy::ON_FAILURE && exit_code != 0 && !killed_by_signal) {
+    } else if (config.restart_policy == RestartPolicy::ON_FAILURE &&
+               exit_code != 0 && !killed_by_signal) {
       should_restart = true;
     }
-    
-    if (should_restart && service->GetRestartCount() < config.max_restart_attempts) {
+
+    if (should_restart &&
+        service->GetRestartCount() < config.max_restart_attempts) {
+      // Increment here for the scheduled restart
       service->IncrementRestartCount();
+
       log_.info("Scheduling restart for service '{}' (attempt {}/{})",
-                service_name, service->GetRestartCount(), config.max_restart_attempts);
-      
+                service_name,
+                service->GetRestartCount(),
+                config.max_restart_attempts);
+
       lock.unlock();
       ScheduleRestart(service_name);
     } else if (should_restart) {
       log_.error("Service '{}' exceeded max restart attempts ({})",
-                 service_name, config.max_restart_attempts);
+                 service_name,
+                 config.max_restart_attempts);
     }
   }
 }
@@ -432,7 +427,7 @@ bool ServiceManager::CheckDependencies(const std::string& name) const {
   const auto& deps = it->second->GetConfig().dependencies;
 
   for (const auto& dep : deps) {
-    if (!HasService(dep)) { return false; }
+    if (services_.find(dep) == services_.end()) { return false; }
   }
 
   return true;
@@ -444,12 +439,10 @@ void ServiceManager::ScheduleRestart(const std::string& name) {
 
   auto delay = service->GetConfig().restart_delay;
 
-  log_.info("Restarting service '{}' in {} seconds", name, delay.count());
-
-  // Simple delay before restart
-  std::this_thread::sleep_for(delay);
-
-  StartServiceInternal(name, true);
+  std::thread([this, name, delay]() {
+    std::this_thread::sleep_for(delay);
+    StartServiceInternal(name, true);
+  }).detach();
 }
 
 pid_t ServiceManager::SpawnProcess(const ServiceConfig& config) {
