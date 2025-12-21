@@ -25,6 +25,12 @@
       }
     },
     {
+      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/service-unittest",
+      "runTask": {
+        "before": ["run-test-in-chroot-service"]
+      }
+    },
+    {
       "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/signal-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-signal"]
