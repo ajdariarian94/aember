@@ -1,9 +1,12 @@
 /**
  * @file aember-init.cpp
  * @author Arian Ajdari
- * @brief Library implementation for AemberInit
- * @version 0.1
- * @date 2025-07-18
+ * @date 2025-12-22
+ * @brief Implementation of the AemberInit init system.
+ *
+ * This file contains the implementation of the top-level init process.
+ * It is responsible for early system setup, service supervision,
+ * signal handling, and maintaining the system run loop.
  */
 
 #include <aember-libs/aember-init/aember-init.h>
@@ -21,23 +24,40 @@ AemberInit::~AemberInit() {
 }
 
 void AemberInit::Start() {
+  // Prevent multiple starts
   if (running_.load()) return;
 
+  // Initialize logging as early as possible
   aember::utils::init_early_logging();
 
   log_.info("Starting Aember Init System");
 
-  // Mount early filesystems (additional ones beyond /proc, /sys, /dev)
+  /**
+   * Mount early filesystems.
+   *
+   * These are filesystems required before services start, but after
+   * the kernel has mounted /proc, /sys, and /dev.
+   */
   mount_manager_.emplace();
   if (!mount_manager_->MountEarlyFilesystems()) {
     log_.warn("Some early filesystems failed to mount, continuing anyway");
   }
 
-  // Initialize service manager
+  /**
+   * Initialize the service manager.
+   *
+   * The service manager owns all service definitions and coordinates
+   * their lifecycle. It depends on the child supervisor for process
+   * tracking.
+   */
   service_manager_ = std::make_unique<aember::service_manager::ServiceManager>(
       child_supervisor_);
 
-  // Set up service state change callback
+  /**
+   * Register callback for observing service state changes.
+   *
+   * This is primarily used for logging and higher-level orchestration.
+   */
   service_manager_->SetStateChangeCallback(
       std::bind(&AemberInit::OnServiceStateChangeCallback,
                 this,
@@ -45,7 +65,12 @@ void AemberInit::Start() {
                 std::placeholders::_2,
                 std::placeholders::_3));
 
-  // Setup signal handlers
+  /**
+   * Register signal handlers.
+   *
+   * Signals are handled centrally and dispatched to the appropriate
+   * subsystems.
+   */
   signal_handler_.Register(SIGTERM, [this](int) {
     log_.info("SIGTERM received - shutting down");
     Stop();
@@ -58,13 +83,19 @@ void AemberInit::Start() {
 
   signal_handler_.Register(SIGHUP, [this](int) {
     log_.info("SIGHUP received - reload configuration");
-    // TODO: reload config later
+    // Configuration reload will be implemented later
   });
 
+  /**
+   * Handle child process termination.
+   *
+   * SIGCHLD is used to reap exited children and notify the service
+   * manager about service exits.
+   */
   signal_handler_.Register(SIGCHLD, [this](int) {
     log_.debug("SIGCHLD received - reaping children");
 
-    // Reap all children
+    // Reap all exited children
     while (true) {
       int status = 0;
       pid_t pid = ::waitpid(-1, &status, WNOHANG);
@@ -78,69 +109,93 @@ void AemberInit::Start() {
         exit_code = 128 + WTERMSIG(status);
       }
 
-      // Notify service manager about the exit
+      // Notify the service manager about the service exit
       service_manager_->HandleServiceExit(pid, exit_code);
     }
 
-    // Also let child supervisor handle it (for logging)
+    // Allow the child supervisor to perform its own bookkeeping/logging
     child_supervisor_.HandleSIGCHLD();
   });
 
+  // Start signal dispatching
   signal_handler_.Start();
 
+  // Mark init system as running
   running_.store(true);
 
-  // Start heartbeat for health monitoring
+  /**
+   * Start the heartbeat subsystem.
+   *
+   * The heartbeat periodically emits system health information
+   * while the init system is running.
+   */
   heartbeat_.emplace(
       std::bind(&AemberInit::HeartbeatCallback, this, std::placeholders::_1));
   heartbeat_->Start();
 
-  // TODO: Load service configurations from file
-  // For now, you can add services programmatically for testing:
+  /**
+   * Service loading will be driven by configuration in the future.
+   *
+   * For now, services can be added programmatically for testing.
+   */
   /*
-  aember::service_manager::ServiceConfig test_service("test-service",
-  "/bin/sleep"); test_service.args = {"10"}; test_service.restart_policy =
-  aember::service_manager::RestartPolicy::ALWAYS;
+  aember::service_manager::ServiceConfig test_service(
+      "test-service", "/bin/sleep");
+  test_service.args = {"10"};
+  test_service.restart_policy =
+      aember::service_manager::RestartPolicy::ALWAYS;
   service_manager_->AddService(test_service);
   service_manager_->StartService("test-service");
   */
 
   log_.info("Aember Init System started successfully");
 
+  // Enter the main run loop
   RunLoop();
 
+  // Ensure clean shutdown when run loop exits
   Stop();
 }
 
 void AemberInit::Stop() {
+  // Ensure Stop is only executed once
   if (!running_.exchange(false)) return;
 
   log_.info("Stopping Aember Init System...");
 
-  // Stop all services first
+  /**
+   * Stop all managed services first.
+   *
+   * This ensures services are terminated cleanly before tearing down
+   * infrastructure.
+   */
   if (service_manager_) { service_manager_->StopAll(); }
 
   // Stop signal handling
   signal_handler_.Stop();
 
-  // Stop all remaining child processes
+  // Terminate any remaining child processes
   child_supervisor_.StopAll();
 
-  // Wake up RunLoop if blocked
+  // Wake the run loop if it is blocked
   cv_.notify_all();
 
-  // Stop and clean up heartbeat
+  /**
+   * Stop and destroy the heartbeat subsystem.
+   */
   if (heartbeat_) {
     heartbeat_->Stop();
     heartbeat_.reset();
   }
 
-  // Clean up service manager
+  // Destroy the service manager
   if (service_manager_) { service_manager_.reset(); }
 
-  // Unmount filesystems (if needed during shutdown)
-  // Note: Usually you don't unmount during normal operation
-  // This would be used during system shutdown/reboot
+  /**
+   * Unmount filesystems if required.
+   *
+   * Typically used during system shutdown or reboot.
+   */
   if (mount_manager_) {
     // mount_manager_->UnmountAll(false);
     mount_manager_.reset();
@@ -167,14 +222,20 @@ void AemberInit::RunLoop() {
 
   std::unique_lock<std::mutex> lock(mtx_);
 
+  /**
+   * Main init loop.
+   *
+   * Keeps the init process alive and provides a place for periodic
+   * maintenance tasks.
+   */
   while (running_.load()) {
     cv_.wait_for(lock, std::chrono::seconds(1));
 
-    // TODO: Here you can add periodic tasks like:
-    // - Check service health
-    // - Process pending events
-    // - Handle configuration changes
-    // - Monitor system resources
+    // Future periodic tasks may include:
+    // - Service health checks
+    // - Processing pending events
+    // - Configuration reloads
+    // - System resource monitoring
   }
 
   log_.info("Aember Init run loop exiting");

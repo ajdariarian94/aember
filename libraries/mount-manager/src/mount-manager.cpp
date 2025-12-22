@@ -1,3 +1,13 @@
+/**
+ * @file mount-manager.cpp
+ * @author Arian Ajdari
+ * @brief Library implementation for MountManager
+ * @version 0.1
+ * @date 2025-12-22
+ *
+ * @copyright Copyright (c) 2025, Aember, All rights reserved.
+ */
+
 #include <aember-libs/mount-manager/mount-manager.h>
 
 #include <errno.h>
@@ -11,44 +21,55 @@
 
 namespace aember::mount_manager {
 
+/**
+ * @brief Construct a MountManager instance.
+ */
 MountManager::MountManager() : log_("mount-manager") {
   log_.info("MountManager initialized");
 }
 
+/**
+ * @brief Destructor.
+ *
+ * Note: Does not automatically unmount filesystems. Call UnmountAll()
+ * explicitly if needed.
+ */
 MountManager::~MountManager() {
-  // Don't unmount in destructor - let the system handle it
-  // or call UnmountAll explicitly if needed
+  // Destructor intentionally left empty
 }
 
+/**
+ * @brief Returns a list of essential early-boot filesystem mounts.
+ */
 std::vector<MountPoint> MountManager::GetEarlyMounts() const {
   std::vector<MountPoint> mounts;
 
-  // /dev/pts - Pseudo-terminals
+  // /dev/pts - pseudo-terminals
   mounts.emplace_back("devpts",
                       "/dev/pts",
                       "devpts",
                       MS_NOEXEC | MS_NOSUID,
                       "mode=0620,gid=5,ptmxmode=0666");
 
-  // /dev/shm - Shared memory
+  // /dev/shm - shared memory
   mounts.emplace_back("tmpfs",
                       "/dev/shm",
                       "tmpfs",
                       MS_NOEXEC | MS_NOSUID | MS_NODEV,
                       "mode=1777");
 
-  // /run - Runtime data
+  // /run - runtime files
   mounts.emplace_back("tmpfs",
                       "/run",
                       "tmpfs",
                       MS_NOEXEC | MS_NOSUID | MS_NODEV,
                       "mode=0755,size=10%");
 
-  // /tmp - Temporary files
+  // /tmp - temporary files
   mounts.emplace_back(
       "tmpfs", "/tmp", "tmpfs", MS_NOEXEC | MS_NOSUID | MS_NODEV, "mode=1777");
 
-  // /sys/fs/cgroup - Control groups (cgroup2)
+  // /sys/fs/cgroup - cgroup2 filesystem
   mounts.emplace_back("cgroup2",
                       "/sys/fs/cgroup",
                       "cgroup2",
@@ -58,18 +79,25 @@ std::vector<MountPoint> MountManager::GetEarlyMounts() const {
   return mounts;
 }
 
+/**
+ * @brief Ensure a directory exists, creating it recursively if necessary.
+ *
+ * @param path Directory path.
+ * @param mode Permissions for newly created directories.
+ * @return true if the directory exists or was created successfully.
+ */
 bool MountManager::EnsureDirectory(const std::string& path, mode_t mode) {
   struct stat st;
   if (stat(path.c_str(), &st) == 0) {
     if (S_ISDIR(st.st_mode)) {
-      return true;  // Directory exists
+      return true;  // Directory already exists
     } else {
       log_.error("Path '{}' exists but is not a directory", path);
       return false;
     }
   }
 
-  // Create directory with parents
+  // Create directories recursively
   std::string current_path;
   for (size_t i = 0; i < path.length(); ++i) {
     if (path[i] == '/' && i > 0) {
@@ -95,14 +123,20 @@ bool MountManager::EnsureDirectory(const std::string& path, mode_t mode) {
   return true;
 }
 
+/**
+ * @brief Mount a filesystem described by MountPoint.
+ *
+ * @param mp MountPoint object.
+ * @return true on success, false otherwise.
+ */
 bool MountManager::Mount(const MountPoint& mp) {
-  // Check if already mounted
+  // Skip if already mounted
   if (IsMounted(mp.target)) {
     log_.debug("'{}' is already mounted, skipping", mp.target);
     return true;
   }
 
-  // Ensure mount point exists
+  // Ensure mount point directory exists
   if (!EnsureDirectory(mp.target)) { return false; }
 
   log_.info("Mounting {} on {} (type: {})", mp.source, mp.target, mp.fstype);
@@ -119,13 +153,18 @@ bool MountManager::Mount(const MountPoint& mp) {
     return false;
   }
 
-  // Track mounted filesystem
+  // Track successfully mounted filesystem
   mounted_targets_.push_back(mp.target);
 
   log_.info("Successfully mounted {} on {}", mp.source, mp.target);
   return true;
 }
 
+/**
+ * @brief Mount all early boot filesystems.
+ *
+ * @return true if all mounts succeeded, false if any failed.
+ */
 bool MountManager::MountEarlyFilesystems() {
   log_.info("Mounting early boot filesystems...");
 
@@ -148,6 +187,13 @@ bool MountManager::MountEarlyFilesystems() {
   return all_success;
 }
 
+/**
+ * @brief Unmount a filesystem.
+ *
+ * @param target Mount point path.
+ * @param force Force unmount if necessary.
+ * @return true on success, false on failure.
+ */
 bool MountManager::Unmount(const std::string& target, bool force) {
   log_.info("Unmounting {}{}", target, force ? " (forced)" : "");
 
@@ -170,10 +216,15 @@ bool MountManager::Unmount(const std::string& target, bool force) {
   return true;
 }
 
+/**
+ * @brief Unmount all tracked filesystems in reverse order.
+ *
+ * @param force Force unmount if necessary.
+ */
 void MountManager::UnmountAll(bool force) {
   log_.info("Unmounting all tracked filesystems...");
 
-  // Unmount in reverse order (LIFO)
+  // Reverse order to respect dependency hierarchy
   for (auto it = mounted_targets_.rbegin(); it != mounted_targets_.rend();
        ++it) {
     Unmount(*it, force);
@@ -182,10 +233,23 @@ void MountManager::UnmountAll(bool force) {
   mounted_targets_.clear();
 }
 
+/**
+ * @brief Check if a target is mounted.
+ *
+ * @param target Mount point path.
+ * @return true if mounted, false otherwise.
+ */
 bool MountManager::IsMounted(const std::string& target) {
   return CheckMountStatus(target);
 }
 
+/**
+ * @brief Inspect /proc/mounts to determine if a mount point is currently
+ * mounted.
+ *
+ * @param target Mount point path.
+ * @return true if mounted, false otherwise.
+ */
 bool MountManager::CheckMountStatus(const std::string& target) {
   std::ifstream mounts("/proc/mounts");
   if (!mounts.is_open()) {
@@ -205,7 +269,7 @@ bool MountManager::CheckMountStatus(const std::string& target) {
     std::string mountpoint =
         line.substr(first_space + 1, second_space - first_space - 1);
 
-    // Handle escaped spaces in mount points
+    // Handle escaped spaces (\040)
     size_t pos = 0;
     while ((pos = mountpoint.find("\\040", pos)) != std::string::npos) {
       mountpoint.replace(pos, 4, " ");
