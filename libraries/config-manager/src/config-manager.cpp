@@ -1,3 +1,14 @@
+/**
+ * @file config-manager.cpp
+ * @author Arian Ajdari
+ * @date 2025-12-22
+ * @brief Implementation of ConfigManager for dynamic service loading.
+ *
+ * Provides functions to load service configurations from JSON files,
+ * strings, or pre-parsed JSON objects. Validates required fields,
+ * parses optional fields, and converts restart policy strings into enums.
+ */
+
 #include <aember-libs/config-manager/config-manager.h>
 
 #include <fstream>
@@ -5,12 +16,23 @@
 
 namespace aember::config_manager {
 
+/**
+ * @brief Construct a new ConfigManager and initialize logger.
+ */
 ConfigManager::ConfigManager() : log_("config-manager") {
   log_.info("ConfigManager initialized");
 }
 
+/**
+ * @brief Destroy the ConfigManager.
+ */
 ConfigManager::~ConfigManager() = default;
 
+/**
+ * @brief Load configuration from a JSON file.
+ * @param path Path to the configuration file
+ * @return true if successfully loaded, false otherwise
+ */
 bool ConfigManager::LoadFromFile(const std::string& path) {
   log_.info("Loading configuration from file: {}", path);
 
@@ -33,6 +55,11 @@ bool ConfigManager::LoadFromFile(const std::string& path) {
   return LoadFromJson(config);
 }
 
+/**
+ * @brief Load configuration from a JSON string.
+ * @param json_str JSON string containing configuration
+ * @return true if successfully loaded, false otherwise
+ */
 bool ConfigManager::LoadFromString(const std::string& json_str) {
   log_.info("Loading configuration from string");
 
@@ -49,6 +76,11 @@ bool ConfigManager::LoadFromString(const std::string& json_str) {
   return LoadFromJson(config);
 }
 
+/**
+ * @brief Load configuration from a parsed JSON object.
+ * @param config JSON object containing configuration
+ * @return true if successfully loaded, false otherwise
+ */
 bool ConfigManager::LoadFromJson(const nlohmann::json& config) {
   log_.info("Loading configuration from JSON object");
 
@@ -59,7 +91,6 @@ bool ConfigManager::LoadFromJson(const nlohmann::json& config) {
     return false;
   }
 
-  // Parse services if present
   if (config.contains("services")) {
     if (!ParseServices(config["services"])) { return false; }
   }
@@ -70,6 +101,11 @@ bool ConfigManager::LoadFromJson(const nlohmann::json& config) {
   return true;
 }
 
+/**
+ * @brief Parse the "services" array in the configuration.
+ * @param json JSON array of service objects
+ * @return true if successfully parsed, false otherwise
+ */
 bool ConfigManager::ParseServices(const nlohmann::json& json) {
   if (!json.is_array()) {
     SetError("'services' must be an array");
@@ -94,39 +130,40 @@ bool ConfigManager::ParseServices(const nlohmann::json& json) {
   return true;
 }
 
+/**
+ * @brief Parse a single service configuration entry.
+ * @param service_json JSON object representing the service
+ * @param config Output ServiceConfig object
+ * @return true if successfully parsed, false otherwise
+ */
 bool ConfigManager::ParseService(
     const nlohmann::json& service_json,
     aember::service_manager::ServiceConfig& config) {
-  // Required fields
+  // Required fields: name
   if (!service_json.contains("name")) {
     SetError("Service missing required field: 'name'");
     return false;
   }
-
-  if (!service_json.contains("command")) {
-    SetError("Service missing required field: 'command'");
-    return false;
-  }
-
-  // Parse name
   if (!service_json["name"].is_string()) {
     SetError("Service 'name' must be a string");
     return false;
   }
   config.name = service_json["name"].get<std::string>();
-
   if (config.name.empty()) {
     SetError("Service 'name' cannot be empty");
     return false;
   }
 
-  // Parse command
+  // Required fields: command
+  if (!service_json.contains("command")) {
+    SetError("Service missing required field: 'command'");
+    return false;
+  }
   if (!service_json["command"].is_string()) {
     SetError("Service 'command' must be a string");
     return false;
   }
   config.command = service_json["command"].get<std::string>();
-
   if (config.command.empty()) {
     SetError("Service 'command' cannot be empty");
     return false;
@@ -184,9 +221,8 @@ bool ConfigManager::ParseService(
       SetError("Service 'restart_policy' must be a string");
       return false;
     }
-
-    std::string policy_str = service_json["restart_policy"].get<std::string>();
-    config.restart_policy = ParseRestartPolicy(policy_str);
+    config.restart_policy =
+        ParseRestartPolicy(service_json["restart_policy"].get<std::string>());
   }
 
   // Dependencies
@@ -211,7 +247,6 @@ bool ConfigManager::ParseService(
       SetError("Service 'max_restart_attempts' must be an integer");
       return false;
     }
-
     int attempts = service_json["max_restart_attempts"].get<int>();
     if (attempts < 0) {
       SetError("Service 'max_restart_attempts' must be >= 0");
@@ -220,13 +255,12 @@ bool ConfigManager::ParseService(
     config.max_restart_attempts = attempts;
   }
 
-  // Restart delay
+  // Restart delay in seconds
   if (service_json.contains("restart_delay_seconds")) {
     if (!service_json["restart_delay_seconds"].is_number()) {
       SetError("Service 'restart_delay_seconds' must be a number");
       return false;
     }
-
     int delay = service_json["restart_delay_seconds"].get<int>();
     if (delay < 0) {
       SetError("Service 'restart_delay_seconds' must be >= 0");
@@ -238,6 +272,9 @@ bool ConfigManager::ParseService(
   return true;
 }
 
+/**
+ * @brief Convert restart policy string to enum.
+ */
 aember::service_manager::RestartPolicy ConfigManager::ParseRestartPolicy(
     const std::string& policy_str) {
   if (policy_str == "never") {
@@ -252,11 +289,17 @@ aember::service_manager::RestartPolicy ConfigManager::ParseRestartPolicy(
   }
 }
 
+/**
+ * @brief Return all loaded service configurations.
+ */
 std::vector<aember::service_manager::ServiceConfig> ConfigManager::GetServices()
     const {
   return services_;
 }
 
+/**
+ * @brief Return a specific service configuration by name.
+ */
 std::optional<aember::service_manager::ServiceConfig> ConfigManager::GetService(
     const std::string& name) const {
   for (const auto& service : services_) {
@@ -265,22 +308,34 @@ std::optional<aember::service_manager::ServiceConfig> ConfigManager::GetService(
   return std::nullopt;
 }
 
+/**
+ * @brief Clear loaded configuration and reset state.
+ */
 void ConfigManager::Clear() {
   services_.clear();
   loaded_ = false;
   last_error_.reset();
 }
 
+/**
+ * @brief Set last error from a message string.
+ */
 void ConfigManager::SetError(const std::string& message) {
   last_error_ = ConfigError(message);
   log_.error("{}", message);
 }
 
+/**
+ * @brief Set last error from a ConfigError object.
+ */
 void ConfigManager::SetError(const ConfigError& error) {
   last_error_ = error;
   log_.error("{}", error.message);
 }
 
+/**
+ * @brief Validate a JSON configuration file without loading.
+ */
 bool ConfigManager::ValidateFile(const std::string& path, ConfigError* error) {
   std::ifstream file(path);
   if (!file.is_open()) {
@@ -303,6 +358,9 @@ bool ConfigManager::ValidateFile(const std::string& path, ConfigError* error) {
   return ValidateJson(config, error);
 }
 
+/**
+ * @brief Validate a parsed JSON object without loading.
+ */
 bool ConfigManager::ValidateJson(const nlohmann::json& config,
                                  ConfigError* error) {
   if (!config.is_object()) {
@@ -310,7 +368,6 @@ bool ConfigManager::ValidateJson(const nlohmann::json& config,
     return false;
   }
 
-  // Create a temporary ConfigManager to test parsing
   ConfigManager temp;
   bool result = temp.LoadFromJson(config);
 

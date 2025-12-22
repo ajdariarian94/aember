@@ -90,6 +90,7 @@ RUN apt update && apt install -y    \
     kitty                           \
     zstd                            \
     x11-utils                       \
+    xdg-utils                       \
     lsb-release &&                  \
     gem install lolcat
 
