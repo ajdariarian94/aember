@@ -23,6 +23,7 @@ find_package(spdlog REQUIRED)
 # Common
 add_subdirectory(aember-init)
 add_subdirectory(child-supervisor)
+add_subdirectory(config-manager)
 add_subdirectory(device-health)
 add_subdirectory(mount-manager)
 add_subdirectory(service-manager)
