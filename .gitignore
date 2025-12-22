@@ -32,3 +32,5 @@ resources/poky/poky-recipes/**/cache
 *.img
 *.vmlinuz
 *.cpio.gz
+
+doc/generated
