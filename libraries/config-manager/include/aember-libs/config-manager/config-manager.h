@@ -16,6 +16,8 @@ struct ConfigError {
   std::string file;
   int line = -1;
 
+  ConfigError() = default;
+
   ConfigError(const std::string& msg) : message(msg) {}
   ConfigError(const std::string& msg, const std::string& f, int l = -1)
       : message(msg), file(f), line(l) {}
