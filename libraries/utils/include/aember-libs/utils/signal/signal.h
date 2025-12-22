@@ -22,7 +22,8 @@ namespace aember::utils {
 /**
  * @brief Lightweight signal handler for registering and handling POSIX signals.
  *
- * Provides a dedicated thread to wait for signals and invoke registered callbacks.
+ * Provides a dedicated thread to wait for signals and invoke registered
+ * callbacks.
  */
 class SignalHandler {
  public:
@@ -72,10 +73,10 @@ class SignalHandler {
    */
   void SignalLoop();
 
-  sigset_t signal_set_;                  ///< Mask of signals to handle
-  std::map<int, Callback> callbacks_;    ///< Registered callbacks for signals
-  std::atomic<bool> running_{false};     ///< Thread running state
-  std::thread signal_thread_;            ///< Thread for handling signals
+  sigset_t signal_set_;                ///< Mask of signals to handle
+  std::map<int, Callback> callbacks_;  ///< Registered callbacks for signals
+  std::atomic<bool> running_{false};   ///< Thread running state
+  std::thread signal_thread_;          ///< Thread for handling signals
 };
 
 }  // namespace aember::utils

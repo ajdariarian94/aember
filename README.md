@@ -72,3 +72,12 @@ Clean build artifacts:
 ```sh
 aember clean
 ```
+
+## 📚 Documentation
+
+Generate and view Documentation
+
+```sh
+aember generate-docs
+aember view-docs
+```
