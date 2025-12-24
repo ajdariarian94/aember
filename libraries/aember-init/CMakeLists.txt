@@ -18,9 +18,14 @@ target_include_directories(
 
 target_link_libraries(
   ${COMPONENT}
-  PUBLIC aember-libs::child-supervisor aember-libs::device-health
-         aember-libs::mount-manager aember-libs::service-manager
-         aember-libs::utils::logging aember-libs::utils::signal)
+  PUBLIC aember-libs::child-supervisor
+         aember-libs::config-manager
+         aember-libs::device-health
+         aember-libs::mount-manager
+         aember-libs::root-manager
+         aember-libs::service-manager
+         aember-libs::utils::logging
+         aember-libs::utils::signal)
 
 set_target_properties(
   ${COMPONENT} PROPERTIES VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}

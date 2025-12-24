@@ -12,8 +12,10 @@
 #pragma once
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
+#include <aember-libs/config-manager/config-manager.h>
 #include <aember-libs/device-health/heartbeat.h>
 #include <aember-libs/mount-manager/mount-manager.h>
+#include <aember-libs/root-manager/root-manager.h>
 #include <aember-libs/service-manager/service-manager.h>
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/signal/signal.h>
@@ -157,6 +159,22 @@ class AemberInit {
    * services are started.
    */
   std::optional<aember::mount_manager::MountManager> mount_manager_;
+
+  /**
+   * @brief Config manager.
+   *
+   * Responsible for mounting early filesystems required before
+   * services are started.
+   */
+  std::unique_ptr<aember::config_manager::ConfigManager> config_manager_;
+
+  /**
+   * @brief Root manager instance.
+   *
+   * Owns and controls all configured system services, including
+   * dependency management and restart policies.
+   */
+  std::unique_ptr<aember::root_manager::RootManager> root_manager_;
 
   /**
    * @brief Service manager instance.

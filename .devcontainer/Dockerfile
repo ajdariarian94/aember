@@ -37,6 +37,7 @@ RUN apt update && apt install -y    \
     doxygen                         \
     gawk                            \
     gdb                             \
+    genext2fs                       \
     gnupg                           \
     graphviz                        \
     gcc-aarch64-linux-gnu           \         
@@ -63,6 +64,7 @@ RUN apt update && apt install -y    \
     libaudit-dev                    \
     libcap-dev                      \   
     libsystemd-dev                  \
+    libguestfs-tools                \
     apt-transport-https             \
     software-properties-common      \
     zip                             \
@@ -75,6 +77,7 @@ RUN apt update && apt install -y    \
     bash-completion                 \   
     figlet                          \
     ruby                            \
+    parted                          \
     python3                         \
     python3-pip                     \
     python3.12-venv                 \
@@ -91,6 +94,7 @@ RUN apt update && apt install -y    \
     zstd                            \
     x11-utils                       \
     xdg-utils                       \
+    e2fsprogs                       \
     lsb-release &&                  \
     gem install lolcat
 

@@ -41,6 +41,10 @@ class RootManager {
   // Get the path where new root is mounted
   std::string GetNewRootPath() const { return new_root_path_; }
 
+  void DumpMountInfo(const char* reason);
+
+  std::string ResolveSymlink(const std::string& path);
+
  private:
   bool PrepareNewRoot();
   bool MountEssentialFilesystems();
