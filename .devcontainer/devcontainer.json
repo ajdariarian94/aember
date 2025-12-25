@@ -8,15 +8,10 @@
         "--net=host",
         "--privileged",
         "-e", "DISPLAY",
-        "-v", "/tmp/.X11-unix:/tmp/.X11-unix",
         "-v", "/lib/modules:/lib/modules:ro",
         "-v", "/boot:/boot:ro",
-        "-v", "${env:HOME}/.ssh:/home/dev/.ssh:ro",
-        "--device=/dev/loop-control",
-        "--device=/dev/loop0",
-        "--device=/dev/loop1",
-        "--device=/dev/loop2",
-        "--device=/dev/loop3"
+        "-v", "/tmp/.X11-unix:/tmp/.X11-unix",
+        "-v", "${env:HOME}/.ssh:/home/dev/.ssh:ro"
     ],
     "workspaceFolder": "/aember_ws/aember",
     "workspaceMount": "source=${localWorkspaceFolder},target=/aember_ws/aember,type=bind",

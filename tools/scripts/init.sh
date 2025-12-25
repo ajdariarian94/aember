@@ -56,23 +56,6 @@ aember --install-completion
 sudo rm -rf /root/.config/git
 
 # -----------------------------
-# Setup loop devices for pack_step
-# -----------------------------
-echo "[init][info] Checking loop devices..."
-for i in $(seq 0 17); do
-    if [ ! -e /dev/loop$i ]; then
-        echo "[init][warn] /dev/loop$i missing! Host should provide loop devices."
-    fi
-done
-
-if [ ! -e /dev/loop-control ]; then
-    echo "[init][warn] /dev/loop-control missing! Host should provide it."
-fi
-
-echo "[init][info] Loop devices ready (host-provided)."
-
-
-# -----------------------------
 # Show banner
 # -----------------------------
 figlet -f big aember | lolcat
