@@ -51,7 +51,7 @@ class AemberInit {
    * Construction does not start any subsystems. Initialization is deferred
    * to Start().
    */
-  AemberInit();
+  AemberInit(int argc, char** argv);
 
   /**
    * @brief Destructor.

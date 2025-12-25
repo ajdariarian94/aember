@@ -17,72 +17,72 @@
 
 namespace aember::aember_init {
 
-AemberInit::AemberInit() : running_(false), log_("aember-init") {}
+AemberInit::AemberInit(int argc, char** argv)
+    : running_(false), log_(argv[1]) {}
 
 AemberInit::~AemberInit() {
   Stop();
 }
 
 void AemberInit::Start() {
-  // Prevent multiple starts
   if (running_.load()) return;
 
-  // Initialize logging as early as possible
   aember::utils::init_early_logging();
-  log_.info("Starting Aember Init System");
 
-  /**
-   * Mount early filesystems.
-   * These are required before services start, after kernel mounted /proc, /sys,
-   * /dev.
-   */
+  // Detect init mode vs real root mode
+  if (aember::root_manager::RootManager::IsInInitramfs()) {
+    log_.info("Starting Aember in initramfs mode");
+  } else {
+    log_.info("Starting Aember on real root");
+  }
+
+  // ----------------------------
+  // Mount early filesystems
+  // ----------------------------
   mount_manager_.emplace();
   if (!mount_manager_->MountEarlyFilesystems()) {
     log_.warn("Some early filesystems failed to mount, continuing anyway");
   }
 
-  /**
-   * Pivot to real root filesystem if we're in initramfs.
-   */
+  // ----------------------------
+  // Pivot to real root if needed
+  // ----------------------------
   if (aember::root_manager::RootManager::IsInInitramfs()) {
     log_.info("Initramfs detected, preparing to pivot to real root");
 
     root_manager_ =
         std::make_unique<aember::root_manager::RootManager>(*mount_manager_);
 
-    // Configure the real root filesystem
     aember::root_manager::RootConfig root_config;
     root_config.device =
-        "/dev/sda1";  // TODO: parse /proc/cmdline or use UUID/LABEL
+        "/dev/sda1";  // TODO: parse /proc/cmdline or UUID/LABEL
     root_config.fstype = "ext4";
     root_config.mount_options = "rw";
     root_config.new_root_path = "/mnt/root";
 
-    // Ensure pivot mount point exists
     if (!mount_manager_->EnsureDirectory(root_config.new_root_path)) {
       log_.error("Failed to create pivot mount point: {}",
                  root_config.new_root_path);
     }
 
-    // Perform pivot
     if (!root_manager_->PerformPivot(root_config)) {
       log_.warn("Pivot to real root failed; continuing in initramfs");
     } else {
-      log_.info("Successfully pivoted to real root filesystem");
+      log_.info("Successfully switched to real root. Relaunching Aember...");
+      execl("/usr/bin/aember", "/usr/bin/aember", nullptr);
+      log_.error("Failed to exec Aember after pivot: {}", strerror(errno));
+      std::abort();
     }
   } else {
-    log_.info("Not in initramfs, skipping pivot_root");
+    log_.info("Already on real root, skipping pivot_root");
   }
 
-  /**
-   * Initialize the service manager.
-   */
+  // ----------------------------
+  // Initialize Service Manager
+  // ----------------------------
   service_manager_ = std::make_unique<aember::service_manager::ServiceManager>(
       child_supervisor_);
 
-  /**
-   * Register callback for service state changes.
-   */
   service_manager_->SetStateChangeCallback(
       std::bind(&AemberInit::OnServiceStateChangeCallback,
                 this,
@@ -90,16 +90,15 @@ void AemberInit::Start() {
                 std::placeholders::_2,
                 std::placeholders::_3));
 
-  /**
-   * Load service configuration from the real root.
-   */
+  // ----------------------------
+  // Load service configuration
+  // ----------------------------
   config_manager_ = std::make_unique<aember::config_manager::ConfigManager>();
   std::string config_path = "/etc/aember/services.json";
 
   if (config_manager_->LoadFromFile(config_path)) {
     log_.info("Loaded service configuration from {}", config_path);
 
-    // Add all configured services
     for (const auto& service_config : config_manager_->GetServices()) {
       if (service_manager_->AddService(service_config)) {
         log_.info("Added service: {}", service_config.name);
@@ -108,58 +107,31 @@ void AemberInit::Start() {
       }
     }
 
-    // Start all services
     service_manager_->StartAll();
   } else {
     log_.warn("No service configuration found at {}", config_path);
   }
 
-  /**
-   * Register signal handlers.
-   */
-  signal_handler_.Register(SIGTERM, [this](int) {
-    log_.info("SIGTERM received - shutting down");
-    Stop();
-  });
-
-  signal_handler_.Register(SIGINT, [this](int) {
-    log_.info("SIGINT received - shutting down");
-    Stop();
-  });
-
-  signal_handler_.Register(SIGHUP, [this](int) {
-    log_.info("SIGHUP received - reload configuration");
-    // TODO: Reload configuration
-  });
-
+  // ----------------------------
+  // Setup signal handlers
+  // ----------------------------
+  signal_handler_.Register(SIGTERM, [this](int) { Stop(); });
+  signal_handler_.Register(SIGINT, [this](int) { Stop(); });
+  signal_handler_.Register(SIGHUP, [this](int) { /* reload config */ });
   signal_handler_.Register(SIGCHLD, [this](int) {
-    log_.debug("SIGCHLD received - reaping children");
-
-    while (true) {
-      int status = 0;
-      pid_t pid = ::waitpid(-1, &status, WNOHANG);
-      if (pid <= 0) break;
-
-      int exit_code = 0;
-      if (WIFEXITED(status)) {
-        exit_code = WEXITSTATUS(status);
-      } else if (WIFSIGNALED(status)) {
-        exit_code = 128 + WTERMSIG(status);
-      }
-
-      service_manager_->HandleServiceExit(pid, exit_code);
+    int status = 0;
+    while (waitpid(-1, &status, WNOHANG) > 0) {
+      service_manager_->HandleServiceExit(status, WEXITSTATUS(status));
     }
-
     child_supervisor_.HandleSIGCHLD();
   });
 
-  // Start signal handling loop
   signal_handler_.Start();
   running_.store(true);
 
-  /**
-   * Start heartbeat monitoring.
-   */
+  // ----------------------------
+  // Start heartbeat
+  // ----------------------------
   heartbeat_.emplace(
       std::bind(&AemberInit::HeartbeatCallback, this, std::placeholders::_1));
   heartbeat_->Start();

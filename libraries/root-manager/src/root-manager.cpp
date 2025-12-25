@@ -179,30 +179,21 @@ bool RootManager::MountEssentialFilesystems() {
 }
 
 bool RootManager::SwitchRoot() {
-  log_.info("Executing pivot_root");
+  char* args[] = {
+      (char*)"/bin/switch_root",  // Path to busybox or switch_root symlink
+      (char*)"/mnt/root",         // The new root (current dir)
+      (char*)"/usr/bin/aember",   // The path to the binary INSIDE the new root
+      (char*)"aember",
+      nullptr};
 
-  if (chdir(new_root_path_.c_str()) != 0) {
-    log_.error("chdir failed: {}", ErrnoString("chdir"));
-    return false;
-  }
+  log_.info("Executing switch_root...");
 
-  if (syscall(SYS_pivot_root, ".", ".oldroot") != 0) {
-    log_.error("pivot_root failed: {}", ErrnoString("pivot_root"));
-    DumpMountInfo("pivot_root failed");
-    return false;
-  }
+  // Use execv to avoid PATH dependency issues in the minimal initramfs
+  execv(args[0], args);
 
-  if (chroot(".") != 0) {
-    log_.error("chroot failed: {}", ErrnoString("chroot"));
-    return false;
-  }
-
-  if (chdir("/") != 0) {
-    log_.error("chdir(/) failed: {}", ErrnoString("chdir"));
-    return false;
-  }
-
-  return true;
+  // If execv returns, it failed
+  log_.error("switch_root failed: {}", strerror(errno));
+  return false;
 }
 
 bool RootManager::UnmountOldRoot() {
@@ -260,16 +251,8 @@ std::string RootManager::ResolveSymlink(const std::string& path) {
 }
 
 bool RootManager::IsInInitramfs() {
-  std::ifstream mounts("/proc/self/mountinfo");
-  std::string line;
-
-  while (std::getline(mounts, line)) {
-    if (line.find(" - rootfs ") != std::string::npos ||
-        line.find(" - tmpfs ") != std::string::npos) {
-      return true;
-    }
-  }
-  return false;
+  std::ifstream f("/etc/aember/services.json");
+  return !f.good();
 }
 
 void RootManager::DumpMountInfo(const char* reason) {
