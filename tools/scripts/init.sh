@@ -1,11 +1,14 @@
 #!/bin/bash
 # Fully reset .bashrc and setup workspace environment for aember
+# Also ensures loop devices are ready inside Docker
 
 # Resolve script and workspace directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)/aember_ws/aember"
 
+# -----------------------------
 # Reset .bashrc completely
+# -----------------------------
 cat > "$HOME/.bashrc" <<'EOF'
 # ~/.bashrc: reset by aember init.sh
 # Only interactive shells
@@ -52,5 +55,7 @@ aember --install-completion
 
 sudo rm -rf /root/.config/git
 
+# -----------------------------
 # Show banner
+# -----------------------------
 figlet -f big aember | lolcat

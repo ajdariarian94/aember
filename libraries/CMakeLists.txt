@@ -26,6 +26,7 @@ add_subdirectory(child-supervisor)
 add_subdirectory(config-manager)
 add_subdirectory(device-health)
 add_subdirectory(mount-manager)
+add_subdirectory(root-manager)
 add_subdirectory(service-manager)
 add_subdirectory(utils)
 
