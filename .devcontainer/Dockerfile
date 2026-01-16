@@ -9,6 +9,8 @@ ARG UID=1000
 ARG GID=1000
 ARG USERNAME=dev
 
+ARG DOCKER_GID=984
+
 # Create group and user only if they don't exist already
 # Create or reuse user with desired UID/GID
 RUN \
@@ -23,6 +25,9 @@ RUN \
         useradd -m -u "${UID}" -g "${GID}" "${USERNAME}"; \
     fi
 
+RUN groupadd -g ${DOCKER_GID} docker || true \
+    && usermod -aG ${DOCKER_GID} dev
+
 # ---- Install system dependencies ----
 RUN apt update && apt install -y    \
     apt-utils                       \
@@ -30,6 +35,7 @@ RUN apt update && apt install -y    \
     clang                           \
     clang-tools                     \
     clang-tidy                      \
+    docker.io                       \
     git                             \
     ninja-build                     \
     curl                            \

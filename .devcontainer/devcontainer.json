@@ -7,6 +7,13 @@
     "runArgs": [
         "--net=host",
         "--privileged",
+
+        // Docker socket
+        "-v", "/var/run/docker.sock:/var/run/docker.sock",
+
+        // Optional but recommended
+        "-e", "DOCKER_HOST=unix:///var/run/docker.sock",
+
         "-e", "DISPLAY",
         "-v", "/lib/modules:/lib/modules:ro",
         "-v", "/boot:/boot:ro",
@@ -15,7 +22,7 @@
     ],
     "workspaceFolder": "/aember_ws/aember",
     "workspaceMount": "source=${localWorkspaceFolder},target=/aember_ws/aember,type=bind",
-    "remoteUser": "root",
+    "remoteUser": "dev",
     "postStartCommand": "/aember_ws/aember/tools/scripts/init.sh",
     "customizations": {
         "vscode": {
