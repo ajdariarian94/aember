@@ -20,4 +20,4 @@ echo "[init][info] Early mounts done. Handing over to Aember (PID 1)..."
 # Aember will handle pivot_root to real root,
 # mount essential filesystems, and start services.
 # --------------------------------------
-exec /usr/bin/aember aember-init
+exec /usr/bin/aember aember-init 
