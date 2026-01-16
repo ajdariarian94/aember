@@ -17,24 +17,19 @@
 
 namespace aember::aember_init {
 
-AemberInit::AemberInit(int argc, char** argv)
-    : running_(false), log_(argv[1]) {}
+AemberInit::AemberInit(const std::string& logger_name)
+    : running_(false), log_(logger_name) {}
 
 AemberInit::~AemberInit() {
   Stop();
 }
 
-void AemberInit::Start() {
+void AemberInit::StartInitramfs() {
   if (running_.load()) return;
 
   aember::utils::init_early_logging();
 
-  // Detect init mode vs real root mode
-  if (aember::root_manager::RootManager::IsInInitramfs()) {
-    log_.info("Starting Aember in initramfs mode");
-  } else {
-    log_.info("Starting Aember on real root");
-  }
+  log_.info("Starting Aember in initramfs mode");
 
   // ----------------------------
   // Mount early filesystems
@@ -44,37 +39,54 @@ void AemberInit::Start() {
     log_.warn("Some early filesystems failed to mount, continuing anyway");
   }
 
+  log_.info("Initramfs detected, preparing to pivot to real root");
+
+  root_manager_ =
+      std::make_unique<aember::root_manager::RootManager>(*mount_manager_);
+
+  aember::root_manager::RootConfig root_config;
+  root_config.device = "/dev/sda1";  // TODO: parse /proc/cmdline or UUID/LABEL
+  root_config.fstype = "ext4";
+  root_config.mount_options = "rw";
+  root_config.new_root_path = "/mnt/root";
+
+  if (!mount_manager_->EnsureDirectory(root_config.new_root_path)) {
+    log_.error("Failed to create pivot mount point: {}",
+               root_config.new_root_path);
+  }
+
+  if (!root_manager_->PerformPivot(root_config)) {
+    log_.warn("Pivot to real root failed; continuing in initramfs");
+
+    // ----------------------------
+    // Start heartbeat
+    // ----------------------------
+    heartbeat_.emplace(
+        std::bind(&AemberInit::HeartbeatCallback, this, std::placeholders::_1));
+    heartbeat_->Start();
+
+    log_.info("Aember Init System started successfully");
+
+    // Main run loop
+    RunLoop();
+
+    Stop();
+  }
+}
+
+void AemberInit::StartRoot() {
+  if (running_.load()) return;
+
+  aember::utils::init_early_logging();
+
+  log_.info("Starting Aember in root mode");
+
   // ----------------------------
-  // Pivot to real root if needed
+  // Mount early filesystems
   // ----------------------------
-  if (aember::root_manager::RootManager::IsInInitramfs()) {
-    log_.info("Initramfs detected, preparing to pivot to real root");
-
-    root_manager_ =
-        std::make_unique<aember::root_manager::RootManager>(*mount_manager_);
-
-    aember::root_manager::RootConfig root_config;
-    root_config.device =
-        "/dev/sda1";  // TODO: parse /proc/cmdline or UUID/LABEL
-    root_config.fstype = "ext4";
-    root_config.mount_options = "rw";
-    root_config.new_root_path = "/mnt/root";
-
-    if (!mount_manager_->EnsureDirectory(root_config.new_root_path)) {
-      log_.error("Failed to create pivot mount point: {}",
-                 root_config.new_root_path);
-    }
-
-    if (!root_manager_->PerformPivot(root_config)) {
-      log_.warn("Pivot to real root failed; continuing in initramfs");
-    } else {
-      log_.info("Successfully switched to real root. Relaunching Aember...");
-      execl("/usr/bin/aember", "/usr/bin/aember", nullptr);
-      log_.error("Failed to exec Aember after pivot: {}", strerror(errno));
-      std::abort();
-    }
-  } else {
-    log_.info("Already on real root, skipping pivot_root");
+  mount_manager_.emplace();
+  if (!mount_manager_->MountEarlyFilesystems()) {
+    log_.warn("Some early filesystems failed to mount, continuing anyway");
   }
 
   // ----------------------------

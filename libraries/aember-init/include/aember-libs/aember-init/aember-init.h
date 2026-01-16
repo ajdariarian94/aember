@@ -51,7 +51,7 @@ class AemberInit {
    * Construction does not start any subsystems. Initialization is deferred
    * to Start().
    */
-  AemberInit(int argc, char** argv);
+  AemberInit(const std::string& logger_name);
 
   /**
    * @brief Destructor.
@@ -68,7 +68,9 @@ class AemberInit {
    *
    * This function blocks until Stop() is invoked.
    */
-  void Start();
+  void StartInitramfs();
+
+  void StartRoot();
 
   /**
    * @brief Stop the init system.

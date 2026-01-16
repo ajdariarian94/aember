@@ -183,7 +183,7 @@ bool RootManager::SwitchRoot() {
       (char*)"/bin/switch_root",  // Path to busybox or switch_root symlink
       (char*)"/mnt/root",         // The new root (current dir)
       (char*)"/usr/bin/aember",   // The path to the binary INSIDE the new root
-      (char*)"aember",
+      (char*)"--root",            // Argument to indicate root mode
       nullptr};
 
   log_.info("Executing switch_root...");
