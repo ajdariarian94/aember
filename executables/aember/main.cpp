@@ -16,9 +16,13 @@ int main(int argc, char** argv) {
 
   CLI11_PARSE(app, argc, argv);
 
-  aember::aember_init::AemberInit aember_init{argc, argv};
+  if (initramfs) {
+    aember::aember_init::AemberInit aember_init{"aember-init"};
+    aember_init.StartInitramfs();
+  } else if (root) {
+    aember::aember_init::AemberInit aember_init{"aember"};
+    aember_init.StartRoot();
+  }
 
-  aember_init.Start();
-
-  return 0;
+  return EXIT_SUCCESS;
 }
