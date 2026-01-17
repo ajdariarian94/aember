@@ -18,7 +18,9 @@
 namespace aember::aember_init {
 
 AemberInit::AemberInit(const std::string& logger_name)
-    : running_(false), log_(logger_name) {}
+    : running_(false), log_(logger_name) {
+  spdlog::set_level(spdlog::level::debug);
+}
 
 AemberInit::~AemberInit() {
   Stop();
@@ -26,8 +28,6 @@ AemberInit::~AemberInit() {
 
 void AemberInit::StartInitramfs() {
   if (running_.load()) return;
-
-  aember::utils::init_early_logging();
 
   log_.info("Starting Aember in initramfs mode");
 
@@ -76,8 +76,6 @@ void AemberInit::StartInitramfs() {
 
 void AemberInit::StartRoot() {
   if (running_.load()) return;
-
-  aember::utils::init_early_logging();
 
   log_.info("Starting Aember in root mode");
 
