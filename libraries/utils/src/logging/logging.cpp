@@ -35,7 +35,7 @@ void init_early_logging() {
   if (initialized) return;
   initialized = true;
 
-  // 🔥 Hard reset spdlog state (prevents stale sinks/formatters)
+  // Hard reset spdlog state (prevents stale sinks/formatters)
   spdlog::shutdown();
   spdlog::drop_all();
   global_sinks.clear();
