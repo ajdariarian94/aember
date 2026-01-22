@@ -2,7 +2,10 @@
     "name": "aember-dev",
     "build": {
         "dockerfile": "Dockerfile",
-        "context": ".."
+        "context": "..",
+        "args": {
+            "DOCKER_GID": "${localEnv:DOCKER_GID}"
+        }
     },
     "runArgs": [
         "--net=host",
@@ -13,6 +16,7 @@
 
         // Optional but recommended
         "-e", "DOCKER_HOST=unix:///var/run/docker.sock",
+        "-e", "HOST_ROOT_PATH=${localWorkspaceFolder}",
 
         "-e", "DISPLAY",
         "-v", "/lib/modules:/lib/modules:ro",
