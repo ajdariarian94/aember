@@ -2,7 +2,10 @@
     "name": "aember-dev",
     "build": {
         "dockerfile": "Dockerfile",
-        "context": ".."
+        "context": "..",
+        "args": {
+            "DOCKER_GID": "${localEnv:DOCKER_GID}"
+        }
     },
     "runArgs": [
         "--net=host",

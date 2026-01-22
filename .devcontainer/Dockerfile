@@ -9,7 +9,7 @@ ARG UID=1000
 ARG GID=1000
 ARG USERNAME=dev
 
-ARG DOCKER_GID=984
+ARG DOCKER_GID
 
 # Create group and user only if they don't exist already
 # Create or reuse user with desired UID/GID
