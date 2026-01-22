@@ -13,6 +13,7 @@
 
         // Optional but recommended
         "-e", "DOCKER_HOST=unix:///var/run/docker.sock",
+        "-e", "HOST_ROOT_PATH=${localWorkspaceFolder}",
 
         "-e", "DISPLAY",
         "-v", "/lib/modules:/lib/modules:ro",
