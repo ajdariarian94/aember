@@ -19,7 +19,11 @@ namespace aember::aember_init {
 
 AemberInit::AemberInit(const std::string& logger_name)
     : running_(false), log_(logger_name) {
+#ifndef NDEBUG
   spdlog::set_level(spdlog::level::debug);
+#else
+  spdlog::set_level(spdlog::level::info);
+#endif
 }
 
 AemberInit::~AemberInit() {
