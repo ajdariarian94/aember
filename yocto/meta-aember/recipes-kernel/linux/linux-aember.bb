@@ -7,8 +7,12 @@ DEPENDS += "elfutils-native"
 SRC_URI = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.68.tar.xz"
 SRC_URI[sha256sum] = "283ff410e3f352ceed161ae30c0020301326059db03e86efcb384d46ac5840e2"
 
+# Base config for all architectures
 SRC_URI += "file://base.cfg"
+
+# Architecture-specific configs
 SRC_URI:append:x86-64 = " file://x64-linux.cfg"
+SRC_URI:append:aarch64 = " file://arm64-linux.cfg"
 
 KERNEL_DANGLING_FEATURES_WARN_ONLY = "1"
 
@@ -22,15 +26,38 @@ STAGING_KERNEL_DIR = "${S}"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/linux-aember:"
 
+# Architecture-specific default configs
 KBUILD_DEFCONFIG:x86-64 = "x86_64_defconfig"
+KBUILD_DEFCONFIG:aarch64 = "defconfig"
 
-# Force disable certificates
+# Force disable certificates (both architectures)
 do_configure:append() {
     sed -i 's/CONFIG_SYSTEM_TRUSTED_KEYS=.*/CONFIG_SYSTEM_TRUSTED_KEYS=""/' ${B}/.config
     sed -i 's/CONFIG_SYSTEM_REVOCATION_KEYS=.*/CONFIG_SYSTEM_REVOCATION_KEYS=""/' ${B}/.config
+    
+    # Generate build manifest for certification
+    cat > ${B}/kernel-build-manifest.txt << EOF
+Aember Kernel Build Manifest
+============================
+Version: ${PV}
+Architecture: ${TARGET_ARCH}
+Machine: ${MACHINE}
+Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+Compiler: $(${KERNEL_CC} --version 2>/dev/null | head -n1 || echo "Unknown")
+Defconfig: ${KBUILD_DEFCONFIG}
+Kernel Image Type: ${KERNEL_IMAGETYPE}
+EOF
+}
+
+# Deploy manifest with kernel
+do_deploy:append() {
+    install -m 0644 ${B}/kernel-build-manifest.txt ${DEPLOYDIR}/
 }
 
 # Skip buildpaths QA check - common for kernel packages
 INSANE_SKIP:${PN} += "buildpaths"
 INSANE_SKIP:${PN}-src += "buildpaths"
 INSANE_SKIP:kernel-vmlinux += "buildpaths"
+
+# Compatible with both architectures
+COMPATIBLE_MACHINE = "x64-linux|arm64-linux"
