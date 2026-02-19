@@ -14,6 +14,7 @@ keypairs
 #Ignore yocto resources
 # Build directory
 **/yocto/resources/**
+**/yocto/build/**
 
 **/aember-image/recipes-core/aember/files/aember
 
