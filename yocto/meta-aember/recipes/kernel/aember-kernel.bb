@@ -30,11 +30,13 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/linux-aember:"
 KBUILD_DEFCONFIG:x86-64 = "x86_64_defconfig"
 KBUILD_DEFCONFIG:aarch64 = "defconfig"
 
+CUSTOM_OUTDIR = "${TOPDIR}/../build/${MACHINE}/kernel/"
+
 # Force disable certificates (both architectures)
 do_configure:append() {
     sed -i 's/CONFIG_SYSTEM_TRUSTED_KEYS=.*/CONFIG_SYSTEM_TRUSTED_KEYS=""/' ${B}/.config
     sed -i 's/CONFIG_SYSTEM_REVOCATION_KEYS=.*/CONFIG_SYSTEM_REVOCATION_KEYS=""/' ${B}/.config
-    
+
     # Generate build manifest for certification
     cat > ${B}/kernel-build-manifest.txt << EOF
 Aember Kernel Build Manifest
@@ -49,9 +51,27 @@ Kernel Image Type: ${KERNEL_IMAGETYPE}
 EOF
 }
 
-# Deploy manifest with kernel
+# Deploy manifest and kernel artifacts to custom output location
 do_deploy:append() {
     install -m 0644 ${B}/kernel-build-manifest.txt ${DEPLOYDIR}/
+
+    # Copy to custom output location
+    install -d ${CUSTOM_OUTDIR}
+    install -m 0644 ${B}/kernel-build-manifest.txt ${CUSTOM_OUTDIR}/
+
+    # Copy kernel image (bzImage for x86_64, Image for aarch64)
+    for img in ${DEPLOYDIR}/${KERNEL_IMAGETYPE}*; do
+        [ -f "$img" ] && install -m 0644 "$img" ${CUSTOM_OUTDIR}/
+    done
+
+    # Copy DTBs if present (aarch64)
+    if [ -d ${DEPLOYDIR}/dtb ]; then
+        cp -r ${DEPLOYDIR}/dtb ${CUSTOM_OUTDIR}/
+    fi
+
+    # Copy Module.symvers and System.map for out-of-tree module builds
+    [ -f ${B}/Module.symvers ] && install -m 0644 ${B}/Module.symvers ${CUSTOM_OUTDIR}/
+    [ -f ${B}/System.map ] && install -m 0644 ${B}/System.map ${CUSTOM_OUTDIR}/
 }
 
 # Skip buildpaths QA check - common for kernel packages
