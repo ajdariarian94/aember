@@ -5,8 +5,6 @@ LICENSE = "GPL-2.0-only"
 
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0-only;md5=801f80980d171dd6425610833a22dbe6"
 
-CUSTOM_OUTDIR = "${TOPDIR}/../build/${MACHINE}/busybox/"
-
 # ---- Release version ----
 PV = "1.36.1"
 
@@ -18,13 +16,19 @@ SRC_URI[sha256sum] = "b8cc24c9574d809e7279c3be349795c5d5ceb6fdf19ca709f80cde50e4
 SRC_URI += "file://base.cfg"
 SRC_URI:append:x86-64 = " file://x64-linux.cfg"
 SRC_URI:append:aarch64 = " file://arm64-linux.cfg"
+SRC_URI:append:arm = " file://arm-linux.cfg"
 
 # ---- Important fix: sources must be relative to UNPACKDIR ----
 S = "${UNPACKDIR}/busybox-${PV}"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/aember-busybox/files:"
 
+# ---- perl-native provides pod2text/pod2man/pod2html for docs ----
+DEPENDS += "perl-native"
+
 inherit pkgconfig deploy
+
+CUSTOM_OUTDIR = "/aember_ws/aember/yocto/build/${MACHINE}/busybox/"
 
 # ---- Merge a config fragment into .config, respecting disable lines ----
 merge_cfg() {
@@ -47,8 +51,8 @@ merge_cfg() {
 
 # ---- Configure step ----
 do_configure() {
-    oe_runmake distclean
-    oe_runmake defconfig
+    oe_runmake CROSS_COMPILE=${TARGET_PREFIX} distclean
+    oe_runmake CROSS_COMPILE=${TARGET_PREFIX} defconfig
 
     merge_cfg ${UNPACKDIR}/base.cfg
 
@@ -56,16 +60,39 @@ do_configure() {
         merge_cfg ${UNPACKDIR}/x64-linux.cfg
     elif [ "${TARGET_ARCH}" = "aarch64" ]; then
         merge_cfg ${UNPACKDIR}/arm64-linux.cfg
+    elif [ "${TARGET_ARCH}" = "arm" ]; then
+        merge_cfg ${UNPACKDIR}/arm-linux.cfg
     fi
 
-    yes "" | oe_runmake oldconfig
+    if [ "${TARGET_ARCH}" = "arm" ]; then
+        yes "" | oe_runmake \
+            CROSS_COMPILE=${TARGET_PREFIX} \
+            "EXTRA_CFLAGS=-std=gnu11 --sysroot=${RECIPE_SYSROOT} -mfloat-abi=hard -mfpu=neon" \
+            "EXTRA_LDFLAGS=--sysroot=${RECIPE_SYSROOT}" \
+            oldconfig
+    else
+        yes "" | oe_runmake \
+            CROSS_COMPILE=${TARGET_PREFIX} \
+            "EXTRA_CFLAGS=-std=gnu11 --sysroot=${RECIPE_SYSROOT}" \
+            "EXTRA_LDFLAGS=--sysroot=${RECIPE_SYSROOT}" \
+            oldconfig
+    fi
 }
 
 # ---- Compile step ----
 do_compile() {
-    oe_runmake -j${@oe.utils.cpu_count()}
+    if [ "${TARGET_ARCH}" = "arm" ]; then
+        oe_runmake -j${@oe.utils.cpu_count()} \
+            CROSS_COMPILE=${TARGET_PREFIX} \
+            "EXTRA_CFLAGS=-std=gnu11 --sysroot=${RECIPE_SYSROOT} -mfloat-abi=hard -mfpu=neon" \
+            "EXTRA_LDFLAGS=--sysroot=${RECIPE_SYSROOT}"
+    else
+        oe_runmake -j${@oe.utils.cpu_count()} \
+            CROSS_COMPILE=${TARGET_PREFIX} \
+            "EXTRA_CFLAGS=-std=gnu11 --sysroot=${RECIPE_SYSROOT}" \
+            "EXTRA_LDFLAGS=--sysroot=${RECIPE_SYSROOT}"
+    fi
 
-    # Certification-friendly manifest
     cat > ${B}/busybox-build-manifest.txt << EOF
 Aember BusyBox Build Manifest
 =============================
@@ -80,16 +107,15 @@ EOF
 # ---- Install step ----
 do_install() {
     install -d ${D}${bindir}
-    install -m 0755 busybox ${D}${bindir}/busybox
+    install -m 0755 ${B}/busybox ${D}${bindir}/busybox
 }
 
-# ---- Deploy manifest with the build ----
+# ---- Deploy artifacts to custom output location ----
 do_deploy() {
     install -d ${DEPLOYDIR}
     install -m 0755 ${B}/busybox ${DEPLOYDIR}/busybox
     install -m 0644 ${B}/busybox-build-manifest.txt ${DEPLOYDIR}/
 
-    # Also copy to our custom output location
     install -d ${CUSTOM_OUTDIR}
     install -m 0755 ${B}/busybox ${CUSTOM_OUTDIR}/busybox
     install -m 0644 ${B}/busybox-build-manifest.txt ${CUSTOM_OUTDIR}/
@@ -101,4 +127,4 @@ addtask deploy after do_compile before do_build
 INSANE_SKIP:${PN} += "buildpaths already-stripped"
 
 # ---- Compatible machines (mirrors kernel recipe) ----
-COMPATIBLE_MACHINE = "x64-linux|arm64-linux"
+COMPATIBLE_MACHINE = "x64-linux|arm64-linux|arm-linux"

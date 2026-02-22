@@ -13,6 +13,7 @@ SRC_URI += "file://base.cfg"
 # Architecture-specific configs
 SRC_URI:append:x86-64 = " file://x64-linux.cfg"
 SRC_URI:append:aarch64 = " file://arm64-linux.cfg"
+SRC_URI:append:arm = " file://arm-linux.cfg"
 
 KERNEL_DANGLING_FEATURES_WARN_ONLY = "1"
 
@@ -29,10 +30,11 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/linux-aember:"
 # Architecture-specific default configs
 KBUILD_DEFCONFIG:x86-64 = "x86_64_defconfig"
 KBUILD_DEFCONFIG:aarch64 = "defconfig"
+KBUILD_DEFCONFIG:arm = "multi_v7_defconfig"
 
 CUSTOM_OUTDIR = "${TOPDIR}/../build/${MACHINE}/kernel/"
 
-# Force disable certificates (both architectures)
+# Force disable certificates (all architectures)
 do_configure:append() {
     sed -i 's/CONFIG_SYSTEM_TRUSTED_KEYS=.*/CONFIG_SYSTEM_TRUSTED_KEYS=""/' ${B}/.config
     sed -i 's/CONFIG_SYSTEM_REVOCATION_KEYS=.*/CONFIG_SYSTEM_REVOCATION_KEYS=""/' ${B}/.config
@@ -59,12 +61,12 @@ do_deploy:append() {
     install -d ${CUSTOM_OUTDIR}
     install -m 0644 ${B}/kernel-build-manifest.txt ${CUSTOM_OUTDIR}/
 
-    # Copy kernel image (bzImage for x86_64, Image for aarch64)
+    # Copy kernel image (bzImage for x86_64, Image for aarch64, zImage for arm)
     for img in ${DEPLOYDIR}/${KERNEL_IMAGETYPE}*; do
         [ -f "$img" ] && install -m 0644 "$img" ${CUSTOM_OUTDIR}/
     done
 
-    # Copy DTBs if present (aarch64)
+    # Copy DTBs if present (aarch64 and arm)
     if [ -d ${DEPLOYDIR}/dtb ]; then
         cp -r ${DEPLOYDIR}/dtb ${CUSTOM_OUTDIR}/
     fi
@@ -79,5 +81,5 @@ INSANE_SKIP:${PN} += "buildpaths"
 INSANE_SKIP:${PN}-src += "buildpaths"
 INSANE_SKIP:kernel-vmlinux += "buildpaths"
 
-# Compatible with both architectures
-COMPATIBLE_MACHINE = "x64-linux|arm64-linux"
+# Compatible with all architectures
+COMPATIBLE_MACHINE = "x64-linux|arm64-linux|arm-linux"
