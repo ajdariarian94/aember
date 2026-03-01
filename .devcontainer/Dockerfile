@@ -125,7 +125,6 @@ RUN locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 
-
 # ---- Setup virtual environment ----
 RUN python3 -m venv /venv
 RUN /venv/bin/pip install --upgrade pip
