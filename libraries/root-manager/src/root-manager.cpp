@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include <fstream>
+#include <sstream>
 #include <vector>
 
 namespace aember::root_manager {
@@ -18,6 +19,41 @@ namespace aember::root_manager {
 static std::string ErrnoString(const char* action) {
   return std::string(action) + ": errno=" + std::to_string(errno) + " (" +
          strerror(errno) + ")";
+}
+
+void RootConfig::ParseFromProcCmdline(const std::string& path) {
+  std::ifstream file(path);
+  if (!file.is_open()) { throw std::runtime_error("Failed to open " + path); }
+
+  std::string line;
+  std::getline(file, line);
+
+  std::istringstream iss(line);
+  std::string token;
+
+  while (iss >> token) {
+    auto pos = token.find('=');
+    if (pos == std::string::npos) continue;
+
+    std::string key = token.substr(0, pos);
+    std::string value = token.substr(pos + 1);
+
+    if (key == "root") {
+      device = value;
+    } else if (key == "rootfstype") {
+      fstype = value;
+    } else if (key == "rootflags") {
+      mount_options = value;
+    }
+  }
+
+  if (device.empty()) {
+    throw std::runtime_error("Kernel parameter 'root=' is missing");
+  }
+
+  if (fstype.empty()) { fstype = "ext4"; }
+
+  if (mount_options.empty()) { mount_options = "rw"; }
 }
 
 RootManager::RootManager(aember::mount_manager::MountManager& mount_manager)

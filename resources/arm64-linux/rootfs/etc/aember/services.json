@@ -1,7 +1,10 @@
 {
-    "name": "test-service",
-    "exec": "/bin/sh",
-    "args": ["-c", "while true; do echo '[test-service] running'; sleep 1; done"],
-    "autostart": true,
-    "restart": "always"
+  "services": [
+    {
+      "name": "echo-aember",
+      "command": "/usr/bin/echo-aember",
+      "args": [""],
+      "restart_policy": "always"
+    }
+  ]
 }

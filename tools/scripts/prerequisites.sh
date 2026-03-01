@@ -3,6 +3,20 @@
 set -e
 
 ###############################################################################
+# Disable AppArmor restriction for unprivileged user namespaces
+###############################################################################
+APPARMOR_LINE="echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+
+# Apply immediately
+echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+# Add to ~/.bashrc only once
+if ! grep -Fxq "$APPARMOR_LINE" ~/.bashrc; then
+    echo "$APPARMOR_LINE" >> ~/.bashrc
+    echo "Added AppArmor userns restriction disable to ~/.bashrc"
+fi
+
+###############################################################################
 # X11 access for containers
 ###############################################################################
 if ! grep -Fxq "xhost +local:root" ~/.bashrc; then

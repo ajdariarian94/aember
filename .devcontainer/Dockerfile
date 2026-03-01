@@ -125,7 +125,6 @@ RUN locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 
-
 # ---- Setup virtual environment ----
 RUN python3 -m venv /venv
 RUN /venv/bin/pip install --upgrade pip
@@ -133,57 +132,6 @@ RUN /venv/bin/pip install --upgrade pip
 # Copy Python dependencies and install
 COPY ./requirements.txt /usr
 RUN /venv/bin/pip install --no-cache-dir -r /usr/requirements.txt
-
-# ---- Clone and build BusyBox ----
-RUN git clone https://github.com/mirror/busybox.git /tmp/busybox-src
-
-# ---- Build BusyBox for x86_64 (native) ----
-RUN mkdir -p /tmp/busybox-x86 && cp -r /tmp/busybox-src/* /tmp/busybox-x86 && \
-    cd /tmp/busybox-x86 && \
-    make distclean && \
-    make defconfig && \
-    sed -i 's/^CONFIG_TC=.*/# CONFIG_TC is not set/' .config && \
-    sed -i 's/^CONFIG_IFCONFIG=.*/# CONFIG_IFCONFIG is not set/' .config && \
-    sed -i 's/^CONFIG_ROUTE=.*/# CONFIG_ROUTE is not set/' .config && \
-    make -j$(nproc) && \
-    mkdir -p /usr/local/bin/x64-linux && \
-    cp busybox /usr/local/bin/x64-linux/busybox
-
-# ---- Build BusyBox for ARM64 (aarch64) ----
-RUN mkdir -p /tmp/busybox-aarch64 && cp -r /tmp/busybox-src/* /tmp/busybox-aarch64 && \
-    cd /tmp/busybox-aarch64 && \
-    make distclean && \
-    make defconfig && \
-    sed -i 's/^CONFIG_TC=.*/# CONFIG_TC is not set/; \
-            s/^CONFIG_IFCONFIG=.*/# CONFIG_IFCONFIG is not set/; \
-            s/^CONFIG_ROUTE=.*/# CONFIG_ROUTE is not set/; \
-            s/^CONFIG_NSENTER=.*/# CONFIG_NSENTER is not set/; \
-            s/^CONFIG_UNSHARE=.*/# CONFIG_UNSHARE is not set/; \
-            s/^CONFIG_SHA1_HWACCEL=.*/# CONFIG_SHA1_HWACCEL is not set/; \
-            s/^CONFIG_SHA256_HWACCEL=.*/# CONFIG_SHA256_HWACCEL is not set/' .config && \
-    yes "" | make CROSS_COMPILE=aarch64-linux-gnu- oldconfig && \
-    make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) && \
-    mkdir -p /usr/local/bin/arm64-linux && \
-    cp busybox /usr/local/bin/arm64-linux/busybox && \
-    cp /usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1
-
-# ---- Build BusyBox for ARM32 (armhf) ----
-RUN mkdir -p /tmp/busybox-armhf && cp -r /tmp/busybox-src/* /tmp/busybox-armhf && \
-    cd /tmp/busybox-armhf && \
-    make distclean && \
-    make defconfig && \
-    sed -i 's/^CONFIG_TC=.*/# CONFIG_TC is not set/; \
-            s/^CONFIG_IFCONFIG=.*/# CONFIG_IFCONFIG is not set/; \
-            s/^CONFIG_ROUTE=.*/# CONFIG_ROUTE is not set/; \
-            s/^CONFIG_NSENTER=.*/# CONFIG_NSENTER is not set/; \
-            s/^CONFIG_UNSHARE=.*/# CONFIG_UNSHARE is not set/; \
-            s/^CONFIG_SHA1_HWACCEL=.*/# CONFIG_SHA1_HWACCEL is not set/; \
-            s/^CONFIG_SHA256_HWACCEL=.*/# CONFIG_SHA256_HWACCEL is not set/' .config && \
-    yes "" | make CROSS_COMPILE=arm-linux-gnueabihf- oldconfig && \
-    make CROSS_COMPILE=arm-linux-gnueabihf- -j$(nproc) && \
-    mkdir -p /usr/local/bin/arm-linux && \
-    cp busybox /usr/local/bin/arm-linux/busybox && \
-    cp /usr/arm-linux-gnueabihf/lib/ld-linux-armhf.so.3 /lib/ld-linux-armhf.so.3 
 
 # Fix permissions (user was created earlier)
 RUN chown -R ${UID}:${GID} /venv && chmod -R 755 /venv

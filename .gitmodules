@@ -4,3 +4,7 @@
 [submodule "aember-cli.git"]
 	path = aember-cli
 	url = git@aember:ajdariarian94/aember-cli.git
+[submodule "yocto/poky"]
+	path = yocto/poky
+	url = git@aember:ajdariarian94/poky.git
+	branch = kirkstone

@@ -13,8 +13,8 @@ keypairs
 
 #Ignore yocto resources
 # Build directory
-resources/poky/poky-cache
-resources/poky/poky-recipes/**/cache
+**/yocto/resources/**
+**/yocto/build/**
 
 **/aember-image/recipes-core/aember/files/aember
 
