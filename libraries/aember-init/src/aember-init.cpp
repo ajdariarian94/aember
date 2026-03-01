@@ -49,10 +49,7 @@ void AemberInit::StartInitramfs() {
       std::make_unique<aember::root_manager::RootManager>(*mount_manager_);
 
   aember::root_manager::RootConfig root_config;
-  root_config.device = "/dev/sda1";  // TODO: parse /proc/cmdline or UUID/LABEL
-  root_config.fstype = "ext4";
-  root_config.mount_options = "rw";
-  root_config.new_root_path = "/mnt/root";
+  root_config.ParseFromProcCmdline();
 
   if (!mount_manager_->EnsureDirectory(root_config.new_root_path)) {
     log_.error("Failed to create pivot mount point: {}",

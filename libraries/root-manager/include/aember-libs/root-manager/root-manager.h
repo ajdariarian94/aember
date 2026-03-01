@@ -9,12 +9,14 @@
 namespace aember::root_manager {
 
 struct RootConfig {
-  std::string device;         // e.g., "/dev/sda1", "UUID=xxx", "LABEL=xxx"
-  std::string fstype;         // e.g., "ext4", "btrfs", "xfs"
-  std::string mount_options;  // e.g., "ro,noatime"
-  std::string new_root_path;  // Where to mount new root (usually "/mnt/root")
+  std::string device;         // "/dev/sda1", "UUID=xxx", "LABEL=xxx"
+  std::string fstype;         // "ext4", "btrfs", etc.
+  std::string mount_options;  // "ro,noatime"
+  std::string new_root_path;  // mount target (default "/mnt/root")
 
   RootConfig() : new_root_path("/mnt/root") {}
+
+  void ParseFromProcCmdline(const std::string& path = "/proc/cmdline");
 };
 
 class RootManager {
