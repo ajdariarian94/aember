@@ -88,6 +88,14 @@ void AemberInit::StartRoot() {
     log_.warn("Some early filesystems failed to mount, continuing anyway");
   }
 
+  debug_shell_.emplace();
+  if (!debug_shell_) { log_.warn("Debug Shell not available"); }
+
+  // ----------------------------
+  // Check debug shell
+  // ----------------------------
+  bool debug_shell = debug_shell_->CheckDebugShell();
+
   // ----------------------------
   // Initialize Service Manager
   // ----------------------------
@@ -118,7 +126,18 @@ void AemberInit::StartRoot() {
       }
     }
 
-    service_manager_->StartAll();
+    if (debug_shell) {
+      // Silence PID1 first so services and shell don't pollute each other
+      debug_shell_->SilenceAemberInBackground();
+
+      // Start services — they inherit /dev/null
+      service_manager_->StartAll();
+
+      // Block in debug shell, services already running in background
+      debug_shell_->SpawnDebugShell();
+    } else {
+      service_manager_->StartAll();
+    }
   } else {
     log_.warn("No service configuration found at {}", config_path);
   }

@@ -29,6 +29,27 @@ set_target_properties(${LOGGING_TARGET}
                       PROPERTIES EXPORT_NAME ${COMPONENT}::${LOGGING_COMPONENT})
 
 # -----------------------------------------------------------------------------
+# Shell subcomponent
+# -----------------------------------------------------------------------------
+
+set(SHELL_COMPONENT "shell")
+set(SHELL_TARGET "${COMPONENT}_${SHELL_COMPONENT}") # utils_shell
+
+add_library(${SHELL_TARGET} STATIC src/shell/debug-shell.cpp)
+
+add_library(${PROJECT_NAME}::${COMPONENT}::${SHELL_COMPONENT} ALIAS
+            ${SHELL_TARGET})
+
+target_include_directories(
+  ${SHELL_TARGET} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+target_link_libraries(${SHELL_TARGET} PUBLIC aember-libs::utils)
+
+set_target_properties(${SHELL_TARGET}
+                      PROPERTIES EXPORT_NAME ${COMPONENT}::${SHELL_COMPONENT})
+
+# -----------------------------------------------------------------------------
 # Signal subcomponent
 # -----------------------------------------------------------------------------
 
@@ -83,7 +104,7 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Install targets
 install(
-  TARGETS ${COMPONENT} ${LOGGING_TARGET} ${SIGNAL_TARGET}
+  TARGETS ${COMPONENT} ${LOGGING_TARGET} ${SHELL_TARGET} ${SIGNAL_TARGET}
   EXPORT ${COMPONENT}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

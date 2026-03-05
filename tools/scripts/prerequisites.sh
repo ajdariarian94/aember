@@ -3,22 +3,27 @@
 set -e
 
 ###############################################################################
-# Disable AppArmor restriction for unprivileged user namespaces
+# Permanently disable AppArmor restriction for unprivileged user namespaces
+# (Required for Yocto inside Docker)
 ###############################################################################
-APPARMOR_LINE="echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+
+SYSCTL_CONF="/etc/sysctl.d/99-yocto-docker-userns.conf"
+SYSCTL_LINE="kernel.apparmor_restrict_unprivileged_userns = 0"
+
+# Create sysctl config if not already present
+if ! sudo grep -Fxq "$SYSCTL_LINE" "$SYSCTL_CONF" 2>/dev/null; then
+    echo "Configuring permanent AppArmor userns setting..."
+    echo "$SYSCTL_LINE" | sudo tee "$SYSCTL_CONF" >/dev/null
+fi
 
 # Apply immediately
-echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
-
-# Add to ~/.bashrc only once
-if ! grep -Fxq "$APPARMOR_LINE" ~/.bashrc; then
-    echo "$APPARMOR_LINE" >> ~/.bashrc
-    echo "Added AppArmor userns restriction disable to ~/.bashrc"
-fi
+echo "Applying AppArmor userns setting..."
+sudo sysctl -p "$SYSCTL_CONF"
 
 ###############################################################################
 # X11 access for containers
 ###############################################################################
+
 if ! grep -Fxq "xhost +local:root" ~/.bashrc; then
     echo "xhost +local:root" >> ~/.bashrc
 fi
@@ -26,10 +31,10 @@ fi
 ###############################################################################
 # Export Docker GID (host)
 ###############################################################################
+
 if getent group docker >/dev/null 2>&1; then
     DOCKER_GID=$(getent group docker | cut -d: -f3)
 
-    # Add export only once
     if ! grep -Fxq "export DOCKER_GID=${DOCKER_GID}" ~/.bashrc; then
         echo "export DOCKER_GID=${DOCKER_GID}" >> ~/.bashrc
         echo "Added DOCKER_GID=${DOCKER_GID} to ~/.bashrc"
@@ -41,6 +46,7 @@ fi
 ###############################################################################
 # Git submodules
 ###############################################################################
+
 if [ -f ".gitmodules" ]; then
     echo "Initializing and updating git submodules..."
     git submodule init

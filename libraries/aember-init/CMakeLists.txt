@@ -25,6 +25,7 @@ target_link_libraries(
          aember-libs::root-manager
          aember-libs::service-manager
          aember-libs::utils::logging
+         aember-libs::utils::shell
          aember-libs::utils::signal)
 
 set_target_properties(
