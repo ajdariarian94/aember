@@ -7,66 +7,21 @@ set(COMPONENT "utils")
 set(${COMPONENT}_${PROJECT_NAME}_VERSION ${VERSION})
 
 # -----------------------------------------------------------------------------
-# Logging subcomponent
+# Sub-components
 # -----------------------------------------------------------------------------
 
 set(LOGGING_COMPONENT "logging")
 set(LOGGING_TARGET "${COMPONENT}_${LOGGING_COMPONENT}") # utils_logging
 
-add_library(${LOGGING_TARGET} STATIC src/logging/logging.cpp)
-
-add_library(${PROJECT_NAME}::${COMPONENT}::${LOGGING_COMPONENT} ALIAS
-            ${LOGGING_TARGET})
-
-target_include_directories(
-  ${LOGGING_TARGET}
-  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-
-target_link_libraries(${LOGGING_TARGET} PUBLIC spdlog::spdlog)
-
-set_target_properties(${LOGGING_TARGET}
-                      PROPERTIES EXPORT_NAME ${COMPONENT}::${LOGGING_COMPONENT})
-
-# -----------------------------------------------------------------------------
-# Shell subcomponent
-# -----------------------------------------------------------------------------
-
 set(SHELL_COMPONENT "shell")
 set(SHELL_TARGET "${COMPONENT}_${SHELL_COMPONENT}") # utils_shell
-
-add_library(${SHELL_TARGET} STATIC src/shell/debug-shell.cpp)
-
-add_library(${PROJECT_NAME}::${COMPONENT}::${SHELL_COMPONENT} ALIAS
-            ${SHELL_TARGET})
-
-target_include_directories(
-  ${SHELL_TARGET} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-
-target_link_libraries(${SHELL_TARGET} PUBLIC aember-libs::utils)
-
-set_target_properties(${SHELL_TARGET}
-                      PROPERTIES EXPORT_NAME ${COMPONENT}::${SHELL_COMPONENT})
-
-# -----------------------------------------------------------------------------
-# Signal subcomponent
-# -----------------------------------------------------------------------------
 
 set(SIGNAL_COMPONENT "signal")
 set(SIGNAL_TARGET "${COMPONENT}_${SIGNAL_COMPONENT}") # utils_signal
 
-add_library(${SIGNAL_TARGET} STATIC src/signal/signal.cpp)
-
-add_library(${PROJECT_NAME}::${COMPONENT}::${SIGNAL_COMPONENT} ALIAS
-            ${SIGNAL_TARGET})
-
-target_include_directories(
-  ${SIGNAL_TARGET} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-                          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-
-set_target_properties(${SIGNAL_TARGET}
-                      PROPERTIES EXPORT_NAME ${COMPONENT}::${SIGNAL_COMPONENT})
+add_subdirectory(logging)
+add_subdirectory(shell)
+add_subdirectory(signal)
 
 # -----------------------------------------------------------------------------
 # Umbrella component target (empty)
@@ -100,7 +55,9 @@ configure_package_config_file(
 )
 
 # Install headers
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY logging/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY shell/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY signal/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Install targets
 install(
@@ -121,14 +78,3 @@ install(
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
               ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT})
-
-# -----------------------------------------------------------------------------
-# Tests
-# -----------------------------------------------------------------------------
-
-if(BUILD_TESTS)
-  include(CTest)
-  enable_testing()
-
-  add_subdirectory(tests)
-endif()
