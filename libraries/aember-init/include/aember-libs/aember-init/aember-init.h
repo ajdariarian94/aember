@@ -18,6 +18,7 @@
 #include <aember-libs/root-manager/root-manager.h>
 #include <aember-libs/service-manager/service-manager.h>
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/shell/debug-shell.h>
 #include <aember-libs/utils/signal/signal.h>
 
 #include <atomic>
@@ -185,6 +186,8 @@ class AemberInit {
    * dependency management and restart policies.
    */
   std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
+
+  std::optional<aember::utils::DebugShell> debug_shell_;
 
   /**
    * @brief Logger instance for the init system.
