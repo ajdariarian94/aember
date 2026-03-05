@@ -13,3 +13,14 @@ target_include_directories(
 
 set_target_properties(${SIGNAL_TARGET}
                       PROPERTIES EXPORT_NAME ${COMPONENT}::${SIGNAL_COMPONENT})
+
+# -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
+
+if(BUILD_TESTS)
+  include(CTest)
+  enable_testing()
+
+  add_subdirectory(tests)
+endif()

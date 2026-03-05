@@ -15,3 +15,14 @@ target_link_libraries(${SHELL_TARGET} PUBLIC aember-libs::utils)
 
 set_target_properties(${SHELL_TARGET}
                       PROPERTIES EXPORT_NAME ${COMPONENT}::${SHELL_COMPONENT})
+
+# -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
+
+if(BUILD_TESTS)
+  include(CTest)
+  enable_testing()
+
+  # add_subdirectory(tests)
+endif()

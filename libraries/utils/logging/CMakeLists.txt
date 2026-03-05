@@ -16,3 +16,14 @@ target_link_libraries(${LOGGING_TARGET} PUBLIC spdlog::spdlog)
 
 set_target_properties(${LOGGING_TARGET}
                       PROPERTIES EXPORT_NAME ${COMPONENT}::${LOGGING_COMPONENT})
+
+# -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
+
+if(BUILD_TESTS)
+  include(CTest)
+  enable_testing()
+
+  add_subdirectory(tests)
+endif()

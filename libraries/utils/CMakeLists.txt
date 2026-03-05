@@ -78,14 +78,3 @@ install(
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
               ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT})
-
-# -----------------------------------------------------------------------------
-# Tests
-# -----------------------------------------------------------------------------
-
-if(BUILD_TESTS)
-  include(CTest)
-  enable_testing()
-
-  add_subdirectory(tests)
-endif()
