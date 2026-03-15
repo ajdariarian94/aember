@@ -88,6 +88,13 @@ void AemberInit::StartRoot() {
     log_.warn("Some early filesystems failed to mount, continuing anyway");
   }
 
+  // ----------------------------
+  // Enable file logging.
+  // Injects the file sink into all existing loggers (including log_)
+  // and stores it globally for any loggers created afterwards.
+  // ----------------------------
+  aember::utils::enable_file_logging("/var/log/aember-init.log");
+
   debug_shell_.emplace();
   if (!debug_shell_) { log_.warn("Debug Shell not available"); }
 
@@ -127,13 +134,11 @@ void AemberInit::StartRoot() {
     }
 
     if (debug_shell) {
-      // Silence PID1 first so services and shell don't pollute each other
-      debug_shell_->SilenceAemberInBackground();
-
-      // Start services — they inherit /dev/null
+      spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
+      aember::utils::enable_console_silence();  // drop stdout sink cleanly
+      debug_shell_
+          ->SilenceAemberInBackground();  // now dup2 is just a safety net
       service_manager_->StartAll();
-
-      // Block in debug shell, services already running in background
       debug_shell_->SpawnDebugShell();
     } else {
       service_manager_->StartAll();
