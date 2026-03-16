@@ -13,10 +13,13 @@
 #include <spdlog/logger.h>
 #include <spdlog/spdlog.h>
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
 namespace aember::utils {
+
+void enable_console_silence();
 
 /**
  * @brief Initialize early logging to stdout.
@@ -29,17 +32,19 @@ void init_early_logging();
 /**
  * @brief Enable file logging after pivot_root.
  *
- * Must be called once the real root filesystem is mounted. Applies to all
- * existing and future loggers.
+ * Must be called once the real root filesystem is mounted. Injects the
+ * file sink into all existing loggers and stores it globally so that
+ * any Logger constructed afterwards also receives it.
  *
- * @param log_file_path Path to the log file.
+ * @param path Path to the log file.
  */
-void enable_file_logging(const std::string& log_file_path);
+void enable_file_logging(const std::filesystem::path& path);
 
 /**
  * @brief Lightweight per-component logger.
  *
- * Always inherits global sink configuration.
+ * Always inherits global sink configuration, including the file sink
+ * if enable_file_logging() has already been called.
  * Provides convenient logging methods with format string support.
  */
 class Logger {
