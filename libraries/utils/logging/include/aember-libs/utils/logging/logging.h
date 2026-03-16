@@ -13,6 +13,7 @@
 #include <spdlog/logger.h>
 #include <spdlog/spdlog.h>
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -37,7 +38,7 @@ void init_early_logging();
  *
  * @param path Path to the log file.
  */
-void enable_file_logging(const std::string& path);
+void enable_file_logging(const std::filesystem::path& path);
 
 /**
  * @brief Lightweight per-component logger.

@@ -10,7 +10,6 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-#include <filesystem>
 #include <mutex>
 #include <vector>
 
@@ -76,14 +75,17 @@ void init_early_logging() {
   spdlog::set_level(spdlog::level::info);
 }
 
-void enable_file_logging(const std::string& path) {
+void enable_file_logging(const std::filesystem::path& path) {
   std::lock_guard lock(sink_mutex);
   if (file_logging_enabled) return;
   file_logging_enabled = true;
 
+  // Ensure directory exists
+  std::filesystem::create_directories(path.parent_path());
+
   // Build the file sink with the same pattern as console
   auto file_sink =
-      std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, false);
+      std::make_shared<spdlog::sinks::basic_file_sink_mt>(path.string(), false);
   file_sink->set_formatter(make_formatter());
   file_sink->set_level(spdlog::level::trace);
 
@@ -100,8 +102,8 @@ void enable_file_logging(const std::string& path) {
   spdlog::flush_every(std::chrono::seconds(1));
 
   spdlog::default_logger()->info("{} file logging initialized: {}",
-                                 std::filesystem::path{path}.filename(),
-                                 path);
+                                 path.filename().c_str(),
+                                 path.string());
 }
 
 Logger::Logger(const std::string& name) {
