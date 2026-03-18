@@ -15,6 +15,7 @@
 #include <aember-libs/config-manager/config-manager.h>
 #include <aember-libs/device-health/heartbeat.h>
 #include <aember-libs/mount-manager/mount-manager.h>
+#include <aember-libs/network-manager/network-manager.h>
 #include <aember-libs/root-manager/root-manager.h>
 #include <aember-libs/service-manager/service-manager.h>
 #include <aember-libs/utils/logging/logging.h>
@@ -188,6 +189,10 @@ class AemberInit {
   std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
 
   std::optional<aember::utils::DebugShell> debug_shell_;
+
+  std::unique_ptr<aember::network::NetworkManager> network_manager_;
+  void OnNetworkStatusCallback(
+      const aember::network::ConnectivityStatus& status);
 
   /**
    * @brief Logger instance for the init system.

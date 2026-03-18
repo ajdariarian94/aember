@@ -15,6 +15,8 @@
 #include <sys/wait.h>
 #include <nlohmann/json.hpp>
 
+#include <fstream>
+
 namespace aember::aember_init {
 
 AemberInit::AemberInit(const std::string& logger_name)
@@ -102,6 +104,38 @@ void AemberInit::StartRoot() {
   // Check debug shell
   // ----------------------------
   bool debug_shell = debug_shell_->CheckDebugShell();
+
+  // ----------------------------
+  // Bring up network interfaces
+  // ----------------------------
+  nlohmann::json net_cfg;
+  std::string net_config_path = "/etc/aember/network.json";
+
+  std::ifstream net_file(net_config_path);
+  if (net_file.is_open()) {
+    try {
+      net_file >> net_cfg;
+
+      network_manager_ = std::make_unique<aember::network::NetworkManager>(
+          net_cfg,
+          std::bind(&AemberInit::OnNetworkStatusCallback,
+                    this,
+                    std::placeholders::_1));
+
+      network_manager_->Start();
+
+      // Block until internet is up (or 60s timeout) before launching services
+      if (!network_manager_->WaitForConnectivity(std::chrono::seconds(30))) {
+        log_.warn("No internet connectivity after 60s, continuing anyway");
+      }
+
+    } catch (const std::exception& e) {
+      log_.error("Failed to initialize NetworkManager: {}", e.what());
+    }
+  } else {
+    log_.warn("No network config found at {}, skipping network setup",
+              net_config_path);
+  }
 
   // ----------------------------
   // Initialize Service Manager
@@ -210,6 +244,12 @@ void AemberInit::Stop() {
     heartbeat_.reset();
   }
 
+  // Stop network manager
+  if (network_manager_) {
+    network_manager_->Stop();
+    network_manager_.reset();
+  }
+
   // Destroy the service manager
   if (service_manager_) { service_manager_.reset(); }
 
@@ -237,6 +277,16 @@ void AemberInit::OnServiceStateChangeCallback(
             name,
             aember::service_manager::ServiceStateToString(old_state),
             aember::service_manager::ServiceStateToString(new_state));
+}
+
+void AemberInit::OnNetworkStatusCallback(
+    const aember::network::ConnectivityStatus& status) {
+  if (status.online) {
+    log_.info(
+        "Network: online via {} rtt={}ms", status.interface, status.rtt_ms);
+  } else {
+    log_.warn("Network: internet connectivity lost");
+  }
 }
 
 void AemberInit::RunLoop() {
