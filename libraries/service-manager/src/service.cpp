@@ -20,7 +20,8 @@ namespace aember::service_manager {
  */
 Service::Service(const ServiceConfig& config) : config_(config) {
   aember::utils::Logger log("service");
-  log.info("Service '{}' created (type: {})", config_.name,
+  log.info("Service '{}' created (type: {})",
+           config_.name,
            config_.type == ServiceType::PROCESS ? "PROCESS" : "CONTAINER");
 }
 

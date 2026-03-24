@@ -2,8 +2,19 @@
   "services": [
     {
       "name": "echo-aember",
+      "type": "process",
       "command": "/usr/bin/echo-aember",
       "args": [""],
+      "restart_policy": "always"
+    },
+    {
+      "name": "alpine-test",
+      "type": "container",
+      "command": "/bin/sh",
+      "args": ["-c", "echo Hello from Alpine!"],
+      "container": {
+        "rootfs": "/var/lib/aember/containers/alpine"
+      },
       "restart_policy": "always"
     }
   ]

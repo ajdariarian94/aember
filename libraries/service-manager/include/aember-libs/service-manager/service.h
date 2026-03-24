@@ -44,8 +44,8 @@ enum class RestartPolicy {
  * @brief Specifications for container-based services.
  */
 struct ContainerSpec {
-  std::string rootfs;               ///< Root filesystem path for the container
-  std::vector<std::string> args;    ///< Arguments passed to container runtime
+  std::string rootfs;             ///< Root filesystem path for the container
+  std::vector<std::string> args;  ///< Arguments passed to container runtime
 };
 
 /**
@@ -61,13 +61,14 @@ struct ServiceConfig {
   std::string command;                             ///< Command to execute
   std::vector<std::string> args;                   ///< Command-line arguments
   std::map<std::string, std::string> environment;  ///< Environment variables
-  std::string working_directory;                   ///< Working directory for the service
+  std::string working_directory;  ///< Working directory for the service
   RestartPolicy restart_policy = RestartPolicy::NEVER;  ///< Restart behavior
-  std::vector<std::string> dependencies;          ///< Services that must start before this one
-  int max_restart_attempts = 5;                    ///< Maximum number of automatic restarts
-  std::chrono::seconds restart_delay{5};          ///< Delay between restarts
-  ServiceType type{ServiceType::PROCESS};         ///< Process or container
-  std::optional<ContainerSpec> container;         ///< Optional container spec
+  std::vector<std::string>
+      dependencies;              ///< Services that must start before this one
+  int max_restart_attempts = 5;  ///< Maximum number of automatic restarts
+  std::chrono::seconds restart_delay{5};   ///< Delay between restarts
+  ServiceType type{ServiceType::PROCESS};  ///< Process or container
+  std::optional<ContainerSpec> container;  ///< Optional container spec
 
   ServiceConfig() = default;
   ServiceConfig(const std::string& n, const std::string& cmd)
@@ -139,7 +140,8 @@ class Service {
   int exit_code_ = 0;                                 ///< Last exit code
   int restart_count_ = 0;                             ///< Restart counter
   std::chrono::system_clock::time_point start_time_;  ///< Start time
-  std::chrono::system_clock::time_point last_restart_time_; ///< Last restart time
+  std::chrono::system_clock::time_point
+      last_restart_time_;     ///< Last restart time
   mutable std::mutex mutex_;  ///< Protects access to state and counters
 };
 

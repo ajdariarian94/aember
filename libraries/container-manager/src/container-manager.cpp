@@ -23,12 +23,18 @@ namespace aember::container_manager {
 
 std::string ContainerStateToString(ContainerState s) {
   switch (s) {
-    case ContainerState::kStopped: return "stopped";
-    case ContainerState::kStarting: return "starting";
-    case ContainerState::kRunning: return "running";
-    case ContainerState::kStopping: return "stopping";
-    case ContainerState::kFailed: return "failed";
-    default: return "unknown";
+    case ContainerState::kStopped:
+      return "stopped";
+    case ContainerState::kStarting:
+      return "starting";
+    case ContainerState::kRunning:
+      return "running";
+    case ContainerState::kStopping:
+      return "stopping";
+    case ContainerState::kFailed:
+      return "failed";
+    default:
+      return "unknown";
   }
 }
 
@@ -77,9 +83,7 @@ void ContainerManager::Stop() {
   running_ = false;
   cv_.notify_all();
 
-  if (monitor_thread_.joinable()) {
-    monitor_thread_.join();
-  }
+  if (monitor_thread_.joinable()) { monitor_thread_.join(); }
 
   std::lock_guard<std::mutex> lock(containers_mutex_);
 
@@ -153,9 +157,7 @@ bool ContainerManager::StopContainer(const std::string& name) {
 
   bool ok = Stop(*e);
 
-  if (!ok) {
-    log_.error("Failed to stop container '{}'", name);
-  }
+  if (!ok) { log_.error("Failed to stop container '{}'", name); }
 
   Release(*e);
 
@@ -195,9 +197,7 @@ ContainerState ContainerManager::GetContainerState(
   std::lock_guard<std::mutex> lock(containers_mutex_);
 
   auto* e = Find(name);
-  if (!e) {
-    return ContainerState::kFailed;
-  }
+  if (!e) { return ContainerState::kFailed; }
 
   return e->state;
 }
@@ -255,8 +255,7 @@ bool ContainerManager::Create(ContainerEntry& e) {
 
   log_.debug("Creating container '{}'", e.config.name);
 
-  e.lxc = lxc_container_new(e.config.name.c_str(),
-                           e.config.lxc_path.c_str());
+  e.lxc = lxc_container_new(e.config.name.c_str(), e.config.lxc_path.c_str());
 
   if (!e.lxc) {
     log_.error("lxc_container_new failed for '{}'", e.config.name);
@@ -286,12 +285,9 @@ bool ContainerManager::Start(ContainerEntry& e) {
   }
   argv.push_back(nullptr);
 
-  bool ok = e.lxc->start(e.lxc, 1,
-                         argv.size() > 1 ? argv.data() : nullptr);
+  bool ok = e.lxc->start(e.lxc, 1, argv.size() > 1 ? argv.data() : nullptr);
 
-  if (!ok) {
-    log_.error("lxc start failed for '{}'", e.config.name);
-  }
+  if (!ok) { log_.error("lxc start failed for '{}'", e.config.name); }
 
   return ok;
 }
@@ -304,8 +300,7 @@ bool ContainerManager::Stop(ContainerEntry& e) {
   log_.debug("Shutting down container '{}'", e.config.name);
 
   if (!e.lxc->shutdown(e.lxc, 5)) {
-    log_.warn("Graceful shutdown failed for '{}', forcing stop",
-              e.config.name);
+    log_.warn("Graceful shutdown failed for '{}', forcing stop", e.config.name);
     return e.lxc->stop(e.lxc);
   }
 
@@ -325,8 +320,7 @@ void ContainerManager::Release(ContainerEntry& e) {
 // ---------------------------------------------------------------------------
 
 void ContainerManager::MonitorLoop() {
-  log_.info("Container monitor started (interval={} ms)",
-            interval_.count());
+  log_.info("Container monitor started (interval={} ms)", interval_.count());
 
   std::unique_lock<std::mutex> lock(cv_mutex_);
 
@@ -335,9 +329,7 @@ void ContainerManager::MonitorLoop() {
 
     {
       std::lock_guard<std::mutex> g(containers_mutex_);
-      for (auto& e : containers_) {
-        Tick(e);
-      }
+      for (auto& e : containers_) { Tick(e); }
     }
 
     lock.lock();
@@ -350,13 +342,11 @@ void ContainerManager::MonitorLoop() {
 void ContainerManager::Tick(ContainerEntry& e) {
   if (!e.lxc) return;
 
-  if (e.state == ContainerState::kRunning &&
-      e.lxc->is_running(e.lxc)) {
+  if (e.state == ContainerState::kRunning && e.lxc->is_running(e.lxc)) {
     return;
   }
 
-  if (e.state == ContainerState::kRunning &&
-      !e.lxc->is_running(e.lxc)) {
+  if (e.state == ContainerState::kRunning && !e.lxc->is_running(e.lxc)) {
     log_.warn("Container '{}' crashed", e.config.name);
 
     SetState(e, ContainerState::kStopped);
@@ -374,16 +364,14 @@ void ContainerManager::Tick(ContainerEntry& e) {
       return;
     }
 
-    e.next_restart_at_ms =
-        NowMs() + e.config.restart_delay_ms;
+    e.next_restart_at_ms = NowMs() + e.config.restart_delay_ms;
 
     log_.info("Scheduling restart for '{}' in {} ms",
               e.config.name,
               e.config.restart_delay_ms);
   }
 
-  if (e.state == ContainerState::kStopped &&
-      e.next_restart_at_ms > 0 &&
+  if (e.state == ContainerState::kStopped && e.next_restart_at_ms > 0 &&
       NowMs() >= e.next_restart_at_ms) {
     log_.info("Restarting container '{}' (attempt {})",
               e.config.name,
@@ -397,8 +385,7 @@ void ContainerManager::Tick(ContainerEntry& e) {
 
       SetState(e, ContainerState::kRunning);
 
-      log_.info("Container '{}' restarted successfully",
-                e.config.name);
+      log_.info("Container '{}' restarted successfully", e.config.name);
     } else {
       log_.error("Restart failed for '{}'", e.config.name);
       SetState(e, ContainerState::kFailed);
@@ -410,8 +397,7 @@ void ContainerManager::Tick(ContainerEntry& e) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-void ContainerManager::SetState(ContainerEntry& e,
-                                ContainerState s) {
+void ContainerManager::SetState(ContainerEntry& e, ContainerState s) {
   if (e.state == s) return;
 
   auto old = e.state;
@@ -422,9 +408,7 @@ void ContainerManager::SetState(ContainerEntry& e,
             ContainerStateToString(old),
             ContainerStateToString(s));
 
-  if (callback_) {
-    callback_(e.config.name, old, s);
-  }
+  if (callback_) { callback_(e.config.name, old, s); }
 }
 
 int64_t ContainerManager::NowMs() {
@@ -440,8 +424,7 @@ ContainerEntry* ContainerManager::Find(const std::string& name) {
   return nullptr;
 }
 
-const ContainerEntry* ContainerManager::Find(
-    const std::string& name) const {
+const ContainerEntry* ContainerManager::Find(const std::string& name) const {
   for (auto& e : containers_) {
     if (e.config.name == name) return &e;
   }

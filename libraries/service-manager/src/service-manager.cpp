@@ -149,7 +149,8 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
     // Placeholder for container spawn logic
     // For now, we simulate container as a "fake PID"
     pid = static_cast<pid_t>(std::hash<std::string>{}(name) & 0x7FFFFFFF);
-    log_.info("Container service '{}' initialized with pseudo-PID {}", name, pid);
+    log_.info(
+        "Container service '{}' initialized with pseudo-PID {}", name, pid);
   }
 
   {
@@ -165,9 +166,7 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
     ChangeServiceState(name, ServiceState::RUNNING);
   }
 
-  if (type == ServiceType::PROCESS) {
-    child_supervisor_.AddChild(pid, name);
-  }
+  if (type == ServiceType::PROCESS) { child_supervisor_.AddChild(pid, name); }
 
   return true;
 }
@@ -309,7 +308,8 @@ void ServiceManager::HandleServiceExit(pid_t pid, int exit_code) {
         !killed_by_signal)
       should_restart = true;
 
-    if (should_restart && service->GetRestartCount() < config.max_restart_attempts) {
+    if (should_restart &&
+        service->GetRestartCount() < config.max_restart_attempts) {
       service->IncrementRestartCount();
       lock.unlock();
       ScheduleRestart(service_name);
