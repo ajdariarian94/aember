@@ -5,17 +5,24 @@
       "type": "process",
       "command": "/usr/bin/echo-aember",
       "args": [""],
-      "restart_policy": "always"
+      "working_directory": "",
+      "environment": {},
+      "restart_policy": "always",
+      "dependencies": [],
+      "max_restart_attempts": 5,
+      "restart_delay": 5
     },
     {
-      "name": "alpine-test",
+      "name": "alpine-echo",
       "type": "container",
-      "command": "/bin/sh",
-      "args": ["-c", "echo Hello from Alpine!"],
       "container": {
-        "rootfs": "/var/lib/aember/containers/alpine"
+        "rootfs": "/var/lib/aember/containers/alpine",
+        "args": ["/echo-alpine.sh"]
       },
-      "restart_policy": "always"
+      "restart_policy": "always",
+      "dependencies": [],
+      "max_restart_attempts": 5,
+      "restart_delay": 5
     }
   ]
 }
