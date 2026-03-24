@@ -165,7 +165,7 @@ struct NetlinkSocket {
 NetworkManager::NetworkManager(
     const nlohmann::json& config,
     std::function<void(const ConnectivityStatus&)> on_status)
-    : on_status_(std::move(on_status)), log_("network_manager") {
+    : on_status_(std::move(on_status)), log_("network-manager") {
   ParseConfig(config);
   iface_states_.assign(config_.interfaces.size(), InterfaceState::kDown);
 }
