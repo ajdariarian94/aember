@@ -1,19 +1,14 @@
 /**
  * @file container_manager.cpp
  * @author Arian Ajdari
- * @brief Library implementation for ContainerManager.
- *        Manages LXC container lifecycle via liblxc directly.
+ * @brief Minimal ContainerManager implementation using LXC
  * @version 0.1
- * @date 2025-07-18
- *
- * @copyright Copyright (c) 2025, Aember, All rights reserved.
+ * @date 2026-03-23
  */
 
 #include <aember-libs/container-manager/container-manager.h>
 
 #include <lxc/lxccontainer.h>
-
-#include <chrono>
 
 namespace aember::container_manager {
 
@@ -42,65 +37,67 @@ std::string ContainerStateToString(ContainerState s) {
 // Ctor / Dtor
 // ---------------------------------------------------------------------------
 
-ContainerManager::ContainerManager(const nlohmann::json& config,
-                                   StateCallback cb)
+ContainerManager::ContainerManager(StateCallback cb)
     : callback_(std::move(cb)), log_("container-manager") {
-  log_.info("Initializing ContainerManager");
-
-  ParseConfig(config);
-
-  log_.info("Loaded {} container(s)", containers_.size());
+  log_.info("ContainerManager initialized");
 }
 
 ContainerManager::~ContainerManager() {
-  Stop();
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  for (auto& e : containers_) {
+    Stop(e);
+    Release(e);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-void ContainerManager::Start() {
-  log_.info("Starting ContainerManager");
+bool ContainerManager::AddContainer(const ContainerConfig& config) {
+  std::lock_guard<std::mutex> lock(mutex_);
 
-  running_ = true;
-
-  for (auto& e : containers_) {
-    if (e.config.auto_start) {
-      log_.info("Auto-starting container '{}'", e.config.name);
-      StartContainer(e.config.name);
-    }
+  if (config.name.empty() || config.rootfs.empty()) {
+    log_.error("Invalid container config (name/rootfs required)");
+    return false;
   }
 
-  monitor_thread_ = std::thread(&ContainerManager::MonitorLoop, this);
+  if (Find(config.name)) {
+    log_.warn("Container '{}' already exists", config.name);
+    return false;
+  }
 
-  log_.info("ContainerManager started");
+  ContainerEntry e;
+  e.config = config;
+
+  containers_.push_back(std::move(e));
+
+  log_.info("Added container '{}' (rootfs={})", config.name, config.rootfs);
+
+  return true;
 }
 
-void ContainerManager::Stop() {
-  log_.info("Stopping ContainerManager");
+bool ContainerManager::RemoveContainer(const std::string& name) {
+  std::lock_guard<std::mutex> lock(mutex_);
 
-  running_ = false;
-  cv_.notify_all();
+  for (auto it = containers_.begin(); it != containers_.end(); ++it) {
+    if (it->config.name == name) {
+      Stop(*it);
+      Release(*it);
+      containers_.erase(it);
 
-  if (monitor_thread_.joinable()) { monitor_thread_.join(); }
-
-  std::lock_guard<std::mutex> lock(containers_mutex_);
-
-  for (auto& e : containers_) {
-    if (e.state == ContainerState::kRunning) {
-      log_.info("Stopping container '{}'", e.config.name);
+      log_.info("Removed container '{}'", name);
+      return true;
     }
-
-    Stop(e);
-    Release(e);
   }
 
-  log_.info("ContainerManager stopped");
+  log_.warn("RemoveContainer: '{}' not found", name);
+  return false;
 }
 
 bool ContainerManager::StartContainer(const std::string& name) {
-  std::lock_guard<std::mutex> lock(containers_mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
 
   auto* e = Find(name);
   if (!e) {
@@ -114,32 +111,24 @@ bool ContainerManager::StartContainer(const std::string& name) {
   }
 
   log_.info("Starting container '{}'", name);
-
   SetState(*e, ContainerState::kStarting);
 
   if (!Create(*e)) {
-    log_.error("Create failed for '{}'", name);
     SetState(*e, ContainerState::kFailed);
     return false;
   }
 
   if (!Start(*e)) {
-    log_.error("Start failed for '{}'", name);
     SetState(*e, ContainerState::kFailed);
     return false;
   }
 
-  e->restart_count = 0;
-  e->started_at_ms = NowMs();
-
   SetState(*e, ContainerState::kRunning);
-
-  log_.info("Container '{}' is now running", name);
   return true;
 }
 
 bool ContainerManager::StopContainer(const std::string& name) {
-  std::lock_guard<std::mutex> lock(containers_mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
 
   auto* e = Find(name);
   if (!e) {
@@ -147,59 +136,23 @@ bool ContainerManager::StopContainer(const std::string& name) {
     return false;
   }
 
-  if (e->state != ContainerState::kRunning) {
-    log_.warn("Container '{}' is not running", name);
-  }
-
   log_.info("Stopping container '{}'", name);
-
   SetState(*e, ContainerState::kStopping);
 
   bool ok = Stop(*e);
 
-  if (!ok) { log_.error("Failed to stop container '{}'", name); }
-
   Release(*e);
-
-  e->stopped_at_ms = NowMs();
   SetState(*e, ok ? ContainerState::kStopped : ContainerState::kFailed);
 
   return ok;
 }
 
-bool ContainerManager::DestroyContainer(const std::string& name) {
-  std::lock_guard<std::mutex> lock(containers_mutex_);
-
-  auto* e = Find(name);
-  if (!e) {
-    log_.error("DestroyContainer: '{}' not found", name);
-    return false;
-  }
-
-  log_.info("Destroying container '{}'", name);
-
-  Stop(*e);
-
-  if (e->lxc) {
-    if (!e->lxc->destroy(e->lxc)) {
-      log_.error("Failed to destroy container '{}'", name);
-    }
-  }
-
-  Release(*e);
-  SetState(*e, ContainerState::kStopped);
-
-  return true;
-}
-
 ContainerState ContainerManager::GetContainerState(
     const std::string& name) const {
-  std::lock_guard<std::mutex> lock(containers_mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
 
   auto* e = Find(name);
-  if (!e) { return ContainerState::kFailed; }
-
-  return e->state;
+  return e ? e->state : ContainerState::kFailed;
 }
 
 bool ContainerManager::IsRunning(const std::string& name) const {
@@ -207,47 +160,7 @@ bool ContainerManager::IsRunning(const std::string& name) const {
 }
 
 // ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
-void ContainerManager::ParseConfig(const nlohmann::json& config) {
-  if (config.contains("monitor_interval_ms")) {
-    interval_ =
-        std::chrono::milliseconds(config["monitor_interval_ms"].get<int>());
-  }
-
-  if (!config.contains("containers")) {
-    log_.warn("No containers defined in config");
-    return;
-  }
-
-  for (auto& j : config["containers"]) {
-    ContainerEntry e;
-
-    e.config.name = j.at("name").get<std::string>();
-    e.config.rootfs = j.at("rootfs").get<std::string>();
-
-    e.config.auto_start = j.value("auto_start", true);
-    e.config.restart_on_crash = j.value("restart_on_crash", true);
-    e.config.restart_delay_ms = j.value("restart_delay_ms", 2000);
-    e.config.max_restarts = j.value("max_restarts", 5);
-
-    if (j.contains("args")) {
-      for (auto& a : j["args"]) {
-        e.config.args.push_back(a.get<std::string>());
-      }
-    }
-
-    log_.info("Configured container '{}' (rootfs={})",
-              e.config.name,
-              e.config.rootfs);
-
-    containers_.push_back(std::move(e));
-  }
-}
-
-// ---------------------------------------------------------------------------
-// LXC
+// LXC lifecycle
 // ---------------------------------------------------------------------------
 
 bool ContainerManager::Create(ContainerEntry& e) {
@@ -255,8 +168,7 @@ bool ContainerManager::Create(ContainerEntry& e) {
 
   log_.debug("Creating container '{}'", e.config.name);
 
-  e.lxc = lxc_container_new(e.config.name.c_str(), e.config.lxc_path.c_str());
-
+  e.lxc = lxc_container_new(e.config.name.c_str(), nullptr);
   if (!e.lxc) {
     log_.error("lxc_container_new failed for '{}'", e.config.name);
     return false;
@@ -277,13 +189,13 @@ bool ContainerManager::Start(ContainerEntry& e) {
     return false;
   }
 
-  log_.debug("Starting LXC container '{}'", e.config.name);
-
   std::vector<char*> argv;
   for (auto& a : e.config.args) {
     argv.push_back(const_cast<char*>(a.c_str()));
   }
   argv.push_back(nullptr);
+
+  log_.debug("Starting LXC container '{}'", e.config.name);
 
   bool ok = e.lxc->start(e.lxc, 1, argv.size() > 1 ? argv.data() : nullptr);
 
@@ -297,10 +209,10 @@ bool ContainerManager::Stop(ContainerEntry& e) {
 
   if (!e.lxc->is_running(e.lxc)) return true;
 
-  log_.debug("Shutting down container '{}'", e.config.name);
+  log_.debug("Stopping LXC container '{}'", e.config.name);
 
   if (!e.lxc->shutdown(e.lxc, 5)) {
-    log_.warn("Graceful shutdown failed for '{}', forcing stop", e.config.name);
+    log_.warn("Shutdown failed, forcing stop '{}'", e.config.name);
     return e.lxc->stop(e.lxc);
   }
 
@@ -312,84 +224,6 @@ void ContainerManager::Release(ContainerEntry& e) {
     log_.debug("Releasing container '{}'", e.config.name);
     lxc_container_put(e.lxc);
     e.lxc = nullptr;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Monitor
-// ---------------------------------------------------------------------------
-
-void ContainerManager::MonitorLoop() {
-  log_.info("Container monitor started (interval={} ms)", interval_.count());
-
-  std::unique_lock<std::mutex> lock(cv_mutex_);
-
-  while (running_) {
-    lock.unlock();
-
-    {
-      std::lock_guard<std::mutex> g(containers_mutex_);
-      for (auto& e : containers_) { Tick(e); }
-    }
-
-    lock.lock();
-    cv_.wait_for(lock, interval_, [this] { return !running_; });
-  }
-
-  log_.info("Container monitor stopped");
-}
-
-void ContainerManager::Tick(ContainerEntry& e) {
-  if (!e.lxc) return;
-
-  if (e.state == ContainerState::kRunning && e.lxc->is_running(e.lxc)) {
-    return;
-  }
-
-  if (e.state == ContainerState::kRunning && !e.lxc->is_running(e.lxc)) {
-    log_.warn("Container '{}' crashed", e.config.name);
-
-    SetState(e, ContainerState::kStopped);
-    e.stopped_at_ms = NowMs();
-
-    if (!e.config.restart_on_crash) {
-      log_.info("Restart disabled for '{}'", e.config.name);
-      return;
-    }
-
-    if (e.config.max_restarts >= 0 &&
-        e.restart_count >= e.config.max_restarts) {
-      log_.error("Container '{}' exceeded max restarts", e.config.name);
-      SetState(e, ContainerState::kFailed);
-      return;
-    }
-
-    e.next_restart_at_ms = NowMs() + e.config.restart_delay_ms;
-
-    log_.info("Scheduling restart for '{}' in {} ms",
-              e.config.name,
-              e.config.restart_delay_ms);
-  }
-
-  if (e.state == ContainerState::kStopped && e.next_restart_at_ms > 0 &&
-      NowMs() >= e.next_restart_at_ms) {
-    log_.info("Restarting container '{}' (attempt {})",
-              e.config.name,
-              e.restart_count + 1);
-
-    e.next_restart_at_ms = 0;
-
-    if (Create(e) && Start(e)) {
-      e.started_at_ms = NowMs();
-      e.restart_count++;
-
-      SetState(e, ContainerState::kRunning);
-
-      log_.info("Container '{}' restarted successfully", e.config.name);
-    } else {
-      log_.error("Restart failed for '{}'", e.config.name);
-      SetState(e, ContainerState::kFailed);
-    }
   }
 }
 
@@ -409,12 +243,6 @@ void ContainerManager::SetState(ContainerEntry& e, ContainerState s) {
             ContainerStateToString(s));
 
   if (callback_) { callback_(e.config.name, old, s); }
-}
-
-int64_t ContainerManager::NowMs() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(
-             std::chrono::steady_clock::now().time_since_epoch())
-      .count();
 }
 
 ContainerEntry* ContainerManager::Find(const std::string& name) {

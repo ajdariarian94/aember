@@ -13,6 +13,7 @@
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/config-manager/config-manager.h>
+#include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/device-health/heartbeat.h>
 #include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/network-manager/network-manager.h>
@@ -193,6 +194,13 @@ class AemberInit {
   std::unique_ptr<aember::network::NetworkManager> network_manager_;
   void OnNetworkStatusCallback(
       const aember::network::ConnectivityStatus& status);
+
+  std::shared_ptr<aember::container_manager::ContainerManager>
+      container_manager_;
+  void OnContainerStateCallback(
+      const std::string& name,
+      aember::container_manager::ContainerState old_state,
+      aember::container_manager::ContainerState new_state);
 
   /**
    * @brief Logger instance for the init system.

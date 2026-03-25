@@ -2,6 +2,9 @@ set(COMPONENT "container-manager")
 
 set(${COMPONENT}_${PROJECT_NAME}_VERSION ${VERSION})
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LXC REQUIRED IMPORTED_TARGET lxc)
+
 # ##############################################################################
 #
 # Library
@@ -16,7 +19,8 @@ target_include_directories(
   ${COMPONENT} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-target_link_libraries(${COMPONENT} PUBLIC aember-libs::utils::logging)
+target_link_libraries(${COMPONENT} PUBLIC aember-libs::utils::logging
+                                          PkgConfig::LXC)
 
 set_target_properties(
   ${COMPONENT} PROPERTIES VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}

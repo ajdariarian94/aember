@@ -29,8 +29,12 @@ namespace aember::service_manager {
 // --------------------------
 
 ServiceManager::ServiceManager(
-    aember::child_supervisor::ChildSupervisor& supervisor)
-    : child_supervisor_(supervisor), log_("service-manager") {
+    aember::child_supervisor::ChildSupervisor& supervisor,
+    std::shared_ptr<aember::container_manager::ContainerManager>
+        container_manager)
+    : child_supervisor_(supervisor),
+      container_manager_(std::move(container_manager)),
+      log_("service-manager") {
   log_.info("ServiceManager initialized");
 }
 
@@ -137,32 +141,46 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
   log_.info("Starting service '{}'{}", name, is_restart ? " (restart)" : "");
 
   pid_t pid = -1;
+  bool success = false;
 
   if (type == ServiceType::PROCESS) {
     pid = SpawnProcess(config_copy);
-    if (pid < 0) {
-      std::lock_guard<std::mutex> lock(mutex_);
-      ChangeServiceState(name, ServiceState::FAILED);
-      return false;
-    }
+    success = (pid >= 0);
   } else if (type == ServiceType::CONTAINER) {
-    // Placeholder for container spawn logic
-    // For now, we simulate container as a "fake PID"
-    pid = static_cast<pid_t>(std::hash<std::string>{}(name) & 0x7FFFFFFF);
-    log_.info(
-        "Container service '{}' initialized with pseudo-PID {}", name, pid);
+    if (!container_manager_) {
+      log_.error("ContainerManager not initialized");
+      success = false;
+    } else {
+      success = container_manager_->StartContainer(name);
+    }
+  }
+
+  if (!success) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ChangeServiceState(name, ServiceState::FAILED);
+    return false;
   }
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto service = services_[name];
-    service->SetPid(pid);
+
+    // Only processes have real PIDs
+    if (type == ServiceType::PROCESS) {
+      service->SetPid(pid);
+      pid_to_service_[pid] = name;
+    } else {
+      // Containers do not use PID tracking here
+      service->SetPid(-1);
+    }
+
     service->SetStartTime();
+
     if (is_restart) {
       service->SetLastRestartTime();
       service->IncrementRestartCount();
     }
-    pid_to_service_[pid] = name;
+
     ChangeServiceState(name, ServiceState::RUNNING);
   }
 
