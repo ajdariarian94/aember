@@ -91,6 +91,14 @@ void AemberInit::StartRoot() {
   }
 
   // ----------------------------
+  // Load kernel modules
+  // ----------------------------
+  module_loader_.emplace();
+  if (!module_loader_->LoadFromConfig("/etc/aember/modules.json")) {
+    log_.warn("Some kernel modules failed to load, continuing anyway");
+  }
+
+  // ----------------------------
   // Enable file logging
   // ----------------------------
   aember::utils::enable_file_logging("/var/log/aember-init.log");
@@ -146,8 +154,7 @@ void AemberInit::StartRoot() {
   // Initialize Service Manager
   // ----------------------------
   service_manager_ = std::make_unique<aember::service_manager::ServiceManager>(
-      child_supervisor_,
-      container_manager_);  // 👈 pass it here
+      child_supervisor_, container_manager_);
 
   service_manager_->SetStateChangeCallback(
       std::bind(&AemberInit::OnServiceStateChangeCallback,

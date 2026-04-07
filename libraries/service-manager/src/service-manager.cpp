@@ -65,6 +65,34 @@ bool ServiceManager::AddService(const ServiceConfig& config) {
     return false;
   }
 
+  // Register container with ContainerManager if type is CONTAINER
+  if (config.type == ServiceType::CONTAINER) {
+    if (!container_manager_) {
+      log_.error(
+          "Cannot add container service '{}': ContainerManager not initialized",
+          config.name);
+      return false;
+    }
+
+    if (!config.container.has_value()) {
+      log_.error("Container service '{}' has no container spec", config.name);
+      return false;
+    }
+
+    aember::container_manager::ContainerConfig cc;
+    cc.name = config.name;
+    cc.rootfs = config.container->rootfs;
+    cc.args = config.container->args;
+
+    if (!container_manager_->AddContainer(cc)) {
+      log_.error("Failed to register container '{}' with ContainerManager",
+                 config.name);
+      return false;
+    }
+
+    log_.info("Registered container '{}' with ContainerManager", config.name);
+  }
+
   auto service = std::make_shared<Service>(config);
   services_[config.name] = service;
 
@@ -216,17 +244,25 @@ bool ServiceManager::StopServiceInternal(const std::string& name) {
   if (service->GetConfig().type == ServiceType::PROCESS) {
     pid_t pid = service->GetPid();
     if (pid > 0) {
-      log_.info("Stopping service '{}' (pid {})", name, pid);
+      log_.info("Stopping process service '{}' (pid {})", name, pid);
       if (kill(pid, 0) != 0 || kill(pid, SIGTERM) != 0) {
-        log_.warn("Failed to stop service '{}'", name);
-        ChangeServiceState(name, ServiceState::STOPPED);
-        service->SetPid(-1);
-        return true;
+        log_.warn("Failed to send SIGTERM to service '{}', considering stopped",
+                  name);
       }
     }
-  } else {
+    service->SetPid(-1);
+
+  } else if (service->GetConfig().type == ServiceType::CONTAINER) {
     log_.info("Stopping container service '{}'", name);
-    service->SetPid(-1);  // reset pseudo-PID
+    if (container_manager_) {
+      if (!container_manager_->StopContainer(name)) {
+        log_.warn("ContainerManager failed to stop container '{}'", name);
+      }
+    } else {
+      log_.warn("ContainerManager not available, cannot stop container '{}'",
+                name);
+    }
+    service->SetPid(-1);
   }
 
   ChangeServiceState(name, ServiceState::STOPPED);

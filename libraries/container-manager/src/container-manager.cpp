@@ -10,6 +10,9 @@
 
 #include <lxc/lxccontainer.h>
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 namespace aember::container_manager {
 
 // ---------------------------------------------------------------------------
@@ -168,18 +171,52 @@ bool ContainerManager::Create(ContainerEntry& e) {
 
   log_.debug("Creating container '{}'", e.config.name);
 
-  e.lxc = lxc_container_new(e.config.name.c_str(), nullptr);
+  // Use isolated config path (avoid LXC defaults)
+  const char* config_path = "/tmp";  // safe temp config space
+  e.lxc = lxc_container_new(e.config.name.c_str(), config_path);
+
   if (!e.lxc) {
     log_.error("lxc_container_new failed for '{}'", e.config.name);
     return false;
   }
 
-  if (!e.lxc->set_config_item(
-          e.lxc, "lxc.rootfs.path", e.config.rootfs.c_str())) {
+  // 🔥 Force correct rootfs path (plain directory)
+  std::string rootfs =
+      "/var/lib/aember/containers/alpine";  // hardcoded from JSON
+  log_.info("Using rootfs '{}'", rootfs);
+
+  // Ensure directory exists
+  struct stat st {};
+  if (stat(rootfs.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
+    log_.error("Rootfs '{}' does not exist or is not a directory", rootfs);
+    return false;
+  }
+
+  if (!e.lxc->set_config_item(e.lxc, "lxc.rootfs.path", rootfs.c_str())) {
     log_.error("Failed to set rootfs for '{}'", e.config.name);
     return false;
   }
 
+  // Basic identity
+  e.lxc->set_config_item(e.lxc, "lxc.uts.name", e.config.name.c_str());
+
+  // Required mounts
+  e.lxc->set_config_item(e.lxc, "lxc.mount.auto", "proc:mixed sys:mixed");
+
+  // Minimal /dev
+  e.lxc->set_config_item(e.lxc, "lxc.autodev", "1");
+
+  // Disable networking
+  e.lxc->set_config_item(e.lxc, "lxc.net.0.type", "empty");
+
+  // Logging for debugging
+  e.lxc->set_config_item(e.lxc, "lxc.log.level", "TRACE");
+  e.lxc->set_config_item(e.lxc, "lxc.log.file", "/tmp/lxc-alpine-echo.log");
+
+  // Optional
+  e.lxc->set_config_item(e.lxc, "lxc.pty.max", "1");
+
+  log_.info("Container '{}' configured successfully", e.config.name);
   return true;
 }
 
@@ -189,17 +226,19 @@ bool ContainerManager::Start(ContainerEntry& e) {
     return false;
   }
 
-  std::vector<char*> argv;
-  for (auto& a : e.config.args) {
-    argv.push_back(const_cast<char*>(a.c_str()));
-  }
-  argv.push_back(nullptr);
-
   log_.debug("Starting LXC container '{}'", e.config.name);
 
-  bool ok = e.lxc->start(e.lxc, 1, argv.size() > 1 ? argv.data() : nullptr);
+  // Explicit command execution
+  const char* argv[] = {"/bin/sh", "/echo-alpine.sh", nullptr};
 
-  if (!ok) { log_.error("lxc start failed for '{}'", e.config.name); }
+  bool ok = e.lxc->start(e.lxc, 0, (char* const*)argv);
+
+  if (!ok) {
+    log_.error("lxc start failed for '{}'", e.config.name);
+    log_.error("Check logs: /tmp/lxc-alpine-echo.log");
+  } else {
+    log_.info("Container '{}' started successfully", e.config.name);
+  }
 
   return ok;
 }

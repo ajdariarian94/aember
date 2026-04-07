@@ -3,7 +3,7 @@
  * @author Arian Ajdari
  * @brief Library definition for NetworkManager - brings up network interfaces
  *        and monitors internet connectivity for PID1.
- * @version 0.1
+ * @version 0.2
  * @date 2025-07-18
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -52,6 +52,14 @@ struct InterfaceConfig {
 };
 
 /**
+ * @brief Configuration for a Linux bridge interface, loaded from JSON.
+ */
+struct BridgeConfig {
+  std::string name;     ///< Bridge name e.g. "lxcbr0"
+  std::string address;  ///< IP in CIDR e.g. "10.0.3.1/24"
+};
+
+/**
  * @brief Runtime state of a network interface.
  */
 enum class InterfaceState {
@@ -66,41 +74,38 @@ enum class InterfaceState {
  */
 struct NetworkConfig {
   std::vector<InterfaceConfig> interfaces;
-  std::string ping_target{
-      "8.8.8.8"};  ///< ICMP ping target for connectivity check
-  std::chrono::milliseconds ping_interval{
-      std::chrono::seconds(10)};  ///< How often to ping
-  int ping_retries{3};            ///< Ping attempts before declaring offline
-  std::chrono::milliseconds dhcp_timeout{
-      std::chrono::seconds(30)};  ///< DHCP acquisition timeout
-  int dhcp_retries{3};            ///< DHCP attempts before fallback / failure
+  std::vector<BridgeConfig> bridges;   ///< Bridge interfaces to create
+  std::string ping_target{"8.8.8.8"};  ///< TCP probe target
+  std::chrono::milliseconds ping_interval{std::chrono::seconds(10)};
+  int ping_retries{3};
+  std::chrono::milliseconds dhcp_timeout{std::chrono::seconds(30)};
+  int dhcp_retries{3};
 };
 
 /**
  * @brief Connectivity status reported via the status callback.
  */
 struct ConnectivityStatus {
-  bool online{false};       ///< True if ICMP ping succeeded
-  std::string interface;    ///< Interface used for the ping
-  int rtt_ms{-1};           ///< Round-trip time in milliseconds, -1 if offline
-  int64_t timestamp_ms{0};  ///< Epoch milliseconds of last check
+  bool online{false};
+  std::string interface;
+  int rtt_ms{-1};
+  int64_t timestamp_ms{0};
 };
 
 /**
- * @brief Snapshot of the current network state — IP, gateway, DNS, MAC,
- * connectivity. Returned by GetNetworkInfo().
+ * @brief Snapshot of the current network state.
  */
 struct NetworkInfo {
-  std::string interface;                 ///< e.g. "eth0"
-  std::string ip_address;                ///< e.g. "10.0.2.15"
-  std::string netmask;                   ///< e.g. "255.255.255.0"
-  int prefix_len{0};                     ///< e.g. 24
-  std::string broadcast;                 ///< e.g. "10.0.2.255"
-  std::string gateway;                   ///< e.g. "10.0.2.2"
-  std::string mac_address;               ///< e.g. "52:54:00:12:34:56"
-  std::vector<std::string> dns_servers;  ///< from /etc/resolv.conf
-  bool online{false};                    ///< last known connectivity
-  int rtt_ms{-1};                        ///< last TCP probe RTT
+  std::string interface;
+  std::string ip_address;
+  std::string netmask;
+  int prefix_len{0};
+  std::string broadcast;
+  std::string gateway;
+  std::string mac_address;
+  std::vector<std::string> dns_servers;
+  bool online{false};
+  int rtt_ms{-1};
 };
 
 // ---------------------------------------------------------------------------
@@ -110,8 +115,8 @@ struct NetworkInfo {
 /**
  * @class NetworkManager
  * @brief Brings up configured network interfaces (DHCP or static, via netlink
- *        with udhcpc fallback) and periodically monitors internet connectivity
- *        via ICMP echo requests.
+ *        with udhcpc fallback), creates bridge interfaces for LXC containers,
+ *        and periodically monitors internet connectivity via TCP probe.
  *
  * Usage:
  * @code
@@ -119,36 +124,27 @@ struct NetworkInfo {
  *     if (!s.online) spdlog::warn("Internet lost!");
  *   });
  *   net.Start();
- *   // ... later ...
- *   net.Stop();
  * @endcode
  */
 class NetworkManager {
  public:
-  /**
-   * @brief Constructs a NetworkManager.
-   * @param config        Parsed JSON config (see NetworkConfig fields).
-   * @param on_status     Optional callback invoked on every connectivity check.
-   */
   explicit NetworkManager(
       const nlohmann::json& config,
       std::function<void(const ConnectivityStatus&)> on_status = nullptr);
 
   ~NetworkManager();
 
-  // Non-copyable, non-movable (owns threads and sockets)
   NetworkManager(const NetworkManager&) = delete;
   NetworkManager& operator=(const NetworkManager&) = delete;
 
   /**
-   * @brief Parses config, brings up all configured interfaces, starts
-   *        the background connectivity monitor thread.
+   * @brief Brings up interfaces, creates bridges, starts connectivity monitor.
    * @throws std::runtime_error if a required interface fails to come up.
    */
   void Start();
 
   /**
-   * @brief Stops the connectivity monitor thread and tears down interfaces.
+   * @brief Stops the connectivity monitor thread.
    */
   void Stop();
 
@@ -158,22 +154,17 @@ class NetworkManager {
   ConnectivityStatus GetStatus() const;
 
   /**
-   * @brief Returns true if at least one interface is up and internet is
-   * reachable.
+   * @brief Returns true if internet is reachable.
    */
   bool IsOnline() const;
 
   /**
-   * @brief Returns a full snapshot of the active interface: IP, netmask,
-   * gateway, MAC, DNS servers, and last connectivity result. Reads live from
-   * the kernel via ioctl + /proc/net/route + /etc/resolv.conf.
+   * @brief Returns a full snapshot of the active interface.
    */
   NetworkInfo GetNetworkInfo();
 
   /**
    * @brief Blocks until internet connectivity is confirmed or timeout expires.
-   * @param timeout  Maximum time to wait.
-   * @return true if online within timeout, false otherwise.
    */
   bool WaitForConnectivity(
       std::chrono::milliseconds timeout = std::chrono::seconds(60));
@@ -183,91 +174,47 @@ class NetworkManager {
   void ParseConfig(const nlohmann::json& config);
 
   // --- Interface bring-up ---------------------------------------------------
-
-  /**
-   * @brief Brings up all interfaces according to their config.
-   *        Blocks on required interfaces.
-   */
   void BringUpInterfaces();
-
-  /**
-   * @brief Brings up a single interface (tries netlink first, falls back to
-   *        busybox ip / udhcpc).
-   */
   bool BringUpInterface(const InterfaceConfig& iface);
-
-  /**
-   * @brief Sets an interface administratively UP via netlink RTM_NEWLINK.
-   * @return true on success.
-   */
   bool NetlinkSetInterfaceUp(const std::string& iface_name);
-
-  /**
-   * @brief Assigns a static IP/prefix and default route via netlink.
-   * @return true on success.
-   */
   bool NetlinkSetStaticAddress(const InterfaceConfig& iface);
-
-  /**
-   * @brief Runs udhcpc to acquire a DHCP lease.
-   *        Blocks until lease obtained or timeout/retries exhausted.
-   * @return true if a lease was obtained.
-   */
   bool RunUdhcpc(const InterfaceConfig& iface);
-
-  /**
-   * @brief Shells out to `ip` as a fallback for interface / route setup.
-   */
   bool FallbackIpCommand(const std::vector<std::string>& args);
-
-  /**
-   * @brief Writes /etc/resolv.conf from the DNS servers in iface config.
-   */
   void WriteResolvConf(const InterfaceConfig& iface);
 
+  // --- Bridge management ----------------------------------------------------
+
+  /**
+   * @brief Creates all bridges configured in the JSON config.
+   */
+  void CreateBridges();
+
+  /**
+   * @brief Creates a single bridge and assigns its IP address.
+   *        Uses ip link add type bridge + ip addr add + ip link set up.
+   *        Skips gracefully if bridge already exists.
+   * @return true on success.
+   */
+  bool CreateBridge(const BridgeConfig& bridge);
+
+  /**
+   * @brief Returns true if the named interface already exists in the kernel.
+   */
+  bool InterfaceExists(const std::string& name);
+
   // --- Connectivity monitor -------------------------------------------------
-
-  /**
-   * @brief Background thread: periodically pings ping_target_.
-   */
   void MonitorLoop();
-
-  /**
-   * @brief Sends a single ICMP echo request and waits for a reply.
-   * @param target_ip  Dotted-decimal IPv4 address.
-   * @param timeout_ms Milliseconds to wait for reply.
-   * @return RTT in milliseconds, or -1 on failure.
-   */
   int PingOnce(const std::string& target_ip, int timeout_ms = 2000);
-
-  /**
-   * @brief Runs PingOnce() up to ping_retries_ times.
-   * @return RTT of first success, or -1 if all attempts fail.
-   */
   int Ping(const std::string& target_ip);
 
   // --- Helpers --------------------------------------------------------------
-
-  /**
-   * @brief Returns the name of the first interface currently in kUp state.
-   */
   std::string FirstUpInterface() const;
-
-  /**
-   * @brief Updates connectivity status and fires the callback if set.
-   */
   void UpdateStatus(bool online, int rtt_ms);
-
-  /**
-   * @brief Resolves interface index by name via ioctl.
-   */
   int GetInterfaceIndex(const std::string& iface_name);
 
   // --- Members --------------------------------------------------------------
-
   NetworkConfig config_;
-  std::vector<InterfaceState>
-      iface_states_;  ///< Parallel to config_.interfaces
+  std::vector<InterfaceState> iface_states_;
 
   std::function<void(const ConnectivityStatus&)> on_status_;
 

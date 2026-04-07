@@ -15,6 +15,7 @@
 #include <aember-libs/config-manager/config-manager.h>
 #include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/device-health/heartbeat.h>
+#include <aember-libs/module-loader/module-loader.h>
 #include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/network-manager/network-manager.h>
 #include <aember-libs/root-manager/root-manager.h>
@@ -201,6 +202,8 @@ class AemberInit {
       const std::string& name,
       aember::container_manager::ContainerState old_state,
       aember::container_manager::ContainerState new_state);
+
+  std::optional<aember::module_loader::ModuleLoader> module_loader_;
 
   /**
    * @brief Logger instance for the init system.

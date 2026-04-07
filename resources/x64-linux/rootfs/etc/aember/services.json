@@ -17,7 +17,7 @@
       "type": "container",
       "container": {
         "rootfs": "/var/lib/aember/containers/alpine",
-        "args": ["/echo-alpine.sh"]
+        "args": ["/bin/sh", "/echo-alpine.sh"]
       },
       "restart_policy": "always",
       "dependencies": [],

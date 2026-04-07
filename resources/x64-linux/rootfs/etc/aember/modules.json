@@ -1,0 +1,9 @@
+{
+  "modules": [
+    "llc",
+    "stp",
+    "bridge",
+    "veth",
+    "br_netfilter"
+  ]
+}

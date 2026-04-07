@@ -53,27 +53,45 @@ Kernel Image Type: ${KERNEL_IMAGETYPE}
 EOF
 }
 
+KERNEL_IMAGE="${WORKDIR}/image"
+
 # Deploy manifest and kernel artifacts to custom output location
 do_deploy:append() {
-    install -m 0644 ${B}/kernel-build-manifest.txt ${DEPLOYDIR}/
+    # Ensure custom output directory exists
+    mkdir -p "${CUSTOM_OUTDIR}"
 
-    # Copy to custom output location
-    install -d ${CUSTOM_OUTDIR}
-    install -m 0644 ${B}/kernel-build-manifest.txt ${CUSTOM_OUTDIR}/
-
-    # Copy kernel image (bzImage for x86_64, Image for aarch64, zImage for arm)
-    for img in ${DEPLOYDIR}/${KERNEL_IMAGETYPE}*; do
-        [ -f "$img" ] && install -m 0644 "$img" ${CUSTOM_OUTDIR}/
-    done
-
-    # Copy DTBs if present (aarch64 and arm)
-    if [ -d ${DEPLOYDIR}/dtb ]; then
-        cp -r ${DEPLOYDIR}/dtb ${CUSTOM_OUTDIR}/
+    # Copy kernel build manifest
+    if [ -f "${B}/kernel-build-manifest.txt" ]; then
+        cp -v "${B}/kernel-build-manifest.txt" "${CUSTOM_OUTDIR}/"
     fi
 
-    # Copy Module.symvers and System.map for out-of-tree module builds
-    [ -f ${B}/Module.symvers ] && install -m 0644 ${B}/Module.symvers ${CUSTOM_OUTDIR}/
-    [ -f ${B}/System.map ] && install -m 0644 ${B}/System.map ${CUSTOM_OUTDIR}/
+    # Copy kernel images (handle empty glob)
+    shopt -s nullglob || true  # only if bash
+    for img in ${DEPLOYDIR}/${KERNEL_IMAGETYPE}*; do
+        if [ -f "$img" ]; then
+            cp -v "$img" "${CUSTOM_OUTDIR}/"
+        fi
+    done
+
+    # Copy DTBs if present
+    if [ -d "${DEPLOYDIR}/dtb" ]; then
+        cp -rv "${DEPLOYDIR}/dtb" "${CUSTOM_OUTDIR}/"
+    fi
+
+    # Copy Module.symvers and System.map
+    [ -f "${B}/Module.symvers" ] && cp -v "${B}/Module.symvers" "${CUSTOM_OUTDIR}/"
+    [ -f "${B}/System.map" ] && cp -v "${B}/System.map" "${CUSTOM_OUTDIR}/"
+
+    
+    # Copy all of lib/ from the kernel image folder
+    if [ -d "${KERNEL_IMAGE}/lib" ]; then
+        cp -rv "${KERNEL_IMAGE}/lib" "${CUSTOM_OUTDIR}/"
+    fi
+
+    # Copy all modules
+    if [ -d "${KERNEL_IMAGE}/lib/modules" ]; then
+        cp -rv "${KERNEL_IMAGE}/lib/modules" "${CUSTOM_OUTDIR}/lib/"
+    fi
 }
 
 # Skip buildpaths QA check - common for kernel packages
