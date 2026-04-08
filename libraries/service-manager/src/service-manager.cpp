@@ -2,13 +2,14 @@
  * @file service-manager.cpp
  * @author Arian Ajdari
  * @brief Implementation of ServiceManager
- * @version 0.1
- * @date 2025-12-22
+ * @version 0.2
+ * @date 2026-03-24
  *
- * @copyright Copyright (c) 2025, Aember, All rights reserved.
+ * @copyright Copyright (c) 2025-2026, Aember, All rights reserved.
  */
 
 #include <aember-libs/service-manager/service-manager.h>
+#include <aember-libs/utils/logging/logging.h>
 
 #include <errno.h>
 #include <signal.h>
@@ -16,6 +17,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
 #include <algorithm>
 #include <iostream>
 #include <thread>
@@ -27,8 +29,12 @@ namespace aember::service_manager {
 // --------------------------
 
 ServiceManager::ServiceManager(
-    aember::child_supervisor::ChildSupervisor& supervisor)
-    : child_supervisor_(supervisor), log_("service-manager") {
+    aember::child_supervisor::ChildSupervisor& supervisor,
+    std::shared_ptr<aember::container_manager::ContainerManager>
+        container_manager)
+    : child_supervisor_(supervisor),
+      container_manager_(std::move(container_manager)),
+      log_("service-manager") {
   log_.info("ServiceManager initialized");
 }
 
@@ -48,14 +54,43 @@ bool ServiceManager::AddService(const ServiceConfig& config) {
     return false;
   }
 
-  if (config.command.empty()) {
-    log_.error("Cannot add service '{}' with empty command", config.name);
+  if (config.type == ServiceType::PROCESS && config.command.empty()) {
+    log_.error("Cannot add process service '{}' with empty command",
+               config.name);
     return false;
   }
 
   if (services_.find(config.name) != services_.end()) {
     log_.warn("Service '{}' already exists", config.name);
     return false;
+  }
+
+  // Register container with ContainerManager if type is CONTAINER
+  if (config.type == ServiceType::CONTAINER) {
+    if (!container_manager_) {
+      log_.error(
+          "Cannot add container service '{}': ContainerManager not initialized",
+          config.name);
+      return false;
+    }
+
+    if (!config.container.has_value()) {
+      log_.error("Container service '{}' has no container spec", config.name);
+      return false;
+    }
+
+    aember::container_manager::ContainerConfig cc;
+    cc.name = config.name;
+    cc.rootfs = config.container->rootfs;
+    cc.args = config.container->args;
+
+    if (!container_manager_->AddContainer(cc)) {
+      log_.error("Failed to register container '{}' with ContainerManager",
+                 config.name);
+      return false;
+    }
+
+    log_.info("Registered container '{}' with ContainerManager", config.name);
   }
 
   auto service = std::make_shared<Service>(config);
@@ -94,16 +129,11 @@ bool ServiceManager::StartService(const std::string& name) {
   return StartServiceInternal(name, false);
 }
 
-/**
- * @brief Start a service and its dependencies.
- * @param name Service name
- * @param is_restart Whether this is a restart
- * @return true on success
- */
 bool ServiceManager::StartServiceInternal(const std::string& name,
                                           bool is_restart) {
   std::vector<std::string> dependencies;
   ServiceConfig config_copy;
+  ServiceType type;
 
   {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -128,17 +158,32 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
 
     dependencies = service->GetConfig().dependencies;
     config_copy = service->GetConfig();
+    type = config_copy.type;
 
     ChangeServiceState(name, ServiceState::STARTING);
   }
 
-  // Start dependencies outside of mutex
+  // Start dependencies outside mutex
   for (const auto& dep : dependencies) { StartService(dep); }
 
   log_.info("Starting service '{}'{}", name, is_restart ? " (restart)" : "");
 
-  pid_t pid = SpawnProcess(config_copy);
-  if (pid < 0) {
+  pid_t pid = -1;
+  bool success = false;
+
+  if (type == ServiceType::PROCESS) {
+    pid = SpawnProcess(config_copy);
+    success = (pid >= 0);
+  } else if (type == ServiceType::CONTAINER) {
+    if (!container_manager_) {
+      log_.error("ContainerManager not initialized");
+      success = false;
+    } else {
+      success = container_manager_->StartContainer(name);
+    }
+  }
+
+  if (!success) {
     std::lock_guard<std::mutex> lock(mutex_);
     ChangeServiceState(name, ServiceState::FAILED);
     return false;
@@ -147,18 +192,28 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto service = services_[name];
-    service->SetPid(pid);
+
+    // Only processes have real PIDs
+    if (type == ServiceType::PROCESS) {
+      service->SetPid(pid);
+      pid_to_service_[pid] = name;
+    } else {
+      // Containers do not use PID tracking here
+      service->SetPid(-1);
+    }
+
     service->SetStartTime();
+
     if (is_restart) {
       service->SetLastRestartTime();
       service->IncrementRestartCount();
     }
 
-    pid_to_service_[pid] = name;
     ChangeServiceState(name, ServiceState::RUNNING);
   }
 
-  child_supervisor_.AddChild(pid, name);
+  if (type == ServiceType::PROCESS) { child_supervisor_.AddChild(pid, name); }
+
   return true;
 }
 
@@ -166,11 +221,9 @@ bool ServiceManager::StopService(const std::string& name) {
   return StopServiceInternal(name);
 }
 
-/**
- * @brief Stop a service safely, sending SIGTERM and handling process exit.
- */
 bool ServiceManager::StopServiceInternal(const std::string& name) {
   std::lock_guard<std::mutex> lock(mutex_);
+
   auto it = services_.find(name);
   if (it == services_.end()) {
     log_.error("Service '{}' not found", name);
@@ -186,27 +239,33 @@ bool ServiceManager::StopServiceInternal(const std::string& name) {
     return true;
   }
 
-  if (current_state == ServiceState::FAILED) {
-    ChangeServiceState(name, ServiceState::STOPPED);
-    service->SetPid(-1);
-    return true;
-  }
-
   ChangeServiceState(name, ServiceState::STOPPING);
 
-  pid_t pid = service->GetPid();
-  if (pid > 0) {
-    log_.info("Stopping service '{}' (pid {})", name, pid);
-    if (kill(pid, 0) != 0 || kill(pid, SIGTERM) != 0) {
-      log_.warn("Failed to stop service '{}'", name);
-      ChangeServiceState(name, ServiceState::STOPPED);
-      service->SetPid(-1);
-      return true;
+  if (service->GetConfig().type == ServiceType::PROCESS) {
+    pid_t pid = service->GetPid();
+    if (pid > 0) {
+      log_.info("Stopping process service '{}' (pid {})", name, pid);
+      if (kill(pid, 0) != 0 || kill(pid, SIGTERM) != 0) {
+        log_.warn("Failed to send SIGTERM to service '{}', considering stopped",
+                  name);
+      }
     }
-  } else {
-    ChangeServiceState(name, ServiceState::STOPPED);
+    service->SetPid(-1);
+
+  } else if (service->GetConfig().type == ServiceType::CONTAINER) {
+    log_.info("Stopping container service '{}'", name);
+    if (container_manager_) {
+      if (!container_manager_->StopContainer(name)) {
+        log_.warn("ContainerManager failed to stop container '{}'", name);
+      }
+    } else {
+      log_.warn("ContainerManager not available, cannot stop container '{}'",
+                name);
+    }
+    service->SetPid(-1);
   }
 
+  ChangeServiceState(name, ServiceState::STOPPED);
   return true;
 }
 
@@ -234,42 +293,6 @@ void ServiceManager::StopAll() {
   log_.info("Stopping {} services", service_names.size());
   for (auto it = service_names.rbegin(); it != service_names.rend(); ++it) {
     StopService(*it);
-  }
-
-  // Wait briefly for all services to stop
-  auto timeout = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-  bool all_stopped = false;
-
-  while (std::chrono::steady_clock::now() < timeout) {
-    all_stopped = true;
-    for (const auto& name : service_names) {
-      auto state = GetServiceState(name);
-      if (state != ServiceState::STOPPED && state != ServiceState::FAILED) {
-        all_stopped = false;
-        break;
-      }
-    }
-    if (all_stopped) return;
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-
-  // Force stop remaining services
-  if (!all_stopped) {
-    log_.warn("Some services did not stop, sending SIGKILL");
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& name : service_names) {
-      auto it = services_.find(name);
-      if (it != services_.end()) {
-        auto service = it->second;
-        if (service->GetState() != ServiceState::STOPPED &&
-            service->GetState() != ServiceState::FAILED) {
-          pid_t pid = service->GetPid();
-          if (pid > 0) kill(pid, SIGKILL);
-          service->SetState(ServiceState::STOPPED);
-          service->SetPid(-1);
-        }
-      }
-    }
   }
 }
 
@@ -332,7 +355,6 @@ void ServiceManager::HandleServiceExit(pid_t pid, int exit_code) {
     ChangeServiceState(service_name, ServiceState::FAILED);
   }
 
-  // Schedule restart if needed
   if (!was_stopping) {
     bool should_restart = false;
     if (config.restart_policy == RestartPolicy::ALWAYS) should_restart = true;

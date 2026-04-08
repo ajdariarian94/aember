@@ -16,8 +16,10 @@ target_include_directories(
   ${COMPONENT} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-target_link_libraries(${COMPONENT} PUBLIC aember-libs::child-supervisor
-                                          aember-libs::utils::logging)
+target_link_libraries(
+  ${COMPONENT}
+  PUBLIC aember-libs::child-supervisor aember-libs::container-manager
+         aember-libs::utils::logging)
 
 set_target_properties(
   ${COMPONENT} PROPERTIES VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}

@@ -13,6 +13,13 @@ else()
 endif()
 
 # =====================================
+# pkg-config search paths
+# =====================================
+set(ENV{PKG_CONFIG_PATH}
+    "${CMAKE_CURRENT_LIST_DIR}/../../build/${TRIPLET}/virtualization/pkgconfig:$ENV{PKG_CONFIG_PATH}"
+)
+
+# =====================================
 # Compilers
 # =====================================
 set(CMAKE_C_COMPILER gcc)

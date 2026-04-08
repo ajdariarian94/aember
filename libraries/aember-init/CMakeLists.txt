@@ -20,7 +20,9 @@ target_link_libraries(
   ${COMPONENT}
   PUBLIC aember-libs::child-supervisor
          aember-libs::config-manager
+         aember-libs::container-manager
          aember-libs::device-health
+         aember-libs::module-loader
          aember-libs::mount-manager
          aember-libs::network-manager
          aember-libs::root-manager

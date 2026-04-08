@@ -10,6 +10,7 @@
 #pragma once
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
+#include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/service-manager/service.h>
 #include <aember-libs/utils/logging/logging.h>
 
@@ -38,7 +39,9 @@ class ServiceManager {
    *
    * @param supervisor Reference to a ChildSupervisor to manage child processes
    */
-  ServiceManager(aember::child_supervisor::ChildSupervisor& supervisor);
+  ServiceManager(aember::child_supervisor::ChildSupervisor& supervisor,
+                 std::shared_ptr<aember::container_manager::ContainerManager>
+                     container_manager);
 
   /**
    * @brief Destructor.
@@ -192,6 +195,9 @@ class ServiceManager {
   aember::child_supervisor::ChildSupervisor&
       child_supervisor_;  ///< Supervisor for child processes
   StateChangeCallback state_change_callback_;  ///< Callback for state changes
+
+  std::shared_ptr<aember::container_manager::ContainerManager>
+      container_manager_;
 
   mutable aember::utils::Logger log_;  ///< Logger instance
 };

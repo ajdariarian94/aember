@@ -43,7 +43,9 @@ do_install:append() {
     install -d ${D}${localstatedir}/lib/lxc
 }
 
+# Ensure -dev package is produced alongside the main package
 PACKAGES =+ "${PN}-templates"
+PACKAGES =+ "${PN}-dev"
 
 FILES:${PN} = " \
     ${bindir}/lxc-* \
@@ -62,27 +64,63 @@ FILES:${PN}-templates = " \
     ${datadir}/lxc/templates/ \
 "
 
+# Dev package: headers, pkgconfig, and the unversioned .so linker symlink
+FILES:${PN}-dev = " \
+    ${includedir}/lxc/ \
+    ${libdir}/pkgconfig/lxc.pc \
+    ${libdir}/liblxc.so \
+"
+
+# Make the dev package depend on the runtime so consumers get everything
+RDEPENDS:${PN}-dev = "${PN}"
+
+# Allow the dev package to be built into the SDK / sysroot
+ALLOW_EMPTY:${PN}-dev = "1"
+
 CUSTOM_OUTDIR = "${TOPDIR}/../build/${MACHINE}/virtualization/"
 
 do_deploy() {
+    CUSTOM_OUTDIR=$(realpath -m ${TOPDIR}/../build/${MACHINE}/virtualization)
     install -d ${CUSTOM_OUTDIR}
 
-    # Copy lxc binaries
+    # ── Runtime binaries ──────────────────────────────────────────────────────
     for bin in ${D}${bindir}/lxc-*; do
         [ -f "$bin" ] && install -m 0755 "$bin" ${CUSTOM_OUTDIR}/
     done
 
-    # Copy liblxc
+    # ── Shared libraries → under libs/ ───────────────────────────────────────
+    install -d ${CUSTOM_OUTDIR}/libs
     for lib in ${D}${libdir}/liblxc.so*; do
-        [ -f "$lib" ] && install -m 0755 "$lib" ${CUSTOM_OUTDIR}/
+        if [ -L "$lib" ]; then
+            cp -P "$lib" ${CUSTOM_OUTDIR}/libs/
+        elif [ -f "$lib" ]; then
+            install -m 0755 "$lib" ${CUSTOM_OUTDIR}/libs/
+        fi
     done
 
-    # Copy configs
+    # ── Headers ───────────────────────────────────────────────────────────────
+    if [ -d "${D}${includedir}/lxc" ]; then
+        install -d ${CUSTOM_OUTDIR}/include/lxc
+        cp -r ${D}${includedir}/lxc/. ${CUSTOM_OUTDIR}/include/lxc/
+    fi
+
+    # ── pkg-config — rewrite paths to match deployed layout ──────────────────
+    if [ -f "${D}${libdir}/pkgconfig/lxc.pc" ]; then
+        install -d ${CUSTOM_OUTDIR}/pkgconfig
+        sed \
+            -e "s|^prefix=.*|prefix=${CUSTOM_OUTDIR}|" \
+            -e "s|^libdir=.*|libdir=${CUSTOM_OUTDIR}/libs|" \
+            -e "s|^includedir=.*|includedir=${CUSTOM_OUTDIR}/include|" \
+            ${D}${libdir}/pkgconfig/lxc.pc > ${CUSTOM_OUTDIR}/pkgconfig/lxc.pc
+    fi
+
+    # ── Configs ───────────────────────────────────────────────────────────────
     cp -r ${D}${sysconfdir}/lxc ${CUSTOM_OUTDIR}/etc-lxc
 }
 
 # Skip buildpaths QA — same as kernel recipe
 INSANE_SKIP:${PN} += "buildpaths file-rdeps"
 INSANE_SKIP:${PN}-templates += "file-rdeps"
+INSANE_SKIP:${PN}-dev += "buildpaths"
 
 COMPATIBLE_MACHINE = "x64-linux|arm64-linux|arm-linux"

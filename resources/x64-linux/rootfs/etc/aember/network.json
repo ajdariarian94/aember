@@ -12,5 +12,12 @@
       "required": true,
       "dns":      ["8.8.8.8", "1.1.1.1"]
     }
+  ],
+
+  "bridges": [
+    {
+      "name":    "lxcbr0",
+      "address": "10.0.3.1/24"
+    }
   ]
 }

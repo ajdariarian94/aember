@@ -91,22 +91,25 @@ void AemberInit::StartRoot() {
   }
 
   // ----------------------------
-  // Enable file logging.
-  // Injects the file sink into all existing loggers (including log_)
-  // and stores it globally for any loggers created afterwards.
+  // Load kernel modules
+  // ----------------------------
+  module_loader_.emplace();
+  if (!module_loader_->LoadFromConfig("/etc/aember/modules.json")) {
+    log_.warn("Some kernel modules failed to load, continuing anyway");
+  }
+
+  // ----------------------------
+  // Enable file logging
   // ----------------------------
   aember::utils::enable_file_logging("/var/log/aember-init.log");
 
   debug_shell_.emplace();
   if (!debug_shell_) { log_.warn("Debug Shell not available"); }
 
-  // ----------------------------
-  // Check debug shell
-  // ----------------------------
   bool debug_shell = debug_shell_->CheckDebugShell();
 
   // ----------------------------
-  // Bring up network interfaces
+  // Network
   // ----------------------------
   nlohmann::json net_cfg;
   std::string net_config_path = "/etc/aember/network.json";
@@ -124,7 +127,6 @@ void AemberInit::StartRoot() {
 
       network_manager_->Start();
 
-      // Block until internet is up (or 60s timeout) before launching services
       if (!network_manager_->WaitForConnectivity(std::chrono::seconds(30))) {
         log_.warn("No internet connectivity after 60s, continuing anyway");
       }
@@ -138,10 +140,21 @@ void AemberInit::StartRoot() {
   }
 
   // ----------------------------
+  // Initialize Container Manager 🔥
+  // ----------------------------
+  container_manager_ =
+      std::make_shared<aember::container_manager::ContainerManager>(
+          std::bind(&AemberInit::OnContainerStateCallback,
+                    this,
+                    std::placeholders::_1,
+                    std::placeholders::_2,
+                    std::placeholders::_3));
+
+  // ----------------------------
   // Initialize Service Manager
   // ----------------------------
   service_manager_ = std::make_unique<aember::service_manager::ServiceManager>(
-      child_supervisor_);
+      child_supervisor_, container_manager_);
 
   service_manager_->SetStateChangeCallback(
       std::bind(&AemberInit::OnServiceStateChangeCallback,
@@ -169,9 +182,9 @@ void AemberInit::StartRoot() {
 
     if (debug_shell) {
       spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
-      aember::utils::enable_console_silence();  // drop stdout sink cleanly
-      debug_shell_
-          ->SilenceAemberInBackground();  // now dup2 is just a safety net
+      aember::utils::enable_console_silence();
+      debug_shell_->SilenceAemberInBackground();
+
       service_manager_->StartAll();
       debug_shell_->SpawnDebugShell();
     } else {
@@ -182,16 +195,20 @@ void AemberInit::StartRoot() {
   }
 
   // ----------------------------
-  // Setup signal handlers
+  // Signals
   // ----------------------------
   signal_handler_.Register(SIGTERM, [this](int) { Stop(); });
   signal_handler_.Register(SIGINT, [this](int) { Stop(); });
   signal_handler_.Register(SIGHUP, [this](int) { /* reload config */ });
+
   signal_handler_.Register(SIGCHLD, [this](int) {
     int status = 0;
-    while (waitpid(-1, &status, WNOHANG) > 0) {
-      service_manager_->HandleServiceExit(status, WEXITSTATUS(status));
+    pid_t pid;
+
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+      service_manager_->HandleServiceExit(pid, WEXITSTATUS(status));
     }
+
     child_supervisor_.HandleSIGCHLD();
   });
 
@@ -199,7 +216,7 @@ void AemberInit::StartRoot() {
   running_.store(true);
 
   // ----------------------------
-  // Start heartbeat
+  // Heartbeat
   // ----------------------------
   heartbeat_.emplace(
       std::bind(&AemberInit::HeartbeatCallback, this, std::placeholders::_1));
@@ -207,9 +224,7 @@ void AemberInit::StartRoot() {
 
   log_.info("Aember Init System started successfully");
 
-  // Main run loop
   RunLoop();
-
   Stop();
 }
 
@@ -287,6 +302,23 @@ void AemberInit::OnNetworkStatusCallback(
   } else {
     log_.warn("Network: internet connectivity lost");
   }
+}
+
+void AemberInit::OnContainerStateCallback(
+    const std::string& name,
+    aember::container_manager::ContainerState old_state,
+    aember::container_manager::ContainerState new_state) {
+  log_.info("Container '{}' state changed: {} -> {}",
+            name,
+            aember::container_manager::ContainerStateToString(old_state),
+            aember::container_manager::ContainerStateToString(new_state));
+
+  // 🔥 Optional (next step): sync to ServiceManager
+  // Example:
+  //
+  // if (service_manager_) {
+  //   // map container state → service state
+  // }
 }
 
 void AemberInit::RunLoop() {

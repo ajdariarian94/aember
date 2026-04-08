@@ -2,9 +2,10 @@
  * @file network_manager.cpp
  * @author Arian Ajdari
  * @brief Library implementation for NetworkManager.
- *        Brings up network interfaces (netlink + udhcpc fallback) and
- *        monitors internet connectivity via ICMP echo requests.
- * @version 0.1
+ *        Brings up network interfaces (netlink + udhcpc fallback),
+ *        creates bridge interfaces for LXC containers, and monitors
+ *        internet connectivity via TCP probe.
+ * @version 0.2
  * @date 2025-07-18
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -43,10 +44,6 @@ namespace aember::network {
 
 namespace {
 
-/**
- * @brief Forks and executes a command with the given argv, waits for exit.
- * @return Exit code, or -1 on fork/exec failure.
- */
 int RunCommand(const std::vector<std::string>& args) {
   if (args.empty()) { return -1; }
 
@@ -59,7 +56,6 @@ int RunCommand(const std::vector<std::string>& args) {
   if (pid < 0) { return -1; }
 
   if (pid == 0) {
-    // Child: redirect stdout/stderr to /dev/null to keep init logs clean
     int devnull = open("/dev/null", O_WRONLY);
     if (devnull >= 0) {
       dup2(devnull, STDOUT_FILENO);
@@ -67,7 +63,7 @@ int RunCommand(const std::vector<std::string>& args) {
       close(devnull);
     }
     execvp(argv[0], argv.data());
-    _exit(127);  // exec failed
+    _exit(127);
   }
 
   int status = 0;
@@ -75,9 +71,6 @@ int RunCommand(const std::vector<std::string>& args) {
   return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
-/**
- * @brief Parses a CIDR string like "192.168.1.10/24" into address and prefix.
- */
 bool ParseCidr(const std::string& cidr, in_addr& addr, int& prefix_len) {
   auto slash = cidr.find('/');
   if (slash == std::string::npos) { return false; }
@@ -90,9 +83,6 @@ bool ParseCidr(const std::string& cidr, in_addr& addr, int& prefix_len) {
   return (prefix_len >= 0 && prefix_len <= 32);
 }
 
-/**
- * @brief Converts an IPv4 prefix length to a netmask in_addr.
- */
 in_addr PrefixToNetmask(int prefix_len) {
   in_addr mask{};
   mask.s_addr = prefix_len ? htonl(~((1u << (32 - prefix_len)) - 1)) : 0;
@@ -102,7 +92,7 @@ in_addr PrefixToNetmask(int prefix_len) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Netlink helper: scoped RAII socket
+// Netlink helper
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -120,10 +110,6 @@ struct NetlinkSocket {
 
   bool Valid() const { return fd >= 0; }
 
-  /**
-   * @brief Sends a netlink request and waits for ACK.
-   * @return true on success (NLMSG_ERROR with err==0).
-   */
   bool SendAndAck(struct nlmsghdr* nlh) {
     if (!Valid()) { return false; }
 
@@ -141,7 +127,6 @@ struct NetlinkSocket {
 
     if (sendmsg(fd, &msg, 0) < 0) { return false; }
 
-    // Read ACK
     alignas(NLMSG_ALIGNTO) char buf[4096];
     ssize_t n = recv(fd, buf, sizeof(buf), 0);
     if (n < 0) { return false; }
@@ -150,7 +135,7 @@ struct NetlinkSocket {
     if (!NLMSG_OK(reply, static_cast<unsigned>(n))) { return false; }
     if (reply->nlmsg_type == NLMSG_ERROR) {
       auto* err = reinterpret_cast<struct nlmsgerr*>(NLMSG_DATA(reply));
-      return err->error == 0;  // 0 = ACK
+      return err->error == 0;
     }
     return true;
   }
@@ -165,7 +150,7 @@ struct NetlinkSocket {
 NetworkManager::NetworkManager(
     const nlohmann::json& config,
     std::function<void(const ConnectivityStatus&)> on_status)
-    : on_status_(std::move(on_status)), log_("network_manager") {
+    : on_status_(std::move(on_status)), log_("network-manager") {
   ParseConfig(config);
   iface_states_.assign(config_.interfaces.size(), InterfaceState::kDown);
 }
@@ -182,6 +167,7 @@ void NetworkManager::Start() {
   log_.info("Starting NetworkManager");
 
   BringUpInterfaces();
+  CreateBridges();
 
   {
     std::lock_guard<std::mutex> lock(cv_mutex_);
@@ -236,7 +222,6 @@ bool NetworkManager::WaitForConnectivity(std::chrono::milliseconds timeout) {
 // ---------------------------------------------------------------------------
 
 void NetworkManager::ParseConfig(const nlohmann::json& config) {
-  // Defaults
   config_.ping_target = config.value("ping_target", "8.8.8.8");
   config_.ping_retries = config.value("ping_retries", 3);
   config_.ping_interval =
@@ -276,6 +261,17 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
               iface.required);
     config_.interfaces.push_back(std::move(iface));
   }
+
+  // Parse bridges (optional)
+  if (config.contains("bridges") && config["bridges"].is_array()) {
+    for (const auto& entry : config["bridges"]) {
+      BridgeConfig bridge;
+      bridge.name = entry.at("name").get<std::string>();
+      bridge.address = entry.at("address").get<std::string>();
+      log_.info("Parsed bridge: {} address={}", bridge.name, bridge.address);
+      config_.bridges.push_back(std::move(bridge));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +308,6 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
             iface.name,
             iface.mode == IpMode::kDhcp ? "dhcp" : "static");
 
-  // Step 1: Set interface administratively UP via netlink
   if (!NetlinkSetInterfaceUp(iface.name)) {
     log_.warn("{}: netlink UP failed, trying fallback", iface.name);
     if (!FallbackIpCommand({"ip", "link", "set", iface.name, "up"})) {
@@ -321,7 +316,6 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
     }
   }
 
-  // Step 2: Assign address
   if (iface.mode == IpMode::kStatic) {
     if (!NetlinkSetStaticAddress(iface)) {
       log_.warn("{}: netlink static address failed, trying fallback",
@@ -347,7 +341,6 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
     return true;
   }
 
-  // DHCP
   return RunUdhcpc(iface);
 }
 
@@ -368,7 +361,6 @@ bool NetworkManager::NetlinkSetInterfaceUp(const std::string& iface_name) {
     return false;
   }
 
-  // Build RTM_NEWLINK message
   struct {
     struct nlmsghdr nlh;
     struct ifinfomsg ifi;
@@ -406,7 +398,6 @@ bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
   int iface_index = GetInterfaceIndex(iface.name);
   if (iface_index < 0) { return false; }
 
-  // ---- RTM_NEWADDR ----
   struct {
     struct nlmsghdr nlh;
     struct ifaddrmsg ifa;
@@ -422,7 +413,6 @@ bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
   req.ifa.ifa_prefixlen = static_cast<unsigned char>(prefix_len);
   req.ifa.ifa_index = iface_index;
 
-  // Add IFA_LOCAL attribute
   struct rtattr* rta = reinterpret_cast<struct rtattr*>(
       reinterpret_cast<char*>(&req.nlh) + NLMSG_ALIGN(req.nlh.nlmsg_len));
   rta->rta_type = IFA_LOCAL;
@@ -435,16 +425,13 @@ bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
     return false;
   }
 
-  log_.debug("{}: address {} assigned", iface.name, iface.address);
-
-  // ---- RTM_NEWROUTE (default gateway) ----
   if (iface.gateway.empty()) { return true; }
 
   in_addr gw{};
   if (inet_pton(AF_INET, iface.gateway.c_str(), &gw) != 1) {
     log_.warn(
         "{}: invalid gateway '{}', skipping route", iface.name, iface.gateway);
-    return true;  // Address is up even if gateway parse failed
+    return true;
   }
 
   struct {
@@ -459,14 +446,13 @@ bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
       NLM_F_REQUEST | NLM_F_CREATE | NLM_F_REPLACE | NLM_F_ACK;
   rtreq.nlh.nlmsg_seq = 3;
   rtreq.rtm.rtm_family = AF_INET;
-  rtreq.rtm.rtm_dst_len = 0;  // default route
+  rtreq.rtm.rtm_dst_len = 0;
   rtreq.rtm.rtm_src_len = 0;
   rtreq.rtm.rtm_table = RT_TABLE_MAIN;
   rtreq.rtm.rtm_protocol = RTPROT_STATIC;
   rtreq.rtm.rtm_scope = RT_SCOPE_UNIVERSE;
   rtreq.rtm.rtm_type = RTN_UNICAST;
 
-  // RTA_GATEWAY
   rta = reinterpret_cast<struct rtattr*>(reinterpret_cast<char*>(&rtreq.nlh) +
                                          NLMSG_ALIGN(rtreq.nlh.nlmsg_len));
   rta->rta_type = RTA_GATEWAY;
@@ -474,7 +460,6 @@ bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
   memcpy(RTA_DATA(rta), &gw, sizeof(in_addr));
   rtreq.nlh.nlmsg_len = NLMSG_ALIGN(rtreq.nlh.nlmsg_len) + rta->rta_len;
 
-  // RTA_OIF (output interface)
   rta = reinterpret_cast<struct rtattr*>(reinterpret_cast<char*>(&rtreq.nlh) +
                                          NLMSG_ALIGN(rtreq.nlh.nlmsg_len));
   rta->rta_type = RTA_OIF;
@@ -483,8 +468,7 @@ bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
   rtreq.nlh.nlmsg_len = NLMSG_ALIGN(rtreq.nlh.nlmsg_len) + rta->rta_len;
 
   if (!nl.SendAndAck(&rtreq.nlh)) {
-    log_.warn("{}: RTM_NEWROUTE (default gw) failed, continuing anyway",
-              iface.name);
+    log_.warn("{}: RTM_NEWROUTE failed, continuing anyway", iface.name);
   } else {
     log_.debug("{}: default route via {} set", iface.name, iface.gateway);
   }
@@ -501,8 +485,6 @@ bool NetworkManager::RunUdhcpc(const InterfaceConfig& iface) {
     log_.info(
         "{}: DHCP attempt {}/{}", iface.name, attempt, config_.dhcp_retries);
 
-    // udhcpc -i eth0 -n (exit if no lease) -q (quit after lease) -t 5 (5
-    // discovers) -T <timeout_sec> (timeout per discover)
     int timeout_sec = static_cast<int>(config_.dhcp_timeout.count() / 1000);
     std::string timeout_str = std::to_string(std::max(1, timeout_sec));
 
@@ -510,10 +492,10 @@ bool NetworkManager::RunUdhcpc(const InterfaceConfig& iface) {
         "udhcpc",
         "-i",
         iface.name,
-        "-n",  // exit if no lease
-        "-q",  // quit after lease
+        "-n",
+        "-q",
         "-t",
-        "5",  // send 5 DISCOVER packets
+        "5",
         "-T",
         timeout_str,
         "-s",
@@ -538,7 +520,7 @@ bool NetworkManager::RunUdhcpc(const InterfaceConfig& iface) {
 }
 
 // ---------------------------------------------------------------------------
-// Fallback: shell out to `ip`
+// Fallback ip command
 // ---------------------------------------------------------------------------
 
 bool NetworkManager::FallbackIpCommand(const std::vector<std::string>& args) {
@@ -561,7 +543,7 @@ bool NetworkManager::FallbackIpCommand(const std::vector<std::string>& args) {
 void NetworkManager::WriteResolvConf(const InterfaceConfig& iface) {
   std::vector<std::string> servers = iface.dns_servers;
   if (servers.empty()) {
-    servers = {"8.8.8.8", "1.1.1.1"};  // sensible defaults
+    servers = {"8.8.8.8", "1.1.1.1"};
     log_.debug("No DNS configured for {}, using defaults", iface.name);
   }
 
@@ -575,6 +557,69 @@ void NetworkManager::WriteResolvConf(const InterfaceConfig& iface) {
   for (const auto& ns : servers) { f << "nameserver " << ns << "\n"; }
 
   log_.info("Wrote /etc/resolv.conf ({} nameserver(s))", servers.size());
+}
+
+// ---------------------------------------------------------------------------
+// Bridge management
+// ---------------------------------------------------------------------------
+
+void NetworkManager::CreateBridges() {
+  if (config_.bridges.empty()) {
+    log_.debug("No bridges configured, skipping");
+    return;
+  }
+
+  log_.info("Creating {} bridge(s)", config_.bridges.size());
+
+  for (const auto& bridge : config_.bridges) {
+    if (!CreateBridge(bridge)) {
+      log_.warn("Failed to create bridge '{}', continuing", bridge.name);
+    }
+  }
+}
+
+bool NetworkManager::CreateBridge(const BridgeConfig& bridge) {
+  log_.info("Creating bridge: {} address={}", bridge.name, bridge.address);
+
+  // Skip if bridge already exists
+  if (InterfaceExists(bridge.name)) {
+    log_.info("Bridge '{}' already exists, skipping creation", bridge.name);
+    // Still ensure it's up and has correct address
+    FallbackIpCommand({"ip", "link", "set", bridge.name, "up"});
+    return true;
+  }
+
+  // Create the bridge interface
+  if (!FallbackIpCommand(
+          {"ip", "link", "add", bridge.name, "type", "bridge"})) {
+    log_.error("Failed to create bridge '{}'", bridge.name);
+    return false;
+  }
+
+  // Assign IP address
+  if (!bridge.address.empty()) {
+    if (!FallbackIpCommand(
+            {"ip", "addr", "add", bridge.address, "dev", bridge.name})) {
+      log_.error("Failed to assign address '{}' to bridge '{}'",
+                 bridge.address,
+                 bridge.name);
+      // Don't fail entirely — bridge exists, address assignment failed
+    }
+  }
+
+  // Bring it up
+  if (!FallbackIpCommand({"ip", "link", "set", bridge.name, "up"})) {
+    log_.error("Failed to bring up bridge '{}'", bridge.name);
+    return false;
+  }
+
+  log_.info(
+      "Bridge '{}' created and up (address={})", bridge.name, bridge.address);
+  return true;
+}
+
+bool NetworkManager::InterfaceExists(const std::string& name) {
+  return GetInterfaceIndex(name) >= 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -635,7 +680,7 @@ void NetworkManager::UpdateStatus(bool online, int rtt_ms) {
 }
 
 // ---------------------------------------------------------------------------
-// ICMP ping
+// TCP connectivity probe
 // ---------------------------------------------------------------------------
 
 int NetworkManager::Ping(const std::string& target_ip) {
@@ -647,9 +692,6 @@ int NetworkManager::Ping(const std::string& target_ip) {
 }
 
 int NetworkManager::PingOnce(const std::string& target_ip, int timeout_ms) {
-  // TCP SYN to port 53 (DNS) — works in QEMU user-mode networking where raw
-  // ICMP is silently dropped. A refused connection (ECONNREFUSED) still proves
-  // routing works and counts as reachable; only timeout means offline.
   int sock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (sock < 0) {
     log_.error("TCP probe: socket() failed: {}", strerror(errno));
@@ -672,7 +714,6 @@ int NetworkManager::PingOnce(const std::string& target_ip, int timeout_ms) {
 
   if (rc < 0 && errno != EINPROGRESS) {
     if (errno == ECONNREFUSED) {
-      // Host reachable, port closed — still counts as online
       close(sock);
       int rtt = static_cast<int>(
           std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -686,7 +727,6 @@ int NetworkManager::PingOnce(const std::string& target_ip, int timeout_ms) {
     return -1;
   }
 
-  // Wait for connect to complete or timeout
   fd_set wfds;
   FD_ZERO(&wfds);
   FD_SET(sock, &wfds);
@@ -707,7 +747,6 @@ int NetworkManager::PingOnce(const std::string& target_ip, int timeout_ms) {
     return -1;
   }
 
-  // Check async connect result
   int err = 0;
   socklen_t err_len = sizeof(err);
   getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &err_len);
@@ -734,11 +773,9 @@ NetworkInfo NetworkManager::GetNetworkInfo() {
 
     const std::string& name = config_.interfaces[i].name;
 
-    // Open a throwaway UDP socket to query interface addresses via ioctl
     int sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (sock < 0) { continue; }
 
-    // --- IP address ---
     struct ifreq ifr {};
     strncpy(ifr.ifr_name, name.c_str(), IFNAMSIZ - 1);
 
@@ -749,14 +786,12 @@ NetworkInfo NetworkManager::GetNetworkInfo() {
       info.ip_address = buf;
     }
 
-    // --- Netmask ---
     if (ioctl(sock, SIOCGIFNETMASK, &ifr) == 0) {
       auto* sa = reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_netmask);
       char buf[INET_ADDRSTRLEN]{};
       inet_ntop(AF_INET, &sa->sin_addr, buf, sizeof(buf));
       info.netmask = buf;
 
-      // Derive CIDR prefix length from netmask
       uint32_t mask = ntohl(sa->sin_addr.s_addr);
       int prefix = 0;
       while (mask & 0x80000000u) {
@@ -766,7 +801,6 @@ NetworkInfo NetworkManager::GetNetworkInfo() {
       info.prefix_len = prefix;
     }
 
-    // --- Broadcast ---
     if (ioctl(sock, SIOCGIFBRDADDR, &ifr) == 0) {
       auto* sa = reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_broadaddr);
       char buf[INET_ADDRSTRLEN]{};
@@ -774,7 +808,6 @@ NetworkInfo NetworkManager::GetNetworkInfo() {
       info.broadcast = buf;
     }
 
-    // --- MAC address ---
     if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
       const unsigned char* hw =
           reinterpret_cast<const unsigned char*>(ifr.ifr_hwaddr.sa_data);
@@ -794,29 +827,26 @@ NetworkInfo NetworkManager::GetNetworkInfo() {
     close(sock);
     info.interface = name;
 
-    // --- Default gateway — read from /proc/net/route ---
     std::ifstream route_file("/proc/net/route");
     std::string line;
-    std::getline(route_file, line);  // skip header
+    std::getline(route_file, line);
     while (std::getline(route_file, line)) {
       std::istringstream ss(line);
       std::string iface_col, dest_col, gw_col;
       ss >> iface_col >> dest_col >> gw_col;
 
       if (iface_col != name) { continue; }
-      if (dest_col != "00000000") { continue; }  // default route only
+      if (dest_col != "00000000") { continue; }
 
-      // Gateway is hex little-endian
       uint32_t gw_hex = static_cast<uint32_t>(std::stoul(gw_col, nullptr, 16));
       struct in_addr gw_addr {};
-      gw_addr.s_addr = gw_hex;  // already in network byte order
+      gw_addr.s_addr = gw_hex;
       char buf[INET_ADDRSTRLEN]{};
       inet_ntop(AF_INET, &gw_addr, buf, sizeof(buf));
       info.gateway = buf;
       break;
     }
 
-    // --- DNS — read from /etc/resolv.conf ---
     std::ifstream resolv("/etc/resolv.conf");
     while (std::getline(resolv, line)) {
       if (line.rfind("nameserver ", 0) == 0) {
@@ -824,10 +854,9 @@ NetworkInfo NetworkManager::GetNetworkInfo() {
       }
     }
 
-    break;  // first up interface is enough
+    break;
   }
 
-  // --- Connectivity ---
   {
     std::lock_guard<std::mutex> lock(status_mutex_);
     info.online = status_.online;
@@ -866,10 +895,7 @@ int NetworkManager::GetInterfaceIndex(const std::string& iface_name) {
   int ret = ioctl(sock, SIOCGIFINDEX, &ifr);
   close(sock);
 
-  if (ret < 0) {
-    log_.error("SIOCGIFINDEX for '{}' failed: {}", iface_name, strerror(errno));
-    return -1;
-  }
+  if (ret < 0) { return -1; }
 
   return ifr.ifr_ifindex;
 }

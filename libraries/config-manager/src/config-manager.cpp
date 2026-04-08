@@ -139,13 +139,9 @@ bool ConfigManager::ParseServices(const nlohmann::json& json) {
 bool ConfigManager::ParseService(
     const nlohmann::json& service_json,
     aember::service_manager::ServiceConfig& config) {
-  // Required fields: name
-  if (!service_json.contains("name")) {
-    SetError("Service missing required field: 'name'");
-    return false;
-  }
-  if (!service_json["name"].is_string()) {
-    SetError("Service 'name' must be a string");
+  // Required: name
+  if (!service_json.contains("name") || !service_json["name"].is_string()) {
+    SetError("Service missing required field: 'name' or it is not a string");
     return false;
   }
   config.name = service_json["name"].get<std::string>();
@@ -154,46 +150,82 @@ bool ConfigManager::ParseService(
     return false;
   }
 
-  // Required fields: command
-  if (!service_json.contains("command")) {
-    SetError("Service missing required field: 'command'");
-    return false;
-  }
-  if (!service_json["command"].is_string()) {
-    SetError("Service 'command' must be a string");
-    return false;
-  }
-  config.command = service_json["command"].get<std::string>();
-  if (config.command.empty()) {
-    SetError("Service 'command' cannot be empty");
-    return false;
+  // Optional: type
+  if (service_json.contains("type") && service_json["type"].is_string()) {
+    std::string type_str = service_json["type"].get<std::string>();
+    if (type_str == "container") {
+      config.type = aember::service_manager::ServiceType::CONTAINER;
+    } else {
+      config.type = aember::service_manager::ServiceType::PROCESS;
+    }
   }
 
-  // Optional fields
-
-  // Args
-  if (service_json.contains("args")) {
-    if (!service_json["args"].is_array()) {
-      SetError("Service 'args' must be an array");
+  // PROCESS type requires command
+  if (config.type == aember::service_manager::ServiceType::PROCESS) {
+    if (!service_json.contains("command") ||
+        !service_json["command"].is_string()) {
+      SetError("Process service '" + config.name +
+               "' missing required field: 'command'");
+      return false;
+    }
+    config.command = service_json["command"].get<std::string>();
+    if (config.command.empty()) {
+      SetError("Service 'command' cannot be empty for process: " + config.name);
       return false;
     }
 
-    for (const auto& arg : service_json["args"]) {
-      if (!arg.is_string()) {
-        SetError("Service 'args' must contain only strings");
+    // Args
+    if (service_json.contains("args") && service_json["args"].is_array()) {
+      for (const auto& arg : service_json["args"]) {
+        if (!arg.is_string()) {
+          SetError("Service 'args' must contain only strings");
+          return false;
+        }
+        config.args.push_back(arg.get<std::string>());
+      }
+    }
+  }
+
+  // CONTAINER type requires container.rootfs
+  if (config.type == aember::service_manager::ServiceType::CONTAINER) {
+    if (!service_json.contains("container") ||
+        !service_json["container"].is_object()) {
+      SetError("Container service '" + config.name +
+               "' missing 'container' object");
+      return false;
+    }
+
+    const auto& container_json = service_json["container"];
+    if (!container_json.contains("rootfs") ||
+        !container_json["rootfs"].is_string()) {
+      SetError("Container service '" + config.name +
+               "' missing 'container.rootfs'");
+      return false;
+    }
+
+    aember::service_manager::ContainerSpec container;
+    container.rootfs = container_json["rootfs"].get<std::string>();
+
+    if (container_json.contains("args")) {
+      if (!container_json["args"].is_array()) {
+        SetError("Container 'args' must be an array of strings");
         return false;
       }
-      config.args.push_back(arg.get<std::string>());
+      for (const auto& arg : container_json["args"]) {
+        if (!arg.is_string()) {
+          SetError("Container 'args' must contain only strings");
+          return false;
+        }
+        container.args.push_back(arg.get<std::string>());
+      }
     }
+
+    config.container = container;
   }
 
-  // Environment
-  if (service_json.contains("environment")) {
-    if (!service_json["environment"].is_object()) {
-      SetError("Service 'environment' must be an object");
-      return false;
-    }
-
+  // Optional: environment
+  if (service_json.contains("environment") &&
+      service_json["environment"].is_object()) {
     for (auto it = service_json["environment"].begin();
          it != service_json["environment"].end();
          ++it) {
@@ -205,33 +237,23 @@ bool ConfigManager::ParseService(
     }
   }
 
-  // Working directory
-  if (service_json.contains("working_directory")) {
-    if (!service_json["working_directory"].is_string()) {
-      SetError("Service 'working_directory' must be a string");
-      return false;
-    }
+  // Optional: working_directory
+  if (service_json.contains("working_directory") &&
+      service_json["working_directory"].is_string()) {
     config.working_directory =
         service_json["working_directory"].get<std::string>();
   }
 
-  // Restart policy
-  if (service_json.contains("restart_policy")) {
-    if (!service_json["restart_policy"].is_string()) {
-      SetError("Service 'restart_policy' must be a string");
-      return false;
-    }
+  // Optional: restart_policy
+  if (service_json.contains("restart_policy") &&
+      service_json["restart_policy"].is_string()) {
     config.restart_policy =
         ParseRestartPolicy(service_json["restart_policy"].get<std::string>());
   }
 
-  // Dependencies
-  if (service_json.contains("dependencies")) {
-    if (!service_json["dependencies"].is_array()) {
-      SetError("Service 'dependencies' must be an array");
-      return false;
-    }
-
+  // Optional: dependencies
+  if (service_json.contains("dependencies") &&
+      service_json["dependencies"].is_array()) {
     for (const auto& dep : service_json["dependencies"]) {
       if (!dep.is_string()) {
         SetError("Service 'dependencies' must contain only strings");
@@ -241,12 +263,9 @@ bool ConfigManager::ParseService(
     }
   }
 
-  // Max restart attempts
-  if (service_json.contains("max_restart_attempts")) {
-    if (!service_json["max_restart_attempts"].is_number_integer()) {
-      SetError("Service 'max_restart_attempts' must be an integer");
-      return false;
-    }
+  // Optional: max_restart_attempts
+  if (service_json.contains("max_restart_attempts") &&
+      service_json["max_restart_attempts"].is_number_integer()) {
     int attempts = service_json["max_restart_attempts"].get<int>();
     if (attempts < 0) {
       SetError("Service 'max_restart_attempts' must be >= 0");
@@ -255,15 +274,12 @@ bool ConfigManager::ParseService(
     config.max_restart_attempts = attempts;
   }
 
-  // Restart delay in seconds
-  if (service_json.contains("restart_delay_seconds")) {
-    if (!service_json["restart_delay_seconds"].is_number()) {
-      SetError("Service 'restart_delay_seconds' must be a number");
-      return false;
-    }
-    int delay = service_json["restart_delay_seconds"].get<int>();
+  // Optional: restart_delay
+  if (service_json.contains("restart_delay") &&
+      service_json["restart_delay"].is_number()) {
+    int delay = service_json["restart_delay"].get<int>();
     if (delay < 0) {
-      SetError("Service 'restart_delay_seconds' must be >= 0");
+      SetError("Service 'restart_delay' must be >= 0");
       return false;
     }
     config.restart_delay = std::chrono::seconds(delay);
