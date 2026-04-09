@@ -1,7 +1,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(aember-libs REQUIRED COMPONENTS utils)
+find_dependency(aember-libs REQUIRED COMPONENTS mount-manager utils)
 
 # Reconstruct lxc imported target for consumers
 find_package(PkgConfig REQUIRED)

@@ -205,6 +205,7 @@ bool ConfigManager::ParseService(
 
     aember::service_manager::ContainerSpec container;
     container.rootfs = container_json["rootfs"].get<std::string>();
+    container.squashfs = container_json["squashfs"].get<std::string>();
 
     if (container_json.contains("args")) {
       if (!container_json["args"].is_array()) {

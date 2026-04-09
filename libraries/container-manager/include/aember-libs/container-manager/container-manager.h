@@ -9,9 +9,11 @@
 
 #pragma once
 
+#include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/utils/logging/logging.h>
 
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -40,6 +42,7 @@ std::string ContainerStateToString(ContainerState state);
 
 struct ContainerConfig {
   std::string name;
+  std::string squashfs;
   std::string rootfs;
   std::vector<std::string> args;
 };
@@ -63,7 +66,9 @@ class ContainerManager {
   using StateCallback =
       std::function<void(const std::string&, ContainerState, ContainerState)>;
 
-  explicit ContainerManager(StateCallback cb = nullptr);
+  explicit ContainerManager(
+      std::shared_ptr<aember::mount_manager::MountManager> mount_manager,
+      StateCallback cb = nullptr);
   ~ContainerManager();
 
   ContainerManager(const ContainerManager&) = delete;
@@ -104,6 +109,8 @@ class ContainerManager {
   StateCallback callback_;
 
   aember::utils::Logger log_{"container-manager"};
+
+  std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
 };
 
 }  // namespace aember::container_manager

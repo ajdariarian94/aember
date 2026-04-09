@@ -160,6 +160,48 @@ bool MountManager::Mount(const MountPoint& mp) {
   return true;
 }
 
+bool MountManager::MountSquashFS(const std::string& image,
+                                 const std::string& target, bool read_only) {
+  if (IsMounted(target)) {
+    log_.debug("'{}' is already mounted, skipping", target);
+    return true;
+  }
+
+  if (!EnsureDirectory(target)) { return false; }
+
+  log_.info("Mounting {} on {} using BusyBox", image, target);
+
+  // Build command string for squashfs mount
+  std::string cmd =
+      "/bin/busybox mount -t squashfs " + image + " " + target + " -o async";
+
+  int ret = system(cmd.c_str());
+  if (ret != 0) {
+    log_.error("BusyBox mount failed for {} on {}", image, target);
+    return false;
+  }
+
+  mounted_targets_.push_back(target);
+  log_.info("Successfully mounted {} on {} via BusyBox", image, target);
+
+  // Mount tmpfs over /tmp to make it writable
+  std::string tmp_path = target + "/tmp";
+  if (!EnsureDirectory(tmp_path)) {
+    log_.warn("Could not ensure tmp directory exists at {}", tmp_path);
+  } else {
+    std::string tmp_cmd = "/bin/busybox mount -t tmpfs tmpfs " + tmp_path;
+    ret = system(tmp_cmd.c_str());
+    if (ret != 0) {
+      log_.warn("Failed to mount tmpfs on {}", tmp_path);
+    } else {
+      mounted_targets_.push_back(tmp_path);
+      log_.info("Successfully mounted tmpfs on {}", tmp_path);
+    }
+  }
+
+  return true;
+}
+
 /**
  * @brief Mount all early boot filesystems.
  *
