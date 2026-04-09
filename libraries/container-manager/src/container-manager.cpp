@@ -40,8 +40,12 @@ std::string ContainerStateToString(ContainerState s) {
 // Ctor / Dtor
 // ---------------------------------------------------------------------------
 
-ContainerManager::ContainerManager(StateCallback cb)
-    : callback_(std::move(cb)), log_("container-manager") {
+ContainerManager::ContainerManager(
+    std::shared_ptr<aember::mount_manager::MountManager> mount_manager,
+    StateCallback cb)
+    : mount_manager_(mount_manager),
+      callback_(std::move(cb)),
+      log_("container-manager") {
   log_.info("ContainerManager initialized");
 }
 
@@ -167,53 +171,54 @@ bool ContainerManager::IsRunning(const std::string& name) const {
 // ---------------------------------------------------------------------------
 
 bool ContainerManager::Create(ContainerEntry& e) {
+  log_.info("Container '{}' squashfs: '{}', rootfs: '{}'",
+            e.config.name,
+            e.config.squashfs,
+            e.config.rootfs);
   Release(e);
 
   log_.debug("Creating container '{}'", e.config.name);
 
-  // Isolated config path
+  // LXC handle
   const char* config_path = "/tmp";
   e.lxc = lxc_container_new(e.config.name.c_str(), config_path);
-
   if (!e.lxc) {
     log_.error("lxc_container_new failed for '{}'", e.config.name);
     return false;
   }
 
-  // Use rootfs from config
-  const std::string& rootfs = e.config.rootfs;
-  log_.info("Using rootfs '{}'", rootfs);
-
-  // Validate rootfs
-  struct stat st {};
-  if (stat(rootfs.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
-    log_.error("Rootfs '{}' does not exist or is not a directory", rootfs);
-    return false;
+  // ----------------------------
+  // Mount SquashFS if specified
+  // ----------------------------
+  if (!e.config.squashfs.empty()) {
+    if (!mount_manager_->MountSquashFS(e.config.squashfs, e.config.rootfs)) {
+      log_.error("Failed to mount squashfs '{}' at '{}'",
+                 e.config.squashfs,
+                 e.config.rootfs);
+      return false;
+    }
+    log_.info(
+        "Mounted squashfs '{}' at '{}'", e.config.squashfs, e.config.rootfs);
   }
 
-  if (!e.lxc->set_config_item(e.lxc, "lxc.rootfs.path", rootfs.c_str())) {
+  // ----------------------------
+  // Configure LXC rootfs
+  // ----------------------------
+  if (!e.lxc->set_config_item(
+          e.lxc, "lxc.rootfs.path", e.config.rootfs.c_str())) {
     log_.error("Failed to set rootfs for '{}'", e.config.name);
     return false;
   }
 
-  // Identity
+  // LXC identity and mounts
   e.lxc->set_config_item(e.lxc, "lxc.uts.name", e.config.name.c_str());
-
-  // Mounts
   e.lxc->set_config_item(e.lxc, "lxc.mount.auto", "proc:mixed sys:mixed");
-
-  // /dev
   e.lxc->set_config_item(e.lxc, "lxc.autodev", "1");
-
-  // Disable networking for now
   e.lxc->set_config_item(e.lxc, "lxc.net.0.type", "empty");
 
-  // Dynamic log file per container
   std::string log_file = "/tmp/lxc-" + e.config.name + ".log";
   e.lxc->set_config_item(e.lxc, "lxc.log.level", "TRACE");
   e.lxc->set_config_item(e.lxc, "lxc.log.file", log_file.c_str());
-
-  // Optional
   e.lxc->set_config_item(e.lxc, "lxc.pty.max", "1");
 
   log_.info("Container '{}' configured (log: {})", e.config.name, log_file);

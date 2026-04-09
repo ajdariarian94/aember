@@ -44,7 +44,8 @@ enum class RestartPolicy {
  * @brief Specifications for container-based services.
  */
 struct ContainerSpec {
-  std::string rootfs;             ///< Root filesystem path for the container
+  std::string rootfs;  ///< Root filesystem path for the container
+  std::string squashfs;
   std::vector<std::string> args;  ///< Arguments passed to container runtime
 };
 

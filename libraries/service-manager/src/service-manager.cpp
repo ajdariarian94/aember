@@ -83,6 +83,7 @@ bool ServiceManager::AddService(const ServiceConfig& config) {
     cc.name = config.name;
     cc.rootfs = config.container->rootfs;
     cc.args = config.container->args;
+    cc.squashfs = config.container->squashfs;
 
     if (!container_manager_->AddContainer(cc)) {
       log_.error("Failed to register container '{}' with ContainerManager",

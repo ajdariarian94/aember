@@ -164,7 +164,7 @@ class AemberInit {
    * Responsible for mounting early filesystems required before
    * services are started.
    */
-  std::optional<aember::mount_manager::MountManager> mount_manager_;
+  std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
 
   /**
    * @brief Config manager.

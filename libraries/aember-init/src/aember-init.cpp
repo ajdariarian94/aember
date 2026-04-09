@@ -40,7 +40,7 @@ void AemberInit::StartInitramfs() {
   // ----------------------------
   // Mount early filesystems
   // ----------------------------
-  mount_manager_.emplace();
+  mount_manager_ = std::make_shared<aember::mount_manager::MountManager>();
   if (!mount_manager_->MountEarlyFilesystems()) {
     log_.warn("Some early filesystems failed to mount, continuing anyway");
   }
@@ -85,7 +85,7 @@ void AemberInit::StartRoot() {
   // ----------------------------
   // Mount early filesystems
   // ----------------------------
-  mount_manager_.emplace();
+  mount_manager_ = std::make_shared<aember::mount_manager::MountManager>();
   if (!mount_manager_->MountEarlyFilesystems()) {
     log_.warn("Some early filesystems failed to mount, continuing anyway");
   }
@@ -144,6 +144,7 @@ void AemberInit::StartRoot() {
   // ----------------------------
   container_manager_ =
       std::make_shared<aember::container_manager::ContainerManager>(
+          mount_manager_,
           std::bind(&AemberInit::OnContainerStateCallback,
                     this,
                     std::placeholders::_1,
