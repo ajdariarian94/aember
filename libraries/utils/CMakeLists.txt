@@ -14,6 +14,13 @@ set(${COMPONENT}_${PROJECT_NAME}_VERSION
 # Sub-components
 # -----------------------------------------------------------------------------
 
+set(CONTAINER_COMPONENT
+    "container"
+)
+set(CONTAINER_TARGET
+    "${COMPONENT}_${CONTAINER_COMPONENT}"
+) # utils_logging
+
 set(LOGGING_COMPONENT
     "logging"
 )
@@ -42,6 +49,7 @@ set(SIGNAL_TARGET
     "${COMPONENT}_${SIGNAL_COMPONENT}"
 ) # utils_signal
 
+add_subdirectory(container)
 add_subdirectory(logging)
 add_subdirectory(service)
 add_subdirectory(shell)
@@ -95,6 +103,10 @@ configure_package_config_file(
 
 # Install headers
 install(
+  DIRECTORY container/include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
   DIRECTORY logging/include/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
@@ -114,6 +126,7 @@ install(
 # Install targets
 install(
   TARGETS ${COMPONENT}
+          ${CONTAINER_TARGET}
           ${LOGGING_TARGET}
           ${SERVICE_TARGET}
           ${SHELL_TARGET}

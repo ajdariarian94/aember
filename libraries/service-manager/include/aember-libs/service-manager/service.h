@@ -11,6 +11,8 @@
 
 #include <aember-libs/utils/service/restart-policy.h>
 #include <aember-libs/utils/service/service-state.h>
+#include <aember-libs/utils/service/service-type.h>
+#include <aember-libs/utils/service/service-config.h>
 
 #include <chrono>
 #include <map>
@@ -23,42 +25,7 @@
 
 namespace aember::service_manager {
 
-/**
- * @brief Specifications for container-based services.
- */
-struct ContainerSpec {
-  std::string rootfs;  ///< Root filesystem path for the container
-  std::string squashfs;
-  std::vector<std::string> args;  ///< Arguments passed to container runtime
-};
 
-/**
- * @brief Type of service: process or container.
- */
-enum class ServiceType { PROCESS, CONTAINER };
-
-/**
- * @brief Configuration data for a service.
- */
-struct ServiceConfig {
-  std::string name;                                ///< Service name
-  std::string command;                             ///< Command to execute
-  std::vector<std::string> args;                   ///< Command-line arguments
-  std::map<std::string, std::string> environment;  ///< Environment variables
-  std::string working_directory;  ///< Working directory for the service
-  aember::utils::service::RestartPolicy restart_policy =
-      aember::utils::service::RestartPolicy::NEVER;  ///< Restart behavior
-  std::vector<std::string>
-      dependencies;              ///< Services that must start before this one
-  int max_restart_attempts = 5;  ///< Maximum number of automatic restarts
-  std::chrono::seconds restart_delay{5};   ///< Delay between restarts
-  ServiceType type{ServiceType::PROCESS};  ///< Process or container
-  std::optional<ContainerSpec> container;  ///< Optional container spec
-
-  ServiceConfig() = default;
-  ServiceConfig(const std::string& n, const std::string& cmd)
-      : name(n), command(cmd) {}
-};
 
 /**
  * @brief Represents a running service and tracks its state.
@@ -71,13 +38,13 @@ class Service {
   /**
    * @brief Constructs a Service with the given configuration.
    */
-  Service(const ServiceConfig& config);
+  Service(const aember::utils::service::ServiceConfig& config);
 
   /** @brief Returns the service name. */
   const std::string& GetName() const { return config_.name; }
 
   /** @brief Returns the service configuration. */
-  const ServiceConfig& GetConfig() const { return config_; }
+  const aember::utils::service::ServiceConfig& GetConfig() const { return config_; }
 
   /** @brief Returns the current service state. */
   aember::utils::service::ServiceState GetState() const;
@@ -119,7 +86,7 @@ class Service {
   void SetLastRestartTime();
 
  private:
-  ServiceConfig config_;  ///< Service configuration
+  aember::utils::service::ServiceConfig config_;  ///< Service configuration
   aember::utils::service::ServiceState state_ =
       aember::utils::service::ServiceState::STOPPED;  ///< Current state
   pid_t pid_ = -1;                                    ///< Process ID

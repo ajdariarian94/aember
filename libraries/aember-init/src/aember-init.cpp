@@ -307,12 +307,12 @@ void AemberInit::OnNetworkStatusCallback(
 
 void AemberInit::OnContainerStateCallback(
     const std::string& name,
-    aember::container_manager::ContainerState old_state,
-    aember::container_manager::ContainerState new_state) {
+    aember::utils::container::ContainerState old_state,
+    aember::utils::container::ContainerState new_state) {
   log_.info("Container '{}' state changed: {} -> {}",
             name,
-            aember::container_manager::ContainerStateToString(old_state),
-            aember::container_manager::ContainerStateToString(new_state));
+            aember::utils::container::ContainerStateToString(old_state),
+            aember::utils::container::ContainerStateToString(new_state));
 
   // 🔥 Optional (next step): sync to ServiceManager
   // Example:

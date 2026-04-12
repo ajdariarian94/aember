@@ -1,37 +1,29 @@
 # -----------------------------------------------------------------------------
-# Service subcomponent
+# Container subcomponent
 # -----------------------------------------------------------------------------
 
 add_library(
-  ${SERVICE_TARGET}
+  ${CONTAINER_TARGET}
   STATIC
-  src/restart-policy.cpp
-  src/service-config.cpp
-  src/service-state.cpp
+  src/container-state.cpp
 )
 
 add_library(
-  ${PROJECT_NAME}::${COMPONENT}::${SERVICE_COMPONENT}
+  ${PROJECT_NAME}::${COMPONENT}::${CONTAINER_COMPONENT}
   ALIAS
-  ${SERVICE_TARGET}
+  ${CONTAINER_TARGET}
 )
 
 target_include_directories(
-  ${SERVICE_TARGET}
+  ${CONTAINER_TARGET}
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-target_link_libraries(
-  ${SERVICE_TARGET}
-  PUBLIC
-  aember-libs::utils::container
-)
-
 set_target_properties(
-  ${SERVICE_TARGET}
+  ${CONTAINER_TARGET}
   PROPERTIES EXPORT_NAME
-             ${COMPONENT}::${SERVICE_COMPONENT}
+             ${COMPONENT}::${CONTAINER_COMPONENT}
 )
 
 # -----------------------------------------------------------------------------

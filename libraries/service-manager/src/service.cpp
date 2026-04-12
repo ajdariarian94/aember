@@ -18,11 +18,11 @@ namespace aember::service_manager {
  *
  * @param config Service configuration structure
  */
-Service::Service(const ServiceConfig& config) : config_(config) {
+Service::Service(const aember::utils::service::ServiceConfig& config) : config_(config) {
   aember::utils::logging::Logger log("service");
   log.info("Service '{}' created (type: {})",
            config_.name,
-           config_.type == ServiceType::PROCESS ? "PROCESS" : "CONTAINER");
+           config_.type == aember::utils::service::ServiceType::PROCESS ? "PROCESS" : "CONTAINER");
 }
 
 /**

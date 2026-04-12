@@ -11,6 +11,8 @@
 
 #include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/container/container-state.h>
+#include <aember-libs/utils/container/container-entry.h>
 
 #include <functional>
 #include <memory>
@@ -18,44 +20,7 @@
 #include <string>
 #include <vector>
 
-struct lxc_container;
-
 namespace aember::container_manager {
-
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-enum class ContainerState {
-  kStopped,
-  kStarting,
-  kRunning,
-  kStopping,
-  kFailed,
-};
-
-std::string ContainerStateToString(ContainerState state);
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
-struct ContainerConfig {
-  std::string name;
-  std::string squashfs;
-  std::string rootfs;
-  std::vector<std::string> args;
-};
-
-// ---------------------------------------------------------------------------
-// Runtime
-// ---------------------------------------------------------------------------
-
-struct ContainerEntry {
-  ContainerConfig config;
-  ContainerState state{ContainerState::kStopped};
-  lxc_container* lxc{nullptr};
-};
 
 // ---------------------------------------------------------------------------
 // ContainerManager
@@ -64,7 +29,7 @@ struct ContainerEntry {
 class ContainerManager {
  public:
   using StateCallback =
-      std::function<void(const std::string&, ContainerState, ContainerState)>;
+      std::function<void(const std::string&, aember::utils::container::ContainerState, aember::utils::container::ContainerState)>;
 
   explicit ContainerManager(
       std::shared_ptr<aember::mount_manager::MountManager> mount_manager,
@@ -77,7 +42,7 @@ class ContainerManager {
   // --------------------------
   // Container management
   // --------------------------
-  bool AddContainer(const ContainerConfig& config);
+  bool AddContainer(const aember::utils::container::ContainerConfig& config);
   bool RemoveContainer(const std::string& name);
 
   bool StartContainer(const std::string& name);
@@ -86,24 +51,24 @@ class ContainerManager {
   // --------------------------
   // Queries
   // --------------------------
-  ContainerState GetContainerState(const std::string& name) const;
+  aember::utils::container::ContainerState GetContainerState(const std::string& name) const;
   bool IsRunning(const std::string& name) const;
 
  private:
   // LXC lifecycle
-  bool Create(ContainerEntry& e);
-  bool Start(ContainerEntry& e);
-  bool Stop(ContainerEntry& e);
-  void Release(ContainerEntry& e);
+  bool Create(aember::utils::container::ContainerEntry& e);
+  bool Start(aember::utils::container::ContainerEntry& e);
+  bool Stop(aember::utils::container::ContainerEntry& e);
+  void Release(aember::utils::container::ContainerEntry& e);
 
   // Helpers
-  void SetState(ContainerEntry& e, ContainerState s);
+  void SetState(aember::utils::container::ContainerEntry& e, aember::utils::container::ContainerState s);
 
-  ContainerEntry* Find(const std::string& name);
-  const ContainerEntry* Find(const std::string& name) const;
+  aember::utils::container::ContainerEntry* Find(const std::string& name);
+  const aember::utils::container::ContainerEntry* Find(const std::string& name) const;
 
  private:
-  std::vector<ContainerEntry> containers_;
+  std::vector<aember::utils::container::ContainerEntry> containers_;
   mutable std::mutex mutex_;
 
   StateCallback callback_;

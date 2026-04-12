@@ -46,7 +46,7 @@ ServiceManager::~ServiceManager() {
 // Add / Remove Services
 // --------------------------
 
-bool ServiceManager::AddService(const ServiceConfig& config) {
+bool ServiceManager::AddService(const aember::utils::service::ServiceConfig& config) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   if (config.name.empty()) {
@@ -54,7 +54,7 @@ bool ServiceManager::AddService(const ServiceConfig& config) {
     return false;
   }
 
-  if (config.type == ServiceType::PROCESS && config.command.empty()) {
+  if (config.type == aember::utils::service::ServiceType::PROCESS && config.command.empty()) {
     log_.error("Cannot add process service '{}' with empty command",
                config.name);
     return false;
@@ -66,7 +66,7 @@ bool ServiceManager::AddService(const ServiceConfig& config) {
   }
 
   // Register container with ContainerManager if type is CONTAINER
-  if (config.type == ServiceType::CONTAINER) {
+  if (config.type == aember::utils::service::ServiceType::CONTAINER) {
     if (!container_manager_) {
       log_.error(
           "Cannot add container service '{}': ContainerManager not initialized",
@@ -79,7 +79,7 @@ bool ServiceManager::AddService(const ServiceConfig& config) {
       return false;
     }
 
-    aember::container_manager::ContainerConfig cc;
+    aember::utils::container::ContainerConfig cc;
     cc.name = config.name;
     cc.rootfs = config.container->rootfs;
     cc.args = config.container->args;
@@ -133,8 +133,8 @@ bool ServiceManager::StartService(const std::string& name) {
 bool ServiceManager::StartServiceInternal(const std::string& name,
                                           bool is_restart) {
   std::vector<std::string> dependencies;
-  ServiceConfig config_copy;
-  ServiceType type;
+  aember::utils::service::ServiceConfig config_copy;
+  aember::utils::service::ServiceType type;
 
   {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -173,10 +173,10 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
   pid_t pid = -1;
   bool success = false;
 
-  if (type == ServiceType::PROCESS) {
+  if (type == aember::utils::service::ServiceType::PROCESS) {
     pid = SpawnProcess(config_copy);
     success = (pid >= 0);
-  } else if (type == ServiceType::CONTAINER) {
+  } else if (type == aember::utils::service::ServiceType::CONTAINER) {
     if (!container_manager_) {
       log_.error("ContainerManager not initialized");
       success = false;
@@ -196,7 +196,7 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
     auto service = services_[name];
 
     // Only processes have real PIDs
-    if (type == ServiceType::PROCESS) {
+    if (type == aember::utils::service::ServiceType::PROCESS) {
       service->SetPid(pid);
       pid_to_service_[pid] = name;
     } else {
@@ -214,7 +214,7 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
     ChangeServiceState(name, aember::utils::service::ServiceState::RUNNING);
   }
 
-  if (type == ServiceType::PROCESS) { child_supervisor_.AddChild(pid, name); }
+  if (type == aember::utils::service::ServiceType::PROCESS) { child_supervisor_.AddChild(pid, name); }
 
   return true;
 }
@@ -243,7 +243,7 @@ bool ServiceManager::StopServiceInternal(const std::string& name) {
 
   ChangeServiceState(name, aember::utils::service::ServiceState::STOPPING);
 
-  if (service->GetConfig().type == ServiceType::PROCESS) {
+  if (service->GetConfig().type == aember::utils::service::ServiceType::PROCESS) {
     pid_t pid = service->GetPid();
     if (pid > 0) {
       log_.info("Stopping process service '{}' (pid {})", name, pid);
@@ -254,7 +254,7 @@ bool ServiceManager::StopServiceInternal(const std::string& name) {
     }
     service->SetPid(-1);
 
-  } else if (service->GetConfig().type == ServiceType::CONTAINER) {
+  } else if (service->GetConfig().type == aember::utils::service::ServiceType::CONTAINER) {
     log_.info("Stopping container service '{}'", name);
     if (container_manager_) {
       if (!container_manager_->StopContainer(name)) {
@@ -435,7 +435,7 @@ void ServiceManager::ScheduleRestart(const std::string& name) {
 // Process Spawning
 // --------------------------
 
-pid_t ServiceManager::SpawnProcess(const ServiceConfig& config) {
+pid_t ServiceManager::SpawnProcess(const aember::utils::service::ServiceConfig& config) {
   pid_t pid = fork();
 
   if (pid < 0) {

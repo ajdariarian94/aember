@@ -19,22 +19,7 @@ namespace aember::container_manager {
 // Helpers
 // ---------------------------------------------------------------------------
 
-std::string ContainerStateToString(ContainerState s) {
-  switch (s) {
-    case ContainerState::kStopped:
-      return "stopped";
-    case ContainerState::kStarting:
-      return "starting";
-    case ContainerState::kRunning:
-      return "running";
-    case ContainerState::kStopping:
-      return "stopping";
-    case ContainerState::kFailed:
-      return "failed";
-    default:
-      return "unknown";
-  }
-}
+
 
 // ---------------------------------------------------------------------------
 // Ctor / Dtor
@@ -62,7 +47,7 @@ ContainerManager::~ContainerManager() {
 // Public API
 // ---------------------------------------------------------------------------
 
-bool ContainerManager::AddContainer(const ContainerConfig& config) {
+bool ContainerManager::AddContainer(const aember::utils::container::ContainerConfig& config) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   if (config.name.empty() || config.rootfs.empty()) {
@@ -75,7 +60,7 @@ bool ContainerManager::AddContainer(const ContainerConfig& config) {
     return false;
   }
 
-  ContainerEntry e;
+  aember::utils::container::ContainerEntry e;
   e.config = config;
 
   containers_.push_back(std::move(e));
@@ -112,25 +97,25 @@ bool ContainerManager::StartContainer(const std::string& name) {
     return false;
   }
 
-  if (e->state == ContainerState::kRunning) {
+  if (e->state == aember::utils::container::ContainerState::kRunning) {
     log_.warn("Container '{}' already running", name);
     return true;
   }
 
   log_.info("Starting container '{}'", name);
-  SetState(*e, ContainerState::kStarting);
+  SetState(*e, aember::utils::container::ContainerState::kStarting);
 
   if (!Create(*e)) {
-    SetState(*e, ContainerState::kFailed);
+    SetState(*e, aember::utils::container::ContainerState::kFailed);
     return false;
   }
 
   if (!Start(*e)) {
-    SetState(*e, ContainerState::kFailed);
+    SetState(*e, aember::utils::container::ContainerState::kFailed);
     return false;
   }
 
-  SetState(*e, ContainerState::kRunning);
+  SetState(*e, aember::utils::container::ContainerState::kRunning);
   return true;
 }
 
@@ -144,33 +129,33 @@ bool ContainerManager::StopContainer(const std::string& name) {
   }
 
   log_.info("Stopping container '{}'", name);
-  SetState(*e, ContainerState::kStopping);
+  SetState(*e, aember::utils::container::ContainerState::kStopping);
 
   bool ok = Stop(*e);
 
   Release(*e);
-  SetState(*e, ok ? ContainerState::kStopped : ContainerState::kFailed);
+  SetState(*e, ok ? aember::utils::container::ContainerState::kStopped : aember::utils::container::ContainerState::kFailed);
 
   return ok;
 }
 
-ContainerState ContainerManager::GetContainerState(
+aember::utils::container::ContainerState ContainerManager::GetContainerState(
     const std::string& name) const {
   std::lock_guard<std::mutex> lock(mutex_);
 
   auto* e = Find(name);
-  return e ? e->state : ContainerState::kFailed;
+  return e ? e->state : aember::utils::container::ContainerState::kFailed;
 }
 
 bool ContainerManager::IsRunning(const std::string& name) const {
-  return GetContainerState(name) == ContainerState::kRunning;
+  return GetContainerState(name) == aember::utils::container::ContainerState::kRunning;
 }
 
 // ---------------------------------------------------------------------------
 // LXC lifecycle
 // ---------------------------------------------------------------------------
 
-bool ContainerManager::Create(ContainerEntry& e) {
+bool ContainerManager::Create(aember::utils::container::ContainerEntry& e) {
   log_.info("Container '{}' squashfs: '{}', rootfs: '{}'",
             e.config.name,
             e.config.squashfs,
@@ -226,7 +211,7 @@ bool ContainerManager::Create(ContainerEntry& e) {
   return true;
 }
 
-bool ContainerManager::Start(ContainerEntry& e) {
+bool ContainerManager::Start(aember::utils::container::ContainerEntry& e) {
   if (!e.lxc) {
     log_.error("Start: no LXC handle for '{}'", e.config.name);
     return false;
@@ -256,7 +241,7 @@ bool ContainerManager::Start(ContainerEntry& e) {
   return ok;
 }
 
-bool ContainerManager::Stop(ContainerEntry& e) {
+bool ContainerManager::Stop(aember::utils::container::ContainerEntry& e) {
   if (!e.lxc) return true;
 
   if (!e.lxc->is_running(e.lxc)) return true;
@@ -271,7 +256,7 @@ bool ContainerManager::Stop(ContainerEntry& e) {
   return true;
 }
 
-void ContainerManager::Release(ContainerEntry& e) {
+void ContainerManager::Release(aember::utils::container::ContainerEntry& e) {
   if (e.lxc) {
     log_.debug("Releasing container '{}'", e.config.name);
     lxc_container_put(e.lxc);
@@ -283,7 +268,7 @@ void ContainerManager::Release(ContainerEntry& e) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-void ContainerManager::SetState(ContainerEntry& e, ContainerState s) {
+void ContainerManager::SetState(aember::utils::container::ContainerEntry& e, aember::utils::container::ContainerState s) {
   if (e.state == s) return;
 
   auto old = e.state;
@@ -297,14 +282,14 @@ void ContainerManager::SetState(ContainerEntry& e, ContainerState s) {
   if (callback_) { callback_(e.config.name, old, s); }
 }
 
-ContainerEntry* ContainerManager::Find(const std::string& name) {
+aember::utils::container::ContainerEntry* ContainerManager::Find(const std::string& name) {
   for (auto& e : containers_) {
     if (e.config.name == name) return &e;
   }
   return nullptr;
 }
 
-const ContainerEntry* ContainerManager::Find(const std::string& name) const {
+const aember::utils::container::ContainerEntry* ContainerManager::Find(const std::string& name) const {
   for (auto& e : containers_) {
     if (e.config.name == name) return &e;
   }

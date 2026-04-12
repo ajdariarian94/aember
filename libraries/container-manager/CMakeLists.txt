@@ -44,6 +44,7 @@ target_include_directories(
 target_link_libraries(
   ${COMPONENT}
   PUBLIC aember-libs::mount-manager
+         aember-libs::utils::container
          aember-libs::utils::logging
          PkgConfig::LXC
 )

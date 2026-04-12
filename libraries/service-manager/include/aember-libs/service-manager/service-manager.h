@@ -14,6 +14,7 @@
 #include <aember-libs/service-manager/service.h>
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/service/service-state.h>
+#include <aember-libs/utils/service/service-config.h>
 
 #include <functional>
 #include <map>
@@ -65,7 +66,7 @@ class ServiceManager {
    * @param config ServiceConfig to add
    * @return true if added successfully, false if service already exists
    */
-  bool AddService(const ServiceConfig& config);
+  bool AddService(const aember::utils::service::ServiceConfig& config);
 
   /**
    * @brief Remove a service from the manager.
@@ -181,7 +182,7 @@ class ServiceManager {
   bool StartServiceDependencies(const std::string& name);
   bool CheckDependencies(const std::string& name) const;
   void ScheduleRestart(const std::string& name);
-  pid_t SpawnProcess(const ServiceConfig& config);
+  pid_t SpawnProcess(const aember::utils::service::ServiceConfig& config);
 
   void ChangeServiceState(const std::string& name,
                           aember::utils::service::ServiceState new_state);
