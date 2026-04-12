@@ -296,7 +296,7 @@ void AemberInit::OnServiceStateChangeCallback(
 }
 
 void AemberInit::OnNetworkStatusCallback(
-    const aember::network::ConnectivityStatus& status) {
+    const aember::utils::network::ConnectivityStatus& status) {
   if (status.online) {
     log_.info(
         "Network: online via {} rtt={}ms", status.interface, status.rtt_ms);

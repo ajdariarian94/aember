@@ -194,7 +194,7 @@ class AemberInit {
 
   std::unique_ptr<aember::network::NetworkManager> network_manager_;
   void OnNetworkStatusCallback(
-      const aember::network::ConnectivityStatus& status);
+      const aember::utils::network::ConnectivityStatus& status);
 
   std::shared_ptr<aember::container_manager::ContainerManager>
       container_manager_;
