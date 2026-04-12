@@ -24,4 +24,4 @@ enum class InterfaceState {
   kFailed,      ///< Failed to come up after all retries
 };
 
-}  // namespace aember::utils::service
+}  // namespace aember::utils::network

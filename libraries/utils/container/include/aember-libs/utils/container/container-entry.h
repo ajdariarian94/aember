@@ -23,5 +23,4 @@ struct ContainerEntry {
   lxc_container* lxc{nullptr};
 };
 
-
-}  // namespace aember::utils::service
+}  // namespace aember::utils::container

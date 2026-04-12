@@ -149,10 +149,12 @@ struct NetlinkSocket {
 
 NetworkManager::NetworkManager(
     const nlohmann::json& config,
-    std::function<void(const aember::utils::network::ConnectivityStatus&)> on_status)
+    std::function<void(const aember::utils::network::ConnectivityStatus&)>
+        on_status)
     : on_status_(std::move(on_status)), log_("network-manager") {
   ParseConfig(config);
-  iface_states_.assign(config_.interfaces.size(), aember::utils::network::InterfaceState::kDown);
+  iface_states_.assign(config_.interfaces.size(),
+                       aember::utils::network::InterfaceState::kDown);
 }
 
 NetworkManager::~NetworkManager() {
@@ -287,7 +289,8 @@ void NetworkManager::BringUpInterfaces() {
 
     bool ok = BringUpInterface(iface);
 
-    iface_states_[i] = ok ? aember::utils::network::InterfaceState::kUp : aember::utils::network::InterfaceState::kFailed;
+    iface_states_[i] = ok ? aember::utils::network::InterfaceState::kUp
+                          : aember::utils::network::InterfaceState::kFailed;
 
     if (!ok) {
       if (iface.required) {
@@ -303,10 +306,12 @@ void NetworkManager::BringUpInterfaces() {
   }
 }
 
-bool NetworkManager::BringUpInterface(const aember::utils::network::InterfaceConfig& iface) {
-  log_.info("Bringing up interface: {} (mode={})",
-            iface.name,
-            iface.mode == aember::utils::network::IpMode::kDhcp ? "dhcp" : "static");
+bool NetworkManager::BringUpInterface(
+    const aember::utils::network::InterfaceConfig& iface) {
+  log_.info(
+      "Bringing up interface: {} (mode={})",
+      iface.name,
+      iface.mode == aember::utils::network::IpMode::kDhcp ? "dhcp" : "static");
 
   if (!NetlinkSetInterfaceUp(iface.name)) {
     log_.warn("{}: netlink UP failed, trying fallback", iface.name);
@@ -384,7 +389,8 @@ bool NetworkManager::NetlinkSetInterfaceUp(const std::string& iface_name) {
 // Netlink: assign static address + default route
 // ---------------------------------------------------------------------------
 
-bool NetworkManager::NetlinkSetStaticAddress(const aember::utils::network::InterfaceConfig& iface) {
+bool NetworkManager::NetlinkSetStaticAddress(
+    const aember::utils::network::InterfaceConfig& iface) {
   NetlinkSocket nl;
   if (!nl.Valid()) { return false; }
 
@@ -480,7 +486,8 @@ bool NetworkManager::NetlinkSetStaticAddress(const aember::utils::network::Inter
 // DHCP via udhcpc
 // ---------------------------------------------------------------------------
 
-bool NetworkManager::RunUdhcpc(const aember::utils::network::InterfaceConfig& iface) {
+bool NetworkManager::RunUdhcpc(
+    const aember::utils::network::InterfaceConfig& iface) {
   for (int attempt = 1; attempt <= config_.dhcp_retries; ++attempt) {
     log_.info(
         "{}: DHCP attempt {}/{}", iface.name, attempt, config_.dhcp_retries);
@@ -540,7 +547,8 @@ bool NetworkManager::FallbackIpCommand(const std::vector<std::string>& args) {
 // resolv.conf
 // ---------------------------------------------------------------------------
 
-void NetworkManager::WriteResolvConf(const aember::utils::network::InterfaceConfig& iface) {
+void NetworkManager::WriteResolvConf(
+    const aember::utils::network::InterfaceConfig& iface) {
   std::vector<std::string> servers = iface.dns_servers;
   if (servers.empty()) {
     servers = {"8.8.8.8", "1.1.1.1"};
@@ -578,7 +586,8 @@ void NetworkManager::CreateBridges() {
   }
 }
 
-bool NetworkManager::CreateBridge(const aember::utils::network::BridgeConfig& bridge) {
+bool NetworkManager::CreateBridge(
+    const aember::utils::network::BridgeConfig& bridge) {
   log_.info("Creating bridge: {} address={}", bridge.name, bridge.address);
 
   // Skip if bridge already exists
@@ -769,7 +778,9 @@ aember::utils::network::NetworkInfo NetworkManager::GetNetworkInfo() {
   aember::utils::network::NetworkInfo info;
 
   for (size_t i = 0; i < config_.interfaces.size(); ++i) {
-    if (iface_states_[i] != aember::utils::network::InterfaceState::kUp) { continue; }
+    if (iface_states_[i] != aember::utils::network::InterfaceState::kUp) {
+      continue;
+    }
 
     const std::string& name = config_.interfaces[i].name;
 

@@ -13,6 +13,6 @@
 namespace aember::utils::service {
 
 ServiceConfig::ServiceConfig(const std::string& n, const std::string& cmd)
-      : name(n), command(cmd) {}
+    : name(n), command(cmd) {}
 
 }  // namespace aember::utils::service

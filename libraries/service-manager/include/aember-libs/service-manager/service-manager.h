@@ -13,8 +13,8 @@
 #include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/service-manager/service.h>
 #include <aember-libs/utils/logging/logging.h>
-#include <aember-libs/utils/service/service-state.h>
 #include <aember-libs/utils/service/service-config.h>
+#include <aember-libs/utils/service/service-state.h>
 
 #include <functional>
 #include <map>

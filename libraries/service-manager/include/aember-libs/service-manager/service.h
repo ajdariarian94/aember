@@ -10,9 +10,9 @@
 #pragma once
 
 #include <aember-libs/utils/service/restart-policy.h>
+#include <aember-libs/utils/service/service-config.h>
 #include <aember-libs/utils/service/service-state.h>
 #include <aember-libs/utils/service/service-type.h>
-#include <aember-libs/utils/service/service-config.h>
 
 #include <chrono>
 #include <map>
@@ -24,8 +24,6 @@
 #include <sys/types.h>  // for pid_t
 
 namespace aember::service_manager {
-
-
 
 /**
  * @brief Represents a running service and tracks its state.
@@ -44,7 +42,9 @@ class Service {
   const std::string& GetName() const { return config_.name; }
 
   /** @brief Returns the service configuration. */
-  const aember::utils::service::ServiceConfig& GetConfig() const { return config_; }
+  const aember::utils::service::ServiceConfig& GetConfig() const {
+    return config_;
+  }
 
   /** @brief Returns the current service state. */
   aember::utils::service::ServiceState GetState() const;

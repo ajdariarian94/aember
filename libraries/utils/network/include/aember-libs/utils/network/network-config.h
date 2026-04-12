@@ -10,12 +10,12 @@
 
 #pragma once
 
-#include <aember-libs/utils/network/interface-config.h>
 #include <aember-libs/utils/network/bridge-config.h>
+#include <aember-libs/utils/network/interface-config.h>
 
-#include <vector>
 #include <chrono>
 #include <string>
+#include <vector>
 
 namespace aember::utils::network {
 
@@ -32,5 +32,4 @@ struct NetworkConfig {
   int dhcp_retries{3};
 };
 
-
-}  // namespace aember::utils::service
+}  // namespace aember::utils::network

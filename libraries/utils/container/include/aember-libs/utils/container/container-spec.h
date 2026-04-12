@@ -24,5 +24,4 @@ struct ContainerSpec {
   std::vector<std::string> args;  ///< Arguments passed to container runtime
 };
 
-
-}  // namespace aember::utils::service
+}  // namespace aember::utils::container

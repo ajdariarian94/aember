@@ -10,9 +10,9 @@
 #pragma once
 
 #include <aember-libs/mount-manager/mount-manager.h>
-#include <aember-libs/utils/logging/logging.h>
-#include <aember-libs/utils/container/container-state.h>
 #include <aember-libs/utils/container/container-entry.h>
+#include <aember-libs/utils/container/container-state.h>
+#include <aember-libs/utils/logging/logging.h>
 
 #include <functional>
 #include <memory>
@@ -28,8 +28,9 @@ namespace aember::container_manager {
 
 class ContainerManager {
  public:
-  using StateCallback =
-      std::function<void(const std::string&, aember::utils::container::ContainerState, aember::utils::container::ContainerState)>;
+  using StateCallback = std::function<void(
+      const std::string&, aember::utils::container::ContainerState,
+      aember::utils::container::ContainerState)>;
 
   explicit ContainerManager(
       std::shared_ptr<aember::mount_manager::MountManager> mount_manager,
@@ -51,7 +52,8 @@ class ContainerManager {
   // --------------------------
   // Queries
   // --------------------------
-  aember::utils::container::ContainerState GetContainerState(const std::string& name) const;
+  aember::utils::container::ContainerState GetContainerState(
+      const std::string& name) const;
   bool IsRunning(const std::string& name) const;
 
  private:
@@ -62,10 +64,12 @@ class ContainerManager {
   void Release(aember::utils::container::ContainerEntry& e);
 
   // Helpers
-  void SetState(aember::utils::container::ContainerEntry& e, aember::utils::container::ContainerState s);
+  void SetState(aember::utils::container::ContainerEntry& e,
+                aember::utils::container::ContainerState s);
 
   aember::utils::container::ContainerEntry* Find(const std::string& name);
-  const aember::utils::container::ContainerEntry* Find(const std::string& name) const;
+  const aember::utils::container::ContainerEntry* Find(
+      const std::string& name) const;
 
  private:
   std::vector<aember::utils::container::ContainerEntry> containers_;

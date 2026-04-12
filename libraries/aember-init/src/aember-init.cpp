@@ -306,8 +306,7 @@ void AemberInit::OnNetworkStatusCallback(
 }
 
 void AemberInit::OnContainerStateCallback(
-    const std::string& name,
-    aember::utils::container::ContainerState old_state,
+    const std::string& name, aember::utils::container::ContainerState old_state,
     aember::utils::container::ContainerState new_state) {
   log_.info("Container '{}' state changed: {} -> {}",
             name,

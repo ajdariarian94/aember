@@ -24,4 +24,4 @@ enum class ContainerState {
 
 std::string ContainerStateToString(ContainerState state);
 
-}  // namespace aember::utils::service
+}  // namespace aember::utils::container

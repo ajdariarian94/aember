@@ -10,15 +10,15 @@
 
 #pragma once
 
+#include <aember-libs/utils/container/container-spec.h>
 #include <aember-libs/utils/service/restart-policy.h>
 #include <aember-libs/utils/service/service-type.h>
-#include <aember-libs/utils/container/container-spec.h>
 
+#include <chrono>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
-#include <chrono>
-#include <optional>
 
 namespace aember::utils::service {
 
@@ -31,14 +31,14 @@ struct ServiceConfig {
   std::vector<std::string> args;                   ///< Command-line arguments
   std::map<std::string, std::string> environment;  ///< Environment variables
   std::string working_directory;  ///< Working directory for the service
-  RestartPolicy restart_policy =
-      RestartPolicy::NEVER;  ///< Restart behavior
+  RestartPolicy restart_policy = RestartPolicy::NEVER;  ///< Restart behavior
   std::vector<std::string>
       dependencies;              ///< Services that must start before this one
   int max_restart_attempts = 5;  ///< Maximum number of automatic restarts
   std::chrono::seconds restart_delay{5};   ///< Delay between restarts
   ServiceType type{ServiceType::PROCESS};  ///< Process or container
-  std::optional<aember::utils::container::ContainerSpec> container;  ///< Optional container spec
+  std::optional<aember::utils::container::ContainerSpec>
+      container;  ///< Optional container spec
 
   ServiceConfig() = default;
   ServiceConfig(const std::string& n, const std::string& cmd);

@@ -24,5 +24,4 @@ struct ConnectivityStatus {
   int64_t timestamp_ms{0};
 };
 
-
-}  // namespace aember::utils::service
+}  // namespace aember::utils::network

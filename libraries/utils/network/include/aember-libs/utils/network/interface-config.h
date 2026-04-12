@@ -12,8 +12,8 @@
 
 #include <aember-libs/utils/network/ip-mode.h>
 
-#include <vector>
 #include <string>
+#include <vector>
 
 namespace aember::utils::network {
 
@@ -30,6 +30,4 @@ struct InterfaceConfig {
   bool required{false};  ///< If true, init blocks until this IF is up
 };
 
-
-
-}  // namespace aember::utils::service
+}  // namespace aember::utils::network

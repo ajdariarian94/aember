@@ -55,7 +55,8 @@ class NetworkManager {
  public:
   explicit NetworkManager(
       const nlohmann::json& config,
-      std::function<void(const aember::utils::network::ConnectivityStatus&)> on_status = nullptr);
+      std::function<void(const aember::utils::network::ConnectivityStatus&)>
+          on_status = nullptr);
 
   ~NetworkManager();
 
@@ -102,7 +103,8 @@ class NetworkManager {
   void BringUpInterfaces();
   bool BringUpInterface(const aember::utils::network::InterfaceConfig& iface);
   bool NetlinkSetInterfaceUp(const std::string& iface_name);
-  bool NetlinkSetStaticAddress(const aember::utils::network::InterfaceConfig& iface);
+  bool NetlinkSetStaticAddress(
+      const aember::utils::network::InterfaceConfig& iface);
   bool RunUdhcpc(const aember::utils::network::InterfaceConfig& iface);
   bool FallbackIpCommand(const std::vector<std::string>& args);
   void WriteResolvConf(const aember::utils::network::InterfaceConfig& iface);
@@ -141,7 +143,8 @@ class NetworkManager {
   aember::utils::network::NetworkConfig config_;
   std::vector<aember::utils::network::InterfaceState> iface_states_;
 
-  std::function<void(const aember::utils::network::ConnectivityStatus&)> on_status_;
+  std::function<void(const aember::utils::network::ConnectivityStatus&)>
+      on_status_;
 
   aember::utils::network::ConnectivityStatus status_;
   mutable std::mutex status_mutex_;

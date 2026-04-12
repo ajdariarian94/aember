@@ -22,5 +22,4 @@ struct ContainerConfig {
   std::vector<std::string> args;
 };
 
-
-}  // namespace aember::utils::service
+}  // namespace aember::utils::container

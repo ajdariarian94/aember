@@ -22,6 +22,4 @@ struct BridgeConfig {
   std::string address;  ///< IP in CIDR e.g. "10.0.3.1/24"
 };
 
-
-
-}  // namespace aember::utils::service
+}  // namespace aember::utils::network

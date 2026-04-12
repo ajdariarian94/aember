@@ -20,5 +20,4 @@ enum class IpMode {
   kStatic,  ///< Use a statically configured address
 };
 
-
-}  // namespace aember::utils::service
+}  // namespace aember::utils::network

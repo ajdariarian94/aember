@@ -19,8 +19,6 @@ namespace aember::container_manager {
 // Helpers
 // ---------------------------------------------------------------------------
 
-
-
 // ---------------------------------------------------------------------------
 // Ctor / Dtor
 // ---------------------------------------------------------------------------
@@ -47,7 +45,8 @@ ContainerManager::~ContainerManager() {
 // Public API
 // ---------------------------------------------------------------------------
 
-bool ContainerManager::AddContainer(const aember::utils::container::ContainerConfig& config) {
+bool ContainerManager::AddContainer(
+    const aember::utils::container::ContainerConfig& config) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   if (config.name.empty() || config.rootfs.empty()) {
@@ -134,7 +133,9 @@ bool ContainerManager::StopContainer(const std::string& name) {
   bool ok = Stop(*e);
 
   Release(*e);
-  SetState(*e, ok ? aember::utils::container::ContainerState::kStopped : aember::utils::container::ContainerState::kFailed);
+  SetState(*e,
+           ok ? aember::utils::container::ContainerState::kStopped
+              : aember::utils::container::ContainerState::kFailed);
 
   return ok;
 }
@@ -148,7 +149,8 @@ aember::utils::container::ContainerState ContainerManager::GetContainerState(
 }
 
 bool ContainerManager::IsRunning(const std::string& name) const {
-  return GetContainerState(name) == aember::utils::container::ContainerState::kRunning;
+  return GetContainerState(name) ==
+         aember::utils::container::ContainerState::kRunning;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +270,8 @@ void ContainerManager::Release(aember::utils::container::ContainerEntry& e) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-void ContainerManager::SetState(aember::utils::container::ContainerEntry& e, aember::utils::container::ContainerState s) {
+void ContainerManager::SetState(aember::utils::container::ContainerEntry& e,
+                                aember::utils::container::ContainerState s) {
   if (e.state == s) return;
 
   auto old = e.state;
@@ -282,14 +285,16 @@ void ContainerManager::SetState(aember::utils::container::ContainerEntry& e, aem
   if (callback_) { callback_(e.config.name, old, s); }
 }
 
-aember::utils::container::ContainerEntry* ContainerManager::Find(const std::string& name) {
+aember::utils::container::ContainerEntry* ContainerManager::Find(
+    const std::string& name) {
   for (auto& e : containers_) {
     if (e.config.name == name) return &e;
   }
   return nullptr;
 }
 
-const aember::utils::container::ContainerEntry* ContainerManager::Find(const std::string& name) const {
+const aember::utils::container::ContainerEntry* ContainerManager::Find(
+    const std::string& name) const {
   for (auto& e : containers_) {
     if (e.config.name == name) return &e;
   }
