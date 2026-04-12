@@ -113,8 +113,8 @@ class AemberInit {
    * @param new_state New service state.
    */
   void OnServiceStateChangeCallback(
-      const std::string& name, aember::service_manager::ServiceState old_state,
-      aember::service_manager::ServiceState new_state);
+      const std::string& name, aember::utils::service::ServiceState old_state,
+      aember::utils::service::ServiceState new_state);
 
   /**
    * @brief Indicates whether the init system is currently running.
@@ -140,7 +140,7 @@ class AemberInit {
    * Used to register and dispatch handlers for signals such as SIGTERM,
    * SIGINT, SIGCHLD, and SIGHUP.
    */
-  aember::utils::SignalHandler signal_handler_;
+  aember::utils::signal::SignalHandler signal_handler_;
 
   /**
    * @brief Supervises all child processes.
@@ -190,7 +190,7 @@ class AemberInit {
    */
   std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
 
-  std::optional<aember::utils::DebugShell> debug_shell_;
+  std::optional<aember::utils::shell::DebugShell> debug_shell_;
 
   std::unique_ptr<aember::network::NetworkManager> network_manager_;
   void OnNetworkStatusCallback(
@@ -208,7 +208,7 @@ class AemberInit {
   /**
    * @brief Logger instance for the init system.
    */
-  aember::utils::Logger log_;
+  aember::utils::logging::Logger log_;
 };
 
 }  // namespace aember::aember_init

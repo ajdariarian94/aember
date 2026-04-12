@@ -10,7 +10,9 @@ project(
   VERSION 0.5.1
   HOMEPAGE_URL "https://github.com/ajdariarian94/aember.git"
   DESCRIPTION "aember superbuild project"
-  LANGUAGES C CXX)
+  LANGUAGES C
+            CXX
+)
 
 # ##############################################################################
 #
@@ -37,7 +39,8 @@ ExternalProject_Add(
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
              -DBUILD_TESTS=${BUILD_TESTS}
-             -DVERSION=${PROJECT_VERSION})
+             -DVERSION=${PROJECT_VERSION}
+)
 
 ExternalProject_Add(
   executables
@@ -53,7 +56,8 @@ ExternalProject_Add(
              -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-             -DVERSION=${PROJECT_VERSION})
+             -DVERSION=${PROJECT_VERSION}
+)
 
 ExternalProject_Add(
   examples
@@ -69,4 +73,5 @@ ExternalProject_Add(
              -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-             -DVERSION=${PROJECT_VERSION})
+             -DVERSION=${PROJECT_VERSION}
+)

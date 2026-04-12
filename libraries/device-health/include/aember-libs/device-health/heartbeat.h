@@ -76,7 +76,7 @@ class Heartbeat {
   std::condition_variable
       cv_;            ///< Condition variable for thread synchronization
   std::mutex mutex_;  ///< Mutex for thread synchronization
-  aember::utils::Logger log_;  ///< Logger instance
+  aember::utils::logging::Logger log_;  ///< Logger instance
 };
 
 }  // namespace aember::device_health

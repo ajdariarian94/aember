@@ -13,7 +13,7 @@
 #include <mutex>
 #include <vector>
 
-namespace aember::utils {
+namespace aember::utils::logging {
 
 static std::mutex sink_mutex;
 static bool early_initialized = false;
@@ -139,4 +139,4 @@ Logger::Logger(const std::string& name) {
   spdlog::register_logger(logger_);
 }
 
-}  // namespace aember::utils
+}  // namespace aember::utils::logging

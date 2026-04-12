@@ -101,7 +101,7 @@ void AemberInit::StartRoot() {
   // ----------------------------
   // Enable file logging
   // ----------------------------
-  aember::utils::enable_file_logging("/var/log/aember-init.log");
+  aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
 
   debug_shell_.emplace();
   if (!debug_shell_) { log_.warn("Debug Shell not available"); }
@@ -183,7 +183,7 @@ void AemberInit::StartRoot() {
 
     if (debug_shell) {
       spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
-      aember::utils::enable_console_silence();
+      aember::utils::logging::enable_console_silence();
       debug_shell_->SilenceAemberInBackground();
 
       service_manager_->StartAll();
@@ -287,12 +287,12 @@ void AemberInit::HeartbeatCallback(const nlohmann::json& heartbeat_payload) {
 }
 
 void AemberInit::OnServiceStateChangeCallback(
-    const std::string& name, aember::service_manager::ServiceState old_state,
-    aember::service_manager::ServiceState new_state) {
+    const std::string& name, aember::utils::service::ServiceState old_state,
+    aember::utils::service::ServiceState new_state) {
   log_.info("Service '{}' state changed: {} -> {}",
             name,
-            aember::service_manager::ServiceStateToString(old_state),
-            aember::service_manager::ServiceStateToString(new_state));
+            aember::utils::service::ServiceStateToString(old_state),
+            aember::utils::service::ServiceStateToString(new_state));
 }
 
 void AemberInit::OnNetworkStatusCallback(

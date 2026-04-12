@@ -17,7 +17,7 @@
 #include <map>
 #include <thread>
 
-namespace aember::utils {
+namespace aember::utils::signal {
 
 /**
  * @brief Lightweight signal handler for registering and handling POSIX signals.
@@ -79,4 +79,4 @@ class SignalHandler {
   std::thread signal_thread_;          ///< Thread for handling signals
 };
 
-}  // namespace aember::utils
+}  // namespace aember::utils::signal

@@ -152,7 +152,7 @@ class ConfigManager {
   /**
    * @brief Convert restart policy string to enum.
    */
-  aember::service_manager::RestartPolicy ParseRestartPolicy(
+  aember::utils::service::RestartPolicy ParseRestartPolicy(
       const std::string& policy_str);
 
   /**
@@ -166,10 +166,10 @@ class ConfigManager {
   void SetError(const ConfigError& error);
 
   std::vector<aember::service_manager::ServiceConfig>
-      services_;                           // Loaded services
-  bool loaded_ = false;                    // Load state
-  std::optional<ConfigError> last_error_;  // Last error
-  mutable aember::utils::Logger log_;      // Logger
+      services_;                                // Loaded services
+  bool loaded_ = false;                         // Load state
+  std::optional<ConfigError> last_error_;       // Last error
+  mutable aember::utils::logging::Logger log_;  // Logger
 };
 
 }  // namespace aember::config_manager

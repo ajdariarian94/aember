@@ -61,7 +61,7 @@ class RootManager {
   std::string new_root_path_;
   bool pivoted_ = false;
 
-  mutable aember::utils::Logger log_;
+  mutable aember::utils::logging::Logger log_;
 };
 
 }  // namespace aember::root_manager

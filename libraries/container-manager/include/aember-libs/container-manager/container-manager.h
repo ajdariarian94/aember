@@ -108,7 +108,7 @@ class ContainerManager {
 
   StateCallback callback_;
 
-  aember::utils::Logger log_{"container-manager"};
+  aember::utils::logging::Logger log_{"container-manager"};
 
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
 };

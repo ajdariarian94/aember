@@ -1,25 +1,49 @@
 cmake_minimum_required(VERSION 3.16)
 
 # Component name
-set(COMPONENT "utils")
+set(COMPONENT
+    "utils"
+)
 
 # Version (assumes VERSION and PROJECT_NAME provided by parent)
-set(${COMPONENT}_${PROJECT_NAME}_VERSION ${VERSION})
+set(${COMPONENT}_${PROJECT_NAME}_VERSION
+    ${VERSION}
+)
 
 # -----------------------------------------------------------------------------
 # Sub-components
 # -----------------------------------------------------------------------------
 
-set(LOGGING_COMPONENT "logging")
-set(LOGGING_TARGET "${COMPONENT}_${LOGGING_COMPONENT}") # utils_logging
+set(LOGGING_COMPONENT
+    "logging"
+)
+set(LOGGING_TARGET
+    "${COMPONENT}_${LOGGING_COMPONENT}"
+) # utils_logging
 
-set(SHELL_COMPONENT "shell")
-set(SHELL_TARGET "${COMPONENT}_${SHELL_COMPONENT}") # utils_shell
+set(SERVICE_COMPONENT
+    "service"
+)
+set(SERVICE_TARGET
+    "${COMPONENT}_${SERVICE_COMPONENT}"
+) # utils_service
 
-set(SIGNAL_COMPONENT "signal")
-set(SIGNAL_TARGET "${COMPONENT}_${SIGNAL_COMPONENT}") # utils_signal
+set(SHELL_COMPONENT
+    "shell"
+)
+set(SHELL_TARGET
+    "${COMPONENT}_${SHELL_COMPONENT}"
+) # utils_shell
+
+set(SIGNAL_COMPONENT
+    "signal"
+)
+set(SIGNAL_TARGET
+    "${COMPONENT}_${SIGNAL_COMPONENT}"
+) # utils_signal
 
 add_subdirectory(logging)
+add_subdirectory(service)
 add_subdirectory(shell)
 add_subdirectory(signal)
 
@@ -27,13 +51,27 @@ add_subdirectory(signal)
 # Umbrella component target (empty)
 # -----------------------------------------------------------------------------
 
-add_library(${COMPONENT} INTERFACE)
-add_library(${PROJECT_NAME}::${COMPONENT} ALIAS ${COMPONENT})
+add_library(
+  ${COMPONENT}
+  INTERFACE
+)
+add_library(
+  ${PROJECT_NAME}::${COMPONENT}
+  ALIAS
+  ${COMPONENT}
+)
 
 # Umbrella depends on all subcomponents
-target_link_libraries(${COMPONENT} INTERFACE ${LOGGING_TARGET})
+target_link_libraries(
+  ${COMPONENT}
+  INTERFACE ${LOGGING_TARGET}
+)
 
-set_target_properties(${COMPONENT} PROPERTIES EXPORT_NAME ${COMPONENT})
+set_target_properties(
+  ${COMPONENT}
+  PROPERTIES EXPORT_NAME
+             ${COMPONENT}
+)
 
 # -----------------------------------------------------------------------------
 # Installation
@@ -46,7 +84,8 @@ include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
   VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}
-  COMPATIBILITY AnyNewerVersion)
+  COMPATIBILITY AnyNewerVersion
+)
 
 configure_package_config_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
@@ -55,26 +94,47 @@ configure_package_config_file(
 )
 
 # Install headers
-install(DIRECTORY logging/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(DIRECTORY shell/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(DIRECTORY signal/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(
+  DIRECTORY logging/include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
+  DIRECTORY service/include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
+  DIRECTORY shell/include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
+  DIRECTORY signal/include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
 
 # Install targets
 install(
-  TARGETS ${COMPONENT} ${LOGGING_TARGET} ${SHELL_TARGET} ${SIGNAL_TARGET}
+  TARGETS ${COMPONENT}
+          ${LOGGING_TARGET}
+          ${SERVICE_TARGET}
+          ${SHELL_TARGET}
+          ${SIGNAL_TARGET}
   EXPORT ${COMPONENT}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
 
 # Export target set
 install(
   EXPORT ${COMPONENT}
   FILE ${COMPONENT}Targets.cmake
   NAMESPACE ${PROJECT_NAME}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT})
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
+)
 
 # Install config & version files
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
-              ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT})
+install(
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
+)

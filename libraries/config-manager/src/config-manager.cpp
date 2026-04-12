@@ -292,17 +292,17 @@ bool ConfigManager::ParseService(
 /**
  * @brief Convert restart policy string to enum.
  */
-aember::service_manager::RestartPolicy ConfigManager::ParseRestartPolicy(
+aember::utils::service::RestartPolicy ConfigManager::ParseRestartPolicy(
     const std::string& policy_str) {
   if (policy_str == "never") {
-    return aember::service_manager::RestartPolicy::NEVER;
+    return aember::utils::service::RestartPolicy::NEVER;
   } else if (policy_str == "on-failure" || policy_str == "on_failure") {
-    return aember::service_manager::RestartPolicy::ON_FAILURE;
+    return aember::utils::service::RestartPolicy::ON_FAILURE;
   } else if (policy_str == "always") {
-    return aember::service_manager::RestartPolicy::ALWAYS;
+    return aember::utils::service::RestartPolicy::ALWAYS;
   } else {
     log_.warn("Unknown restart policy '{}', defaulting to 'never'", policy_str);
-    return aember::service_manager::RestartPolicy::NEVER;
+    return aember::utils::service::RestartPolicy::NEVER;
   }
 }
 

@@ -4,9 +4,9 @@
 #include <thread>
 
 int main() {
-  aember::utils::Logger log_{"echo-aember"};
+  aember::utils::logging::Logger log_{"echo-aember"};
 
-  aember::utils::enable_file_logging("/var/log/echo-aember.log");
+  aember::utils::logging::enable_file_logging("/var/log/echo-aember.log");
 
   while (true) {
     log_.info("Echo Aember example running");

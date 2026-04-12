@@ -16,7 +16,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-namespace aember::utils {
+namespace aember::utils::shell {
 
 DebugShell::DebugShell() : log_("debug-shell") {}
 
@@ -96,4 +96,4 @@ void DebugShell::SilenceAemberInBackground() {
   }
 }
 
-}  // namespace aember::utils
+}  // namespace aember::utils::shell

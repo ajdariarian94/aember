@@ -111,7 +111,7 @@ class MountManager {
    */
   bool CheckMountStatus(const std::string& target);
 
-  aember::utils::Logger log_;  ///< Logger instance
+  aember::utils::logging::Logger log_;  ///< Logger instance
   std::vector<std::string>
       mounted_targets_;  ///< List of targets that have been mounted
 };

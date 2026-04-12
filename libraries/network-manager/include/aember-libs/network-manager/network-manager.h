@@ -226,7 +226,7 @@ class NetworkManager {
   std::condition_variable cv_;
   std::mutex cv_mutex_;
 
-  aember::utils::Logger log_;
+  aember::utils::logging::Logger log_;
 };
 
 }  // namespace aember::network

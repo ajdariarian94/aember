@@ -10,19 +10,34 @@ project(
   VERSION ${VERSION}
   HOMEPAGE_URL "https://github.com/ajdariarian94/aember/tree/main/examples/echo"
   DESCRIPTION "echo example"
-  LANGUAGES CXX)
+  LANGUAGES CXX
+)
 
 # Dependencies
-find_package(aember-libs REQUIRED COMPONENTS utils)
+find_package(
+  aember-libs
+  REQUIRED
+  COMPONENTS utils
+)
 
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -no-pie")
+set(CMAKE_EXE_LINKER_FLAGS
+    "${CMAKE_EXE_LINKER_FLAGS} -no-pie"
+)
 
-add_executable(${PROJECT_NAME} main.cpp)
+add_executable(
+  ${PROJECT_NAME}
+  main.cpp
+)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE aember-libs::utils::logging)
+target_link_libraries(
+  ${PROJECT_NAME}
+  PRIVATE aember-libs::utils::logging
+)
 
 target_include_directories(
-  ${PROJECT_NAME} PRIVATE $<BUILD_INTERFACE:${CMAKE_INSTALL_PREFIX}/include>)
+  ${PROJECT_NAME}
+  PRIVATE $<BUILD_INTERFACE:${CMAKE_INSTALL_PREFIX}/include>
+)
 
 # ##############################################################################
 #
@@ -31,4 +46,7 @@ target_include_directories(
 # ##############################################################################
 
 include(GNUInstallDirs)
-install(TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_PREFIX}/examples)
+install(
+  TARGETS ${PROJECT_NAME}
+  DESTINATION ${CMAKE_INSTALL_PREFIX}/examples
+)

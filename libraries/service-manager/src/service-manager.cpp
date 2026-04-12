@@ -111,8 +111,8 @@ bool ServiceManager::RemoveService(const std::string& name) {
   }
 
   auto service = it->second;
-  if (service->GetState() == ServiceState::RUNNING ||
-      service->GetState() == ServiceState::STARTING) {
+  if (service->GetState() == aember::utils::service::ServiceState::RUNNING ||
+      service->GetState() == aember::utils::service::ServiceState::STARTING) {
     log_.error("Cannot remove running service '{}'", name);
     return false;
   }
@@ -148,7 +148,8 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
     auto service = it->second;
     auto state = service->GetState();
 
-    if (state == ServiceState::RUNNING || state == ServiceState::STARTING) {
+    if (state == aember::utils::service::ServiceState::RUNNING ||
+        state == aember::utils::service::ServiceState::STARTING) {
       return true;
     }
 
@@ -161,7 +162,7 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
     config_copy = service->GetConfig();
     type = config_copy.type;
 
-    ChangeServiceState(name, ServiceState::STARTING);
+    ChangeServiceState(name, aember::utils::service::ServiceState::STARTING);
   }
 
   // Start dependencies outside mutex
@@ -186,7 +187,7 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
 
   if (!success) {
     std::lock_guard<std::mutex> lock(mutex_);
-    ChangeServiceState(name, ServiceState::FAILED);
+    ChangeServiceState(name, aember::utils::service::ServiceState::FAILED);
     return false;
   }
 
@@ -210,7 +211,7 @@ bool ServiceManager::StartServiceInternal(const std::string& name,
       service->IncrementRestartCount();
     }
 
-    ChangeServiceState(name, ServiceState::RUNNING);
+    ChangeServiceState(name, aember::utils::service::ServiceState::RUNNING);
   }
 
   if (type == ServiceType::PROCESS) { child_supervisor_.AddChild(pid, name); }
@@ -232,15 +233,15 @@ bool ServiceManager::StopServiceInternal(const std::string& name) {
   }
 
   auto service = it->second;
-  ServiceState current_state = service->GetState();
+  aember::utils::service::ServiceState current_state = service->GetState();
 
-  if (current_state == ServiceState::STOPPED ||
-      current_state == ServiceState::STOPPING) {
+  if (current_state == aember::utils::service::ServiceState::STOPPED ||
+      current_state == aember::utils::service::ServiceState::STOPPING) {
     log_.info("Service '{}' already stopped or stopping", name);
     return true;
   }
 
-  ChangeServiceState(name, ServiceState::STOPPING);
+  ChangeServiceState(name, aember::utils::service::ServiceState::STOPPING);
 
   if (service->GetConfig().type == ServiceType::PROCESS) {
     pid_t pid = service->GetPid();
@@ -266,7 +267,7 @@ bool ServiceManager::StopServiceInternal(const std::string& name) {
     service->SetPid(-1);
   }
 
-  ChangeServiceState(name, ServiceState::STOPPED);
+  ChangeServiceState(name, aember::utils::service::ServiceState::STOPPED);
   return true;
 }
 
@@ -306,11 +307,13 @@ bool ServiceManager::HasService(const std::string& name) const {
   return services_.find(name) != services_.end();
 }
 
-ServiceState ServiceManager::GetServiceState(const std::string& name) const {
+aember::utils::service::ServiceState ServiceManager::GetServiceState(
+    const std::string& name) const {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = services_.find(name);
-  return (it != services_.end()) ? it->second->GetState()
-                                 : ServiceState::STOPPED;
+  return (it != services_.end())
+             ? it->second->GetState()
+             : aember::utils::service::ServiceState::STOPPED;
 }
 
 std::vector<std::string> ServiceManager::GetServiceNames() const {
@@ -347,20 +350,25 @@ void ServiceManager::HandleServiceExit(pid_t pid, int exit_code) {
   service->SetPid(-1);
 
   const auto& config = service->GetConfig();
-  bool was_stopping = (service->GetState() == ServiceState::STOPPING);
+  bool was_stopping =
+      (service->GetState() == aember::utils::service::ServiceState::STOPPING);
   bool killed_by_signal = (exit_code >= 128 && exit_code <= 165);
 
   if (exit_code == 0 || (was_stopping && killed_by_signal)) {
-    ChangeServiceState(service_name, ServiceState::STOPPED);
+    ChangeServiceState(service_name,
+                       aember::utils::service::ServiceState::STOPPED);
   } else {
-    ChangeServiceState(service_name, ServiceState::FAILED);
+    ChangeServiceState(service_name,
+                       aember::utils::service::ServiceState::FAILED);
   }
 
   if (!was_stopping) {
     bool should_restart = false;
-    if (config.restart_policy == RestartPolicy::ALWAYS) should_restart = true;
-    if (config.restart_policy == RestartPolicy::ON_FAILURE && exit_code != 0 &&
-        !killed_by_signal)
+    if (config.restart_policy == aember::utils::service::RestartPolicy::ALWAYS)
+      should_restart = true;
+    if (config.restart_policy ==
+            aember::utils::service::RestartPolicy::ON_FAILURE &&
+        exit_code != 0 && !killed_by_signal)
       should_restart = true;
 
     if (should_restart &&
@@ -391,7 +399,7 @@ bool ServiceManager::StartServiceDependencies(const std::string& name) {
 
   for (const auto& dep : service->GetConfig().dependencies) {
     if (!HasService(dep)) return false;
-    if (GetServiceState(dep) != ServiceState::RUNNING) {
+    if (GetServiceState(dep) != aember::utils::service::ServiceState::RUNNING) {
       if (!StartService(dep)) return false;
     }
   }
@@ -459,13 +467,13 @@ pid_t ServiceManager::SpawnProcess(const ServiceConfig& config) {
 // Internal State Change
 // --------------------------
 
-void ServiceManager::ChangeServiceState(const std::string& name,
-                                        ServiceState new_state) {
+void ServiceManager::ChangeServiceState(
+    const std::string& name, aember::utils::service::ServiceState new_state) {
   auto it = services_.find(name);
   if (it == services_.end()) return;
 
   auto service = it->second;
-  ServiceState old_state = service->GetState();
+  aember::utils::service::ServiceState old_state = service->GetState();
   if (old_state == new_state) return;
 
   service->SetState(new_state);

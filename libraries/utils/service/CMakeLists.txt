@@ -1,34 +1,30 @@
 # -----------------------------------------------------------------------------
-# Shell subcomponent
+# Service subcomponent
 # -----------------------------------------------------------------------------
 
 add_library(
-  ${SHELL_TARGET}
+  ${SERVICE_TARGET}
   STATIC
-  src/debug-shell.cpp
+  src/restart-policy.cpp
+  src/service-state.cpp
 )
 
 add_library(
-  ${PROJECT_NAME}::${COMPONENT}::${SHELL_COMPONENT}
+  ${PROJECT_NAME}::${COMPONENT}::${SERVICE_COMPONENT}
   ALIAS
-  ${SHELL_TARGET}
+  ${SERVICE_TARGET}
 )
 
 target_include_directories(
-  ${SHELL_TARGET}
+  ${SERVICE_TARGET}
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-target_link_libraries(
-  ${SHELL_TARGET}
-  PUBLIC aember-libs::utils
-)
-
 set_target_properties(
-  ${SHELL_TARGET}
+  ${SERVICE_TARGET}
   PROPERTIES EXPORT_NAME
-             ${COMPONENT}::${SHELL_COMPONENT}
+             ${COMPONENT}::${SERVICE_COMPONENT}
 )
 
 # -----------------------------------------------------------------------------

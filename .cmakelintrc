@@ -1,12 +1,20 @@
-linelength=80
+# Max line length before warnings
+linelength = 80
 
-filter=+all
+# Encourage breaking long argument lists
+max_arguments = 3
 
-# Optionally, explicitly enable everything and disable very noisy or irrelevant rules
-# For example, remove ignores:
-# -package/stdargs
-# -convention/filename
-# -readability/wonkycase
+# Allow dangling closing parentheses on new lines
+dangle_parens = True
 
-# So, your filters become something like:
-filter=+linelength,+package/consistency,+package/stdargs,+convention/filename,+readability/logic,+readability/mixedcase,+readability/wonkycase,+syntax,+whitespace/eol,+whitespace/extra,+whitespace/indent,+whitespace/mismatch,+whitespace/newline,+whitespace/tabs
+# -----------------------------------------------------------------------------
+# Enable all checks, then optionally disable noisy ones
+# -----------------------------------------------------------------------------
+
+filter = +all
+
+# Example: disable rules you might not care about
+# (uncomment if needed)
+# filter = -convention/filename
+# filter = -readability/wonkycase
+# filter = -package/stdargs

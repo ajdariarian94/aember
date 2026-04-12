@@ -14,7 +14,7 @@
 #include <csignal>
 #include <iostream>
 
-namespace aember::utils {
+namespace aember::utils::signal {
 
 SignalHandler::SignalHandler() {
   // Initialize empty signal set
@@ -82,4 +82,4 @@ void SignalHandler::SignalLoop() {
   }
 }
 
-}  // namespace aember::utils
+}  // namespace aember::utils::signal

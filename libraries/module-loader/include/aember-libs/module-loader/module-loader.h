@@ -94,7 +94,7 @@ class ModuleLoader {
   int RunModprobe(const std::string& name);
 
   std::vector<ModuleResult> results_;  ///< Results of all load attempts
-  aember::utils::Logger log_{"module-loader"};
+  aember::utils::logging::Logger log_{"module-loader"};
 };
 
 }  // namespace aember::module_loader

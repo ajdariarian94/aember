@@ -13,6 +13,7 @@
 #include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/service-manager/service.h>
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/service/service-state.h>
 
 #include <functional>
 #include <map>
@@ -31,8 +32,9 @@ namespace aember::service_manager {
  */
 class ServiceManager {
  public:
-  using StateChangeCallback =
-      std::function<void(const std::string&, ServiceState, ServiceState)>;
+  using StateChangeCallback = std::function<void(
+      const std::string&, aember::utils::service::ServiceState,
+      aember::utils::service::ServiceState)>;
 
   /**
    * @brief Construct a ServiceManager using a ChildSupervisor.
@@ -129,7 +131,8 @@ class ServiceManager {
    * @param name Service name
    * @return ServiceState Current state
    */
-  ServiceState GetServiceState(const std::string& name) const;
+  aember::utils::service::ServiceState GetServiceState(
+      const std::string& name) const;
 
   /**
    * @brief Get names of all managed services.
@@ -180,7 +183,8 @@ class ServiceManager {
   void ScheduleRestart(const std::string& name);
   pid_t SpawnProcess(const ServiceConfig& config);
 
-  void ChangeServiceState(const std::string& name, ServiceState new_state);
+  void ChangeServiceState(const std::string& name,
+                          aember::utils::service::ServiceState new_state);
 
   // --------------------------
   // Members
@@ -199,7 +203,7 @@ class ServiceManager {
   std::shared_ptr<aember::container_manager::ContainerManager>
       container_manager_;
 
-  mutable aember::utils::Logger log_;  ///< Logger instance
+  mutable aember::utils::logging::Logger log_;  ///< Logger instance
 };
 
 }  // namespace aember::service_manager

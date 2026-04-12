@@ -112,7 +112,7 @@ class ChildSupervisor {
   /**
    * Logger instance for child supervision events.
    */
-  aember::utils::Logger log_;
+  aember::utils::logging::Logger log_;
 };
 
 }  // namespace aember::child_supervisor
