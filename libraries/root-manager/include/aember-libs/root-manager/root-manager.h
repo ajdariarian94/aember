@@ -2,22 +2,12 @@
 
 #include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/root/root-config.h>
 
 #include <memory>
 #include <string>
 
 namespace aember::root_manager {
-
-struct RootConfig {
-  std::string device;         // "/dev/sda1", "UUID=xxx", "LABEL=xxx"
-  std::string fstype;         // "ext4", "btrfs", etc.
-  std::string mount_options;  // "ro,noatime"
-  std::string new_root_path;  // mount target (default "/mnt/root")
-
-  RootConfig() : new_root_path("/mnt/root") {}
-
-  void ParseFromProcCmdline(const std::string& path = "/proc/cmdline");
-};
 
 class RootManager {
  public:
@@ -29,13 +19,13 @@ class RootManager {
   RootManager& operator=(const RootManager&) = delete;
 
   // Mount the real root filesystem
-  bool MountRealRoot(const RootConfig& config);
+  bool MountRealRoot(const aember::utils::root::RootConfig& config);
 
   // Perform pivot_root to switch to the new root
   bool PivotToNewRoot();
 
   // Complete pivot process (mount + pivot + cleanup)
-  bool PerformPivot(const RootConfig& config);
+  bool PerformPivot(const aember::utils::root::RootConfig& config);
 
   // Check if we're currently in initramfs
   static bool IsInInitramfs();

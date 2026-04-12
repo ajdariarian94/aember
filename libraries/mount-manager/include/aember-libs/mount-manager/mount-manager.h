@@ -11,28 +11,13 @@
 #pragma once
 
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/mount/mount-point.h>
 
 #include <functional>
 #include <string>
 #include <vector>
 
 namespace aember::mount_manager {
-
-/**
- * @brief Represents a single mount point with its properties.
- */
-struct MountPoint {
-  std::string source;   ///< What to mount (e.g., "proc", "none")
-  std::string target;   ///< Mount point path (e.g., "/proc")
-  std::string fstype;   ///< Filesystem type (e.g., "proc", "sysfs")
-  unsigned long flags;  ///< Mount flags (MS_NOEXEC, MS_NOSUID, etc.)
-  std::string data;     ///< Mount options (e.g., "mode=0755")
-
-  MountPoint(const std::string& src, const std::string& tgt,
-             const std::string& type, unsigned long f = 0,
-             const std::string& d = "")
-      : source(src), target(tgt), fstype(type), flags(f), data(d) {}
-};
 
 /**
  * @brief Manages mounting and unmounting of filesystems.
@@ -63,7 +48,7 @@ class MountManager {
    * @param mp MountPoint object describing the mount.
    * @return true on success, false on failure.
    */
-  bool Mount(const MountPoint& mp);
+  bool Mount(const aember::utils::mount::MountPoint& mp);
 
   bool MountSquashFS(const std::string& image, const std::string& target,
                      bool read_only = true);
@@ -102,7 +87,7 @@ class MountManager {
    * @brief Provides default early filesystem mounts.
    * @return Vector of MountPoint objects for early boot.
    */
-  std::vector<MountPoint> GetEarlyMounts() const;
+  std::vector<aember::utils::mount::MountPoint> GetEarlyMounts() const;
 
   /**
    * @brief Check /proc/mounts to determine if a mount point is already mounted.

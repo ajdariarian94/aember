@@ -41,8 +41,8 @@ MountManager::~MountManager() {
 /**
  * @brief Returns a list of essential early-boot filesystem mounts.
  */
-std::vector<MountPoint> MountManager::GetEarlyMounts() const {
-  std::vector<MountPoint> mounts;
+std::vector<aember::utils::mount::MountPoint> MountManager::GetEarlyMounts() const {
+  std::vector<aember::utils::mount::MountPoint> mounts;
 
   // /dev/pts - pseudo-terminals
   mounts.emplace_back("devpts",
@@ -129,7 +129,7 @@ bool MountManager::EnsureDirectory(const std::string& path, mode_t mode) {
  * @param mp MountPoint object.
  * @return true on success, false otherwise.
  */
-bool MountManager::Mount(const MountPoint& mp) {
+bool MountManager::Mount(const aember::utils::mount::MountPoint& mp) {
   // Skip if already mounted
   if (IsMounted(mp.target)) {
     log_.debug("'{}' is already mounted, skipping", mp.target);

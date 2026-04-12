@@ -50,7 +50,7 @@ void AemberInit::StartInitramfs() {
   root_manager_ =
       std::make_unique<aember::root_manager::RootManager>(*mount_manager_);
 
-  aember::root_manager::RootConfig root_config;
+  aember::utils::root::RootConfig root_config;
   root_config.ParseFromProcCmdline();
 
   if (!mount_manager_->EnsureDirectory(root_config.new_root_path)) {

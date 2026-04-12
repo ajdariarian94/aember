@@ -34,6 +34,7 @@ target_link_libraries(
   ${COMPONENT}
   PUBLIC aember-libs::mount-manager
          aember-libs::utils::logging
+         aember-libs::utils::root
 )
 
 set_target_properties(

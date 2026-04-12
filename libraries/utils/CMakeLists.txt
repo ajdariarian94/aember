@@ -28,12 +28,26 @@ set(LOGGING_TARGET
     "${COMPONENT}_${LOGGING_COMPONENT}"
 ) # utils_logging
 
+set(MOUNT_COMPONENT
+    "mount"
+)
+set(MOUNT_TARGET
+    "${COMPONENT}_${MOUNT_COMPONENT}"
+) # utils_mount
+
 set(NETWORK_COMPONENT
     "network"
 )
 set(NETWORK_TARGET
     "${COMPONENT}_${NETWORK_COMPONENT}"
 ) # utils_network
+
+set(ROOT_COMPONENT
+    "root"
+)
+set(ROOT_TARGET
+    "${COMPONENT}_${ROOT_COMPONENT}"
+) # utils_root
 
 set(SERVICE_COMPONENT
     "service"
@@ -58,7 +72,9 @@ set(SIGNAL_TARGET
 
 add_subdirectory(container)
 add_subdirectory(logging)
+add_subdirectory(mount)
 add_subdirectory(network)
+add_subdirectory(root)
 add_subdirectory(service)
 add_subdirectory(shell)
 add_subdirectory(signal)
@@ -119,7 +135,15 @@ install(
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 install(
+  DIRECTORY mount/include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
   DIRECTORY network/include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
+  DIRECTORY root/include/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 install(
@@ -140,7 +164,9 @@ install(
   TARGETS ${COMPONENT}
           ${CONTAINER_TARGET}
           ${LOGGING_TARGET}
+          ${MOUNT_TARGET}
           ${NETWORK_TARGET}
+          ${ROOT_TARGET}
           ${SERVICE_TARGET}
           ${SHELL_TARGET}
           ${SIGNAL_TARGET}
