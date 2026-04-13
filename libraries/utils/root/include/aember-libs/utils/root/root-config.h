@@ -25,4 +25,4 @@ struct RootConfig {
   void ParseFromProcCmdline(const std::string& path = "/proc/cmdline");
 };
 
-}  // namespace aember::utils::network
+}  // namespace aember::utils::root

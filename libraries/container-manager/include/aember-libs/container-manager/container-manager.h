@@ -28,9 +28,14 @@ namespace aember::container_manager {
 
 class ContainerManager {
  public:
+    using ContainerConfig = aember::utils::container::ContainerConfig;
+    using ContainerEntry = aember::utils::container::ContainerEntry;
+    using ContainerState = aember::utils::container::ContainerState;
+    using Logger = aember::utils::logging::Logger;
+
   using StateCallback = std::function<void(
-      const std::string&, aember::utils::container::ContainerState,
-      aember::utils::container::ContainerState)>;
+      const std::string&, ContainerState,
+      ContainerState)>;
 
   explicit ContainerManager(
       std::shared_ptr<aember::mount_manager::MountManager> mount_manager,
@@ -43,7 +48,7 @@ class ContainerManager {
   // --------------------------
   // Container management
   // --------------------------
-  bool AddContainer(const aember::utils::container::ContainerConfig& config);
+  bool AddContainer(const ContainerConfig& config);
   bool RemoveContainer(const std::string& name);
 
   bool StartContainer(const std::string& name);
@@ -52,32 +57,32 @@ class ContainerManager {
   // --------------------------
   // Queries
   // --------------------------
-  aember::utils::container::ContainerState GetContainerState(
+  ContainerState GetContainerState(
       const std::string& name) const;
   bool IsRunning(const std::string& name) const;
 
  private:
   // LXC lifecycle
-  bool Create(aember::utils::container::ContainerEntry& e);
-  bool Start(aember::utils::container::ContainerEntry& e);
-  bool Stop(aember::utils::container::ContainerEntry& e);
-  void Release(aember::utils::container::ContainerEntry& e);
+  bool Create(ContainerEntry& e);
+  bool Start(ContainerEntry& e);
+  bool Stop(ContainerEntry& e);
+  void Release(ContainerEntry& e);
 
   // Helpers
-  void SetState(aember::utils::container::ContainerEntry& e,
-                aember::utils::container::ContainerState s);
+  void SetState(ContainerEntry& e,
+                ContainerState s);
 
-  aember::utils::container::ContainerEntry* Find(const std::string& name);
-  const aember::utils::container::ContainerEntry* Find(
+  ContainerEntry* Find(const std::string& name);
+  const ContainerEntry* Find(
       const std::string& name) const;
 
  private:
-  std::vector<aember::utils::container::ContainerEntry> containers_;
+  std::vector<ContainerEntry> containers_;
   mutable std::mutex mutex_;
 
   StateCallback callback_;
 
-  aember::utils::logging::Logger log_{"container-manager"};
+  Logger log_{"container-manager"};
 
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
 };

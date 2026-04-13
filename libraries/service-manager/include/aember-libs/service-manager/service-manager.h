@@ -33,9 +33,14 @@ namespace aember::service_manager {
  */
 class ServiceManager {
  public:
-  using StateChangeCallback = std::function<void(
-      const std::string&, aember::utils::service::ServiceState,
-      aember::utils::service::ServiceState)>;
+ using ServiceState = aember::utils::service::ServiceState;
+ using ServiceConfig = aember::utils::service::ServiceConfig;
+ using Logger = aember::utils::logging::Logger;
+ 
+ using StateChangeCallback = std::function<void(
+      const std::string&, ServiceState,
+      ServiceState)>;
+  
 
   /**
    * @brief Construct a ServiceManager using a ChildSupervisor.
@@ -66,7 +71,7 @@ class ServiceManager {
    * @param config ServiceConfig to add
    * @return true if added successfully, false if service already exists
    */
-  bool AddService(const aember::utils::service::ServiceConfig& config);
+  bool AddService(const ServiceConfig& config);
 
   /**
    * @brief Remove a service from the manager.
@@ -132,7 +137,7 @@ class ServiceManager {
    * @param name Service name
    * @return ServiceState Current state
    */
-  aember::utils::service::ServiceState GetServiceState(
+  ServiceState GetServiceState(
       const std::string& name) const;
 
   /**
@@ -182,10 +187,10 @@ class ServiceManager {
   bool StartServiceDependencies(const std::string& name);
   bool CheckDependencies(const std::string& name) const;
   void ScheduleRestart(const std::string& name);
-  pid_t SpawnProcess(const aember::utils::service::ServiceConfig& config);
+  pid_t SpawnProcess(const ServiceConfig& config);
 
   void ChangeServiceState(const std::string& name,
-                          aember::utils::service::ServiceState new_state);
+                          ServiceState new_state);
 
   // --------------------------
   // Members
@@ -204,7 +209,7 @@ class ServiceManager {
   std::shared_ptr<aember::container_manager::ContainerManager>
       container_manager_;
 
-  mutable aember::utils::logging::Logger log_;  ///< Logger instance
+  mutable Logger log_;  ///< Logger instance
 };
 
 }  // namespace aember::service_manager

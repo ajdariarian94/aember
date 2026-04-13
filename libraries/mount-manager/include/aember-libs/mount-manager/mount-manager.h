@@ -30,9 +30,8 @@ namespace aember::mount_manager {
  */
 class MountManager {
  public:
-
- using Logger = aember::utils::logging::Logger;
- using MountPoint = aember::utils::mount::MountPoint;
+  using Logger = aember::utils::logging::Logger;
+  using MountPoint = aember::utils::mount::MountPoint;
 
   MountManager();
   ~MountManager();

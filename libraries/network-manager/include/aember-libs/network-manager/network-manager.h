@@ -53,10 +53,17 @@ namespace aember::network {
  */
 class NetworkManager {
  public:
+  using ConnectivityStatus = aember::utils::network::ConnectivityStatus;
+  using NetworkInfo = aember::utils::network::NetworkInfo;
+  using NetworkConfig = aember::utils::network::NetworkConfig;
+  using InterfaceConfig = aember::utils::network::InterfaceConfig;
+  using BridgeConfig = aember::utils::network::BridgeConfig;
+  using InterfaceState = aember::utils::network::InterfaceState;
+  using Logger = aember::utils::logging::Logger;
+
   explicit NetworkManager(
       const nlohmann::json& config,
-      std::function<void(const aember::utils::network::ConnectivityStatus&)>
-          on_status = nullptr);
+      std::function<void(const ConnectivityStatus&)> on_status = nullptr);
 
   ~NetworkManager();
 
@@ -77,7 +84,7 @@ class NetworkManager {
   /**
    * @brief Returns the last known connectivity status.
    */
-  aember::utils::network::ConnectivityStatus GetStatus() const;
+  ConnectivityStatus GetStatus() const;
 
   /**
    * @brief Returns true if internet is reachable.
@@ -87,7 +94,7 @@ class NetworkManager {
   /**
    * @brief Returns a full snapshot of the active interface.
    */
-  aember::utils::network::NetworkInfo GetNetworkInfo();
+  NetworkInfo GetNetworkInfo();
 
   /**
    * @brief Blocks until internet connectivity is confirmed or timeout expires.
@@ -101,13 +108,12 @@ class NetworkManager {
 
   // --- Interface bring-up ---------------------------------------------------
   void BringUpInterfaces();
-  bool BringUpInterface(const aember::utils::network::InterfaceConfig& iface);
+  bool BringUpInterface(const InterfaceConfig& iface);
   bool NetlinkSetInterfaceUp(const std::string& iface_name);
-  bool NetlinkSetStaticAddress(
-      const aember::utils::network::InterfaceConfig& iface);
-  bool RunUdhcpc(const aember::utils::network::InterfaceConfig& iface);
+  bool NetlinkSetStaticAddress(const InterfaceConfig& iface);
+  bool RunUdhcpc(const InterfaceConfig& iface);
   bool FallbackIpCommand(const std::vector<std::string>& args);
-  void WriteResolvConf(const aember::utils::network::InterfaceConfig& iface);
+  void WriteResolvConf(const InterfaceConfig& iface);
 
   // --- Bridge management ----------------------------------------------------
 
@@ -122,7 +128,7 @@ class NetworkManager {
    *        Skips gracefully if bridge already exists.
    * @return true on success.
    */
-  bool CreateBridge(const aember::utils::network::BridgeConfig& bridge);
+  bool CreateBridge(const BridgeConfig& bridge);
 
   /**
    * @brief Returns true if the named interface already exists in the kernel.
@@ -140,13 +146,12 @@ class NetworkManager {
   int GetInterfaceIndex(const std::string& iface_name);
 
   // --- Members --------------------------------------------------------------
-  aember::utils::network::NetworkConfig config_;
-  std::vector<aember::utils::network::InterfaceState> iface_states_;
+  NetworkConfig config_;
+  std::vector<InterfaceState> iface_states_;
 
-  std::function<void(const aember::utils::network::ConnectivityStatus&)>
-      on_status_;
+  std::function<void(const ConnectivityStatus&)> on_status_;
 
-  aember::utils::network::ConnectivityStatus status_;
+  ConnectivityStatus status_;
   mutable std::mutex status_mutex_;
 
   std::atomic_bool running_{false};
@@ -154,7 +159,7 @@ class NetworkManager {
   std::condition_variable cv_;
   std::mutex cv_mutex_;
 
-  aember::utils::logging::Logger log_;
+  Logger log_;
 };
 
 }  // namespace aember::network

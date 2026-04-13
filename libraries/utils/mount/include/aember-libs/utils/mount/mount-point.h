@@ -30,4 +30,4 @@ struct MountPoint {
       : source(src), target(tgt), fstype(type), flags(f), data(d) {}
 };
 
-}  // namespace aember::utils::network
+}  // namespace aember::utils::mount

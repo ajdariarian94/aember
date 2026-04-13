@@ -33,21 +33,25 @@ namespace aember::service_manager {
  */
 class Service {
  public:
+ 
+ using ServiceConfig = aember::utils::service::ServiceConfig;
+ using ServiceState = aember::utils::service::ServiceState;
+
   /**
    * @brief Constructs a Service with the given configuration.
    */
-  Service(const aember::utils::service::ServiceConfig& config);
+  Service(const ServiceConfig& config);
 
   /** @brief Returns the service name. */
   const std::string& GetName() const { return config_.name; }
 
   /** @brief Returns the service configuration. */
-  const aember::utils::service::ServiceConfig& GetConfig() const {
+  const ServiceConfig& GetConfig() const {
     return config_;
   }
 
   /** @brief Returns the current service state. */
-  aember::utils::service::ServiceState GetState() const;
+  ServiceState GetState() const;
 
   /** @brief Returns the PID of the running process, or -1 if not running. */
   pid_t GetPid() const;
@@ -65,7 +69,7 @@ class Service {
   std::chrono::system_clock::time_point GetLastRestartTime() const;
 
   /** @brief Set the service state. */
-  void SetState(aember::utils::service::ServiceState state);
+  void SetState(ServiceState state);
 
   /** @brief Set the PID of the service process. */
   void SetPid(pid_t pid);
@@ -86,9 +90,8 @@ class Service {
   void SetLastRestartTime();
 
  private:
-  aember::utils::service::ServiceConfig config_;  ///< Service configuration
-  aember::utils::service::ServiceState state_ =
-      aember::utils::service::ServiceState::STOPPED;  ///< Current state
+ ServiceConfig config_;  ///< Service configuration
+ ServiceState state_ = ServiceState::STOPPED;  ///< Current state
   pid_t pid_ = -1;                                    ///< Process ID
   int exit_code_ = 0;                                 ///< Last exit code
   int restart_count_ = 0;                             ///< Restart counter

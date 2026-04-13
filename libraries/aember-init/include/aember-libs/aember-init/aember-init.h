@@ -49,6 +49,10 @@ namespace aember::aember_init {
  */
 class AemberInit {
  public:
+    using DebugShell = aember::utils::shell::DebugShell;
+    using ContainerState = aember::utils::container::ContainerState;
+    using Logger = aember::utils::logging::Logger;
+
   /**
    * @brief Construct the init system.
    *
@@ -190,7 +194,7 @@ class AemberInit {
    */
   std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
 
-  std::optional<aember::utils::shell::DebugShell> debug_shell_;
+  std::optional<DebugShell> debug_shell_;
 
   std::unique_ptr<aember::network::NetworkManager> network_manager_;
   void OnNetworkStatusCallback(
@@ -200,15 +204,15 @@ class AemberInit {
       container_manager_;
   void OnContainerStateCallback(
       const std::string& name,
-      aember::utils::container::ContainerState old_state,
-      aember::utils::container::ContainerState new_state);
+      ContainerState old_state,
+      ContainerState new_state);
 
   std::optional<aember::module_loader::ModuleLoader> module_loader_;
 
   /**
    * @brief Logger instance for the init system.
    */
-  aember::utils::logging::Logger log_;
+  Logger log_;
 };
 
 }  // namespace aember::aember_init

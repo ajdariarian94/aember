@@ -15,9 +15,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
-#include <algorithm>
 
 namespace aember::module_loader {
 
@@ -39,7 +39,6 @@ namespace aember::module_loader {
  */
 class ModuleLoader {
  public:
-
   using ModuleResult = aember::utils::module::ModuleResult;
 
   ModuleLoader();

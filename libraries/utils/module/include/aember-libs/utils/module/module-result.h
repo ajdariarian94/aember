@@ -23,4 +23,4 @@ struct ModuleResult {
   std::string error;   ///< Error message if failed
 };
 
-}  // namespace aember::utils::network
+}  // namespace aember::utils::module

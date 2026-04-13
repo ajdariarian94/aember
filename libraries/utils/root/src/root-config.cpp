@@ -52,4 +52,4 @@ void RootConfig::ParseFromProcCmdline(const std::string& path) {
   if (mount_options.empty()) { mount_options = "rw"; }
 }
 
-}  // namespace aember::utils::service
+}  // namespace aember::utils::root
