@@ -1,205 +1,82 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Component name
-set(COMPONENT
-    "utils"
-)
-
-# Version (assumes VERSION and PROJECT_NAME provided by parent)
-set(${COMPONENT}_${PROJECT_NAME}_VERSION
-    ${VERSION}
-)
+set(COMPONENT "utils")
+set(${COMPONENT}_${PROJECT_NAME}_VERSION ${VERSION})
 
 # -----------------------------------------------------------------------------
-# Sub-components
+# Subcomponents
 # -----------------------------------------------------------------------------
-
-set(CONTAINER_COMPONENT
-    "container"
+set(SUBCOMPONENTS
+    container logging module mount network root service shell signal
 )
-set(CONTAINER_TARGET
-    "${COMPONENT}_${CONTAINER_COMPONENT}"
-) # utils_container
 
-set(LOGGING_COMPONENT
-    "logging"
-)
-set(LOGGING_TARGET
-    "${COMPONENT}_${LOGGING_COMPONENT}"
-) # utils_logging
+# Set up variables that subcomponents expect (preserving original naming)
+foreach(subcomp IN LISTS SUBCOMPONENTS)
+    string(TOUPPER ${subcomp} SUBCOMP_UPPER)
+    set(${SUBCOMP_UPPER}_COMPONENT ${subcomp})
+    set(${SUBCOMP_UPPER}_TARGET "${COMPONENT}_${subcomp}")
+endforeach()
 
-set(MODULE_COMPONENT
-    "module"
-)
-set(MODULE_TARGET
-    "${COMPONENT}_${MODULE_COMPONENT}"
-) # utils_module
-
-set(MOUNT_COMPONENT
-    "mount"
-)
-set(MOUNT_TARGET
-    "${COMPONENT}_${MOUNT_COMPONENT}"
-) # utils_mount
-
-set(NETWORK_COMPONENT
-    "network"
-)
-set(NETWORK_TARGET
-    "${COMPONENT}_${NETWORK_COMPONENT}"
-) # utils_network
-
-set(ROOT_COMPONENT
-    "root"
-)
-set(ROOT_TARGET
-    "${COMPONENT}_${ROOT_COMPONENT}"
-) # utils_root
-
-set(SERVICE_COMPONENT
-    "service"
-)
-set(SERVICE_TARGET
-    "${COMPONENT}_${SERVICE_COMPONENT}"
-) # utils_service
-
-set(SHELL_COMPONENT
-    "shell"
-)
-set(SHELL_TARGET
-    "${COMPONENT}_${SHELL_COMPONENT}"
-) # utils_shell
-
-set(SIGNAL_COMPONENT
-    "signal"
-)
-set(SIGNAL_TARGET
-    "${COMPONENT}_${SIGNAL_COMPONENT}"
-) # utils_signal
-
-add_subdirectory(container)
-add_subdirectory(logging)
-add_subdirectory(module)
-add_subdirectory(mount)
-add_subdirectory(network)
-add_subdirectory(root)
-add_subdirectory(service)
-add_subdirectory(shell)
-add_subdirectory(signal)
+# Now add subdirectories with all variables properly set
+foreach(subcomp IN LISTS SUBCOMPONENTS)
+    add_subdirectory(${subcomp})
+    string(TOUPPER ${subcomp} SUBCOMP_UPPER)
+    list(APPEND SUBCOMPONENT_TARGETS ${${SUBCOMP_UPPER}_TARGET})
+endforeach()
 
 # -----------------------------------------------------------------------------
-# Umbrella component target (empty)
+# Umbrella target
 # -----------------------------------------------------------------------------
+add_library(${COMPONENT} INTERFACE)
+add_library(${PROJECT_NAME}::${COMPONENT} ALIAS ${COMPONENT})
 
-add_library(
-  ${COMPONENT}
-  INTERFACE
-)
-add_library(
-  ${PROJECT_NAME}::${COMPONENT}
-  ALIAS
-  ${COMPONENT}
-)
-
-# Umbrella depends on all subcomponents
-target_link_libraries(
-  ${COMPONENT}
-  INTERFACE ${LOGGING_TARGET}
-)
-
-set_target_properties(
-  ${COMPONENT}
-  PROPERTIES EXPORT_NAME
-             ${COMPONENT}
-)
+target_link_libraries(${COMPONENT} INTERFACE ${LOGGING_TARGET})
+set_target_properties(${COMPONENT} PROPERTIES EXPORT_NAME ${COMPONENT})
 
 # -----------------------------------------------------------------------------
 # Installation
 # -----------------------------------------------------------------------------
-
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-# Config + Version files
+# Package config
 write_basic_package_version_file(
-  ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
-  VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}
-  COMPATIBILITY AnyNewerVersion
+    ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
+    VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}
+    COMPATIBILITY AnyNewerVersion
 )
 
 configure_package_config_file(
-  ${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
-  ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
+    ${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
 )
 
 # Install headers
-install(
-  DIRECTORY container/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-install(
-  DIRECTORY logging/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-install(
-  DIRECTORY module/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-install(
-  DIRECTORY mount/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-install(
-  DIRECTORY network/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-install(
-  DIRECTORY root/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-install(
-  DIRECTORY service/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-install(
-  DIRECTORY shell/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-install(
-  DIRECTORY signal/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
+foreach(subcomp IN LISTS SUBCOMPONENTS)
+    install(DIRECTORY ${subcomp}/include/ 
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endforeach()
 
 # Install targets
 install(
-  TARGETS ${COMPONENT}
-          ${CONTAINER_TARGET}
-          ${LOGGING_TARGET}
-          ${MODULE_TARGET}
-          ${MOUNT_TARGET}
-          ${NETWORK_TARGET}
-          ${ROOT_TARGET}
-          ${SERVICE_TARGET}
-          ${SHELL_TARGET}
-          ${SIGNAL_TARGET}
-  EXPORT ${COMPONENT}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    TARGETS ${COMPONENT} ${SUBCOMPONENT_TARGETS}
+    EXPORT ${COMPONENT}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# Export target set
+# Export and config files
 install(
-  EXPORT ${COMPONENT}
-  FILE ${COMPONENT}Targets.cmake
-  NAMESPACE ${PROJECT_NAME}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
+    EXPORT ${COMPONENT}
+    FILE ${COMPONENT}Targets.cmake
+    NAMESPACE ${PROJECT_NAME}::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
 )
 
-# Install config & version files
 install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
+          ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
 )
