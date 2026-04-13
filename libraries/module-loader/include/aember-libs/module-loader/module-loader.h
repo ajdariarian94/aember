@@ -11,22 +11,15 @@
 #pragma once
 
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/module/module-result.h>
 
 #include <nlohmann/json.hpp>
 
 #include <string>
 #include <vector>
+#include <algorithm>
 
 namespace aember::module_loader {
-
-/**
- * @brief Result of a single module load attempt.
- */
-struct ModuleResult {
-  std::string name;    ///< Module name e.g. "bridge"
-  bool loaded{false};  ///< true if load succeeded
-  std::string error;   ///< Error message if failed
-};
 
 /**
  * @class ModuleLoader
@@ -46,6 +39,9 @@ struct ModuleResult {
  */
 class ModuleLoader {
  public:
+
+  using ModuleResult = aember::utils::module::ModuleResult;
+
   ModuleLoader();
   ~ModuleLoader() = default;
 

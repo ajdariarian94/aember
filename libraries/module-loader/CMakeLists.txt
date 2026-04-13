@@ -33,6 +33,7 @@ target_include_directories(
 target_link_libraries(
   ${COMPONENT}
   PUBLIC aember-libs::utils::logging
+  aember-libs::utils::module
 )
 
 set_target_properties(

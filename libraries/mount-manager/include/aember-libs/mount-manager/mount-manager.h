@@ -30,6 +30,10 @@ namespace aember::mount_manager {
  */
 class MountManager {
  public:
+
+ using Logger = aember::utils::logging::Logger;
+ using MountPoint = aember::utils::mount::MountPoint;
+
   MountManager();
   ~MountManager();
 
@@ -48,7 +52,7 @@ class MountManager {
    * @param mp MountPoint object describing the mount.
    * @return true on success, false on failure.
    */
-  bool Mount(const aember::utils::mount::MountPoint& mp);
+  bool Mount(const MountPoint& mp);
 
   bool MountSquashFS(const std::string& image, const std::string& target,
                      bool read_only = true);
@@ -87,7 +91,7 @@ class MountManager {
    * @brief Provides default early filesystem mounts.
    * @return Vector of MountPoint objects for early boot.
    */
-  std::vector<aember::utils::mount::MountPoint> GetEarlyMounts() const;
+  std::vector<MountPoint> GetEarlyMounts() const;
 
   /**
    * @brief Check /proc/mounts to determine if a mount point is already mounted.
@@ -96,7 +100,7 @@ class MountManager {
    */
   bool CheckMountStatus(const std::string& target);
 
-  aember::utils::logging::Logger log_;  ///< Logger instance
+  Logger log_;  ///< Logger instance
   std::vector<std::string>
       mounted_targets_;  ///< List of targets that have been mounted
 };
