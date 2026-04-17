@@ -33,14 +33,12 @@ namespace aember::service_manager {
  */
 class ServiceManager {
  public:
- using ServiceState = aember::utils::service::ServiceState;
- using ServiceConfig = aember::utils::service::ServiceConfig;
- using Logger = aember::utils::logging::Logger;
- 
- using StateChangeCallback = std::function<void(
-      const std::string&, ServiceState,
-      ServiceState)>;
-  
+  using ServiceState = aember::utils::service::ServiceState;
+  using ServiceConfig = aember::utils::service::ServiceConfig;
+  using Logger = aember::utils::logging::Logger;
+
+  using StateChangeCallback =
+      std::function<void(const std::string&, ServiceState, ServiceState)>;
 
   /**
    * @brief Construct a ServiceManager using a ChildSupervisor.
@@ -137,8 +135,7 @@ class ServiceManager {
    * @param name Service name
    * @return ServiceState Current state
    */
-  ServiceState GetServiceState(
-      const std::string& name) const;
+  ServiceState GetServiceState(const std::string& name) const;
 
   /**
    * @brief Get names of all managed services.
@@ -189,8 +186,7 @@ class ServiceManager {
   void ScheduleRestart(const std::string& name);
   pid_t SpawnProcess(const ServiceConfig& config);
 
-  void ChangeServiceState(const std::string& name,
-                          ServiceState new_state);
+  void ChangeServiceState(const std::string& name, ServiceState new_state);
 
   // --------------------------
   // Members

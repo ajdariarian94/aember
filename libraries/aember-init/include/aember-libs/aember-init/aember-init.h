@@ -49,9 +49,9 @@ namespace aember::aember_init {
  */
 class AemberInit {
  public:
-    using DebugShell = aember::utils::shell::DebugShell;
-    using ContainerState = aember::utils::container::ContainerState;
-    using Logger = aember::utils::logging::Logger;
+  using DebugShell = aember::utils::shell::DebugShell;
+  using ContainerState = aember::utils::container::ContainerState;
+  using Logger = aember::utils::logging::Logger;
 
   /**
    * @brief Construct the init system.
@@ -202,10 +202,9 @@ class AemberInit {
 
   std::shared_ptr<aember::container_manager::ContainerManager>
       container_manager_;
-  void OnContainerStateCallback(
-      const std::string& name,
-      ContainerState old_state,
-      ContainerState new_state);
+  void OnContainerStateCallback(const std::string& name,
+                                ContainerState old_state,
+                                ContainerState new_state);
 
   std::optional<aember::module_loader::ModuleLoader> module_loader_;
 

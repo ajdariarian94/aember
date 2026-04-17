@@ -11,9 +11,8 @@ namespace aember::root_manager {
 
 class RootManager {
  public:
- 
- using RootConfig = aember::utils::root::RootConfig;
- using Logger = aember::utils::logging::Logger;
+  using RootConfig = aember::utils::root::RootConfig;
+  using Logger = aember::utils::logging::Logger;
 
   RootManager(aember::mount_manager::MountManager& mount_manager);
   ~RootManager();

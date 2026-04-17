@@ -34,6 +34,8 @@ namespace aember::child_supervisor {
  */
 class ChildSupervisor {
  public:
+  using Logger = aember::utils::logging::Logger;
+
   /**
    * @brief Construct a new ChildSupervisor.
    *
@@ -112,7 +114,7 @@ class ChildSupervisor {
   /**
    * Logger instance for child supervision events.
    */
-  aember::utils::logging::Logger log_;
+  Logger log_;
 };
 
 }  // namespace aember::child_supervisor

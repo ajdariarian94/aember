@@ -31,6 +31,8 @@ namespace aember::device_health {
  */
 class Heartbeat {
  public:
+  using Logger = aember::utils::logging::Logger;
+
   /**
    * @brief Constructs a Heartbeat object.
    * @param callback Function to be called with heartbeat JSON payload.
@@ -76,7 +78,7 @@ class Heartbeat {
   std::condition_variable
       cv_;            ///< Condition variable for thread synchronization
   std::mutex mutex_;  ///< Mutex for thread synchronization
-  aember::utils::logging::Logger log_;  ///< Logger instance
+  Logger log_;        ///< Logger instance
 };
 
 }  // namespace aember::device_health

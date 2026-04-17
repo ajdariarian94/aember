@@ -33,9 +33,8 @@ namespace aember::service_manager {
  */
 class Service {
  public:
- 
- using ServiceConfig = aember::utils::service::ServiceConfig;
- using ServiceState = aember::utils::service::ServiceState;
+  using ServiceConfig = aember::utils::service::ServiceConfig;
+  using ServiceState = aember::utils::service::ServiceState;
 
   /**
    * @brief Constructs a Service with the given configuration.
@@ -46,9 +45,7 @@ class Service {
   const std::string& GetName() const { return config_.name; }
 
   /** @brief Returns the service configuration. */
-  const ServiceConfig& GetConfig() const {
-    return config_;
-  }
+  const ServiceConfig& GetConfig() const { return config_; }
 
   /** @brief Returns the current service state. */
   ServiceState GetState() const;
@@ -90,8 +87,8 @@ class Service {
   void SetLastRestartTime();
 
  private:
- ServiceConfig config_;  ///< Service configuration
- ServiceState state_ = ServiceState::STOPPED;  ///< Current state
+  ServiceConfig config_;                              ///< Service configuration
+  ServiceState state_ = ServiceState::STOPPED;        ///< Current state
   pid_t pid_ = -1;                                    ///< Process ID
   int exit_code_ = 0;                                 ///< Last exit code
   int restart_count_ = 0;                             ///< Restart counter

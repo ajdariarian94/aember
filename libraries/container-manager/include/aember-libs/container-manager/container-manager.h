@@ -28,14 +28,13 @@ namespace aember::container_manager {
 
 class ContainerManager {
  public:
-    using ContainerConfig = aember::utils::container::ContainerConfig;
-    using ContainerEntry = aember::utils::container::ContainerEntry;
-    using ContainerState = aember::utils::container::ContainerState;
-    using Logger = aember::utils::logging::Logger;
+  using ContainerConfig = aember::utils::container::ContainerConfig;
+  using ContainerEntry = aember::utils::container::ContainerEntry;
+  using ContainerState = aember::utils::container::ContainerState;
+  using Logger = aember::utils::logging::Logger;
 
-  using StateCallback = std::function<void(
-      const std::string&, ContainerState,
-      ContainerState)>;
+  using StateCallback =
+      std::function<void(const std::string&, ContainerState, ContainerState)>;
 
   explicit ContainerManager(
       std::shared_ptr<aember::mount_manager::MountManager> mount_manager,
@@ -57,8 +56,7 @@ class ContainerManager {
   // --------------------------
   // Queries
   // --------------------------
-  ContainerState GetContainerState(
-      const std::string& name) const;
+  ContainerState GetContainerState(const std::string& name) const;
   bool IsRunning(const std::string& name) const;
 
  private:
@@ -69,12 +67,10 @@ class ContainerManager {
   void Release(ContainerEntry& e);
 
   // Helpers
-  void SetState(ContainerEntry& e,
-                ContainerState s);
+  void SetState(ContainerEntry& e, ContainerState s);
 
   ContainerEntry* Find(const std::string& name);
-  const ContainerEntry* Find(
-      const std::string& name) const;
+  const ContainerEntry* Find(const std::string& name) const;
 
  private:
   std::vector<ContainerEntry> containers_;
