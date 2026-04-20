@@ -50,7 +50,7 @@ void AemberInit::StartInitramfs() {
   root_manager_ =
       std::make_unique<aember::root_manager::RootManager>(*mount_manager_);
 
-  aember::root_manager::RootConfig root_config;
+  aember::utils::root::RootConfig root_config;
   root_config.ParseFromProcCmdline();
 
   if (!mount_manager_->EnsureDirectory(root_config.new_root_path)) {
@@ -101,7 +101,7 @@ void AemberInit::StartRoot() {
   // ----------------------------
   // Enable file logging
   // ----------------------------
-  aember::utils::enable_file_logging("/var/log/aember-init.log");
+  aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
 
   debug_shell_.emplace();
   if (!debug_shell_) { log_.warn("Debug Shell not available"); }
@@ -183,7 +183,7 @@ void AemberInit::StartRoot() {
 
     if (debug_shell) {
       spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
-      aember::utils::enable_console_silence();
+      aember::utils::logging::enable_console_silence();
       debug_shell_->SilenceAemberInBackground();
 
       service_manager_->StartAll();
@@ -287,16 +287,16 @@ void AemberInit::HeartbeatCallback(const nlohmann::json& heartbeat_payload) {
 }
 
 void AemberInit::OnServiceStateChangeCallback(
-    const std::string& name, aember::service_manager::ServiceState old_state,
-    aember::service_manager::ServiceState new_state) {
+    const std::string& name, aember::utils::service::ServiceState old_state,
+    aember::utils::service::ServiceState new_state) {
   log_.info("Service '{}' state changed: {} -> {}",
             name,
-            aember::service_manager::ServiceStateToString(old_state),
-            aember::service_manager::ServiceStateToString(new_state));
+            aember::utils::service::ServiceStateToString(old_state),
+            aember::utils::service::ServiceStateToString(new_state));
 }
 
 void AemberInit::OnNetworkStatusCallback(
-    const aember::network::ConnectivityStatus& status) {
+    const aember::utils::network::ConnectivityStatus& status) {
   if (status.online) {
     log_.info(
         "Network: online via {} rtt={}ms", status.interface, status.rtt_ms);
@@ -306,13 +306,12 @@ void AemberInit::OnNetworkStatusCallback(
 }
 
 void AemberInit::OnContainerStateCallback(
-    const std::string& name,
-    aember::container_manager::ContainerState old_state,
-    aember::container_manager::ContainerState new_state) {
+    const std::string& name, aember::utils::container::ContainerState old_state,
+    aember::utils::container::ContainerState new_state) {
   log_.info("Container '{}' state changed: {} -> {}",
             name,
-            aember::container_manager::ContainerStateToString(old_state),
-            aember::container_manager::ContainerStateToString(new_state));
+            aember::utils::container::ContainerStateToString(old_state),
+            aember::utils::container::ContainerStateToString(new_state));
 
   // 🔥 Optional (next step): sync to ServiceManager
   // Example:

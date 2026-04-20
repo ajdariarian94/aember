@@ -13,6 +13,8 @@
 #include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/service-manager/service.h>
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/service/service-config.h>
+#include <aember-libs/utils/service/service-state.h>
 
 #include <functional>
 #include <map>
@@ -31,6 +33,10 @@ namespace aember::service_manager {
  */
 class ServiceManager {
  public:
+  using ServiceState = aember::utils::service::ServiceState;
+  using ServiceConfig = aember::utils::service::ServiceConfig;
+  using Logger = aember::utils::logging::Logger;
+
   using StateChangeCallback =
       std::function<void(const std::string&, ServiceState, ServiceState)>;
 
@@ -199,7 +205,7 @@ class ServiceManager {
   std::shared_ptr<aember::container_manager::ContainerManager>
       container_manager_;
 
-  mutable aember::utils::Logger log_;  ///< Logger instance
+  mutable Logger log_;  ///< Logger instance
 };
 
 }  // namespace aember::service_manager

@@ -18,11 +18,14 @@ namespace aember::service_manager {
  *
  * @param config Service configuration structure
  */
-Service::Service(const ServiceConfig& config) : config_(config) {
-  aember::utils::Logger log("service");
+Service::Service(const aember::utils::service::ServiceConfig& config)
+    : config_(config) {
+  aember::utils::logging::Logger log("service");
   log.info("Service '{}' created (type: {})",
            config_.name,
-           config_.type == ServiceType::PROCESS ? "PROCESS" : "CONTAINER");
+           config_.type == aember::utils::service::ServiceType::PROCESS
+               ? "PROCESS"
+               : "CONTAINER");
 }
 
 /**
@@ -32,7 +35,7 @@ Service::Service(const ServiceConfig& config) : config_(config) {
  *
  * @return ServiceState Current state
  */
-ServiceState Service::GetState() const {
+aember::utils::service::ServiceState Service::GetState() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return state_;
 }
@@ -104,7 +107,7 @@ std::chrono::system_clock::time_point Service::GetLastRestartTime() const {
  *
  * @param state New service state
  */
-void Service::SetState(ServiceState state) {
+void Service::SetState(aember::utils::service::ServiceState state) {
   std::lock_guard<std::mutex> lock(mutex_);
   state_ = state;
 }
@@ -171,48 +174,6 @@ void Service::SetStartTime() {
 void Service::SetLastRestartTime() {
   std::lock_guard<std::mutex> lock(mutex_);
   last_restart_time_ = std::chrono::system_clock::now();
-}
-
-/**
- * @brief Convert a ServiceState enum to a human-readable string.
- *
- * @param state ServiceState value
- * @return std::string Human-readable string
- */
-std::string ServiceStateToString(ServiceState state) {
-  switch (state) {
-    case ServiceState::STOPPED:
-      return "STOPPED";
-    case ServiceState::STARTING:
-      return "STARTING";
-    case ServiceState::RUNNING:
-      return "RUNNING";
-    case ServiceState::STOPPING:
-      return "STOPPING";
-    case ServiceState::FAILED:
-      return "FAILED";
-    default:
-      return "UNKNOWN";
-  }
-}
-
-/**
- * @brief Convert a RestartPolicy enum to a human-readable string.
- *
- * @param policy RestartPolicy value
- * @return std::string Human-readable string
- */
-std::string RestartPolicyToString(RestartPolicy policy) {
-  switch (policy) {
-    case RestartPolicy::NEVER:
-      return "NEVER";
-    case RestartPolicy::ON_FAILURE:
-      return "ON_FAILURE";
-    case RestartPolicy::ALWAYS:
-      return "ALWAYS";
-    default:
-      return "UNKNOWN";
-  }
 }
 
 }  // namespace aember::service_manager

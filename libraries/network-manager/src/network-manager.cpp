@@ -149,10 +149,12 @@ struct NetlinkSocket {
 
 NetworkManager::NetworkManager(
     const nlohmann::json& config,
-    std::function<void(const ConnectivityStatus&)> on_status)
+    std::function<void(const aember::utils::network::ConnectivityStatus&)>
+        on_status)
     : on_status_(std::move(on_status)), log_("network-manager") {
   ParseConfig(config);
-  iface_states_.assign(config_.interfaces.size(), InterfaceState::kDown);
+  iface_states_.assign(config_.interfaces.size(),
+                       aember::utils::network::InterfaceState::kDown);
 }
 
 NetworkManager::~NetworkManager() {
@@ -190,7 +192,7 @@ void NetworkManager::Stop() {
   log_.info("NetworkManager stopped");
 }
 
-ConnectivityStatus NetworkManager::GetStatus() const {
+aember::utils::network::ConnectivityStatus NetworkManager::GetStatus() const {
   std::lock_guard<std::mutex> lock(status_mutex_);
   return status_;
 }
@@ -236,17 +238,17 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
   }
 
   for (const auto& entry : config["interfaces"]) {
-    InterfaceConfig iface;
+    aember::utils::network::InterfaceConfig iface;
     iface.name = entry.at("name").get<std::string>();
     iface.required = entry.value("required", false);
 
     std::string mode_str = entry.value("mode", "dhcp");
     if (mode_str == "static") {
-      iface.mode = IpMode::kStatic;
+      iface.mode = aember::utils::network::IpMode::kStatic;
       iface.address = entry.at("address").get<std::string>();
       iface.gateway = entry.value("gateway", "");
     } else {
-      iface.mode = IpMode::kDhcp;
+      iface.mode = aember::utils::network::IpMode::kDhcp;
     }
 
     if (entry.contains("dns")) {
@@ -265,7 +267,7 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
   // Parse bridges (optional)
   if (config.contains("bridges") && config["bridges"].is_array()) {
     for (const auto& entry : config["bridges"]) {
-      BridgeConfig bridge;
+      aember::utils::network::BridgeConfig bridge;
       bridge.name = entry.at("name").get<std::string>();
       bridge.address = entry.at("address").get<std::string>();
       log_.info("Parsed bridge: {} address={}", bridge.name, bridge.address);
@@ -283,11 +285,12 @@ void NetworkManager::BringUpInterfaces() {
 
   for (size_t i = 0; i < config_.interfaces.size(); ++i) {
     const auto& iface = config_.interfaces[i];
-    iface_states_[i] = InterfaceState::kBringingUp;
+    iface_states_[i] = aember::utils::network::InterfaceState::kBringingUp;
 
     bool ok = BringUpInterface(iface);
 
-    iface_states_[i] = ok ? InterfaceState::kUp : InterfaceState::kFailed;
+    iface_states_[i] = ok ? aember::utils::network::InterfaceState::kUp
+                          : aember::utils::network::InterfaceState::kFailed;
 
     if (!ok) {
       if (iface.required) {
@@ -303,10 +306,12 @@ void NetworkManager::BringUpInterfaces() {
   }
 }
 
-bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
-  log_.info("Bringing up interface: {} (mode={})",
-            iface.name,
-            iface.mode == IpMode::kDhcp ? "dhcp" : "static");
+bool NetworkManager::BringUpInterface(
+    const aember::utils::network::InterfaceConfig& iface) {
+  log_.info(
+      "Bringing up interface: {} (mode={})",
+      iface.name,
+      iface.mode == aember::utils::network::IpMode::kDhcp ? "dhcp" : "static");
 
   if (!NetlinkSetInterfaceUp(iface.name)) {
     log_.warn("{}: netlink UP failed, trying fallback", iface.name);
@@ -316,7 +321,7 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
     }
   }
 
-  if (iface.mode == IpMode::kStatic) {
+  if (iface.mode == aember::utils::network::IpMode::kStatic) {
     if (!NetlinkSetStaticAddress(iface)) {
       log_.warn("{}: netlink static address failed, trying fallback",
                 iface.name);
@@ -384,7 +389,8 @@ bool NetworkManager::NetlinkSetInterfaceUp(const std::string& iface_name) {
 // Netlink: assign static address + default route
 // ---------------------------------------------------------------------------
 
-bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
+bool NetworkManager::NetlinkSetStaticAddress(
+    const aember::utils::network::InterfaceConfig& iface) {
   NetlinkSocket nl;
   if (!nl.Valid()) { return false; }
 
@@ -480,7 +486,8 @@ bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
 // DHCP via udhcpc
 // ---------------------------------------------------------------------------
 
-bool NetworkManager::RunUdhcpc(const InterfaceConfig& iface) {
+bool NetworkManager::RunUdhcpc(
+    const aember::utils::network::InterfaceConfig& iface) {
   for (int attempt = 1; attempt <= config_.dhcp_retries; ++attempt) {
     log_.info(
         "{}: DHCP attempt {}/{}", iface.name, attempt, config_.dhcp_retries);
@@ -540,7 +547,8 @@ bool NetworkManager::FallbackIpCommand(const std::vector<std::string>& args) {
 // resolv.conf
 // ---------------------------------------------------------------------------
 
-void NetworkManager::WriteResolvConf(const InterfaceConfig& iface) {
+void NetworkManager::WriteResolvConf(
+    const aember::utils::network::InterfaceConfig& iface) {
   std::vector<std::string> servers = iface.dns_servers;
   if (servers.empty()) {
     servers = {"8.8.8.8", "1.1.1.1"};
@@ -578,7 +586,8 @@ void NetworkManager::CreateBridges() {
   }
 }
 
-bool NetworkManager::CreateBridge(const BridgeConfig& bridge) {
+bool NetworkManager::CreateBridge(
+    const aember::utils::network::BridgeConfig& bridge) {
   log_.info("Creating bridge: {} address={}", bridge.name, bridge.address);
 
   // Skip if bridge already exists
@@ -647,7 +656,7 @@ void NetworkManager::MonitorLoop() {
 }
 
 void NetworkManager::UpdateStatus(bool online, int rtt_ms) {
-  ConnectivityStatus s;
+  aember::utils::network::ConnectivityStatus s;
   s.online = online;
   s.rtt_ms = rtt_ms;
   s.interface = FirstUpInterface();
@@ -765,11 +774,13 @@ int NetworkManager::PingOnce(const std::string& target_ip, int timeout_ms) {
 // Network info
 // ---------------------------------------------------------------------------
 
-NetworkInfo NetworkManager::GetNetworkInfo() {
-  NetworkInfo info;
+aember::utils::network::NetworkInfo NetworkManager::GetNetworkInfo() {
+  aember::utils::network::NetworkInfo info;
 
   for (size_t i = 0; i < config_.interfaces.size(); ++i) {
-    if (iface_states_[i] != InterfaceState::kUp) { continue; }
+    if (iface_states_[i] != aember::utils::network::InterfaceState::kUp) {
+      continue;
+    }
 
     const std::string& name = config_.interfaces[i].name;
 
@@ -878,7 +889,7 @@ NetworkInfo NetworkManager::GetNetworkInfo() {
 
 std::string NetworkManager::FirstUpInterface() const {
   for (size_t i = 0; i < iface_states_.size(); ++i) {
-    if (iface_states_[i] == InterfaceState::kUp) {
+    if (iface_states_[i] == aember::utils::network::InterfaceState::kUp) {
       return config_.interfaces[i].name;
     }
   }

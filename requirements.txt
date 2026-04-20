@@ -11,3 +11,4 @@ clang-format==18.1.*
 cmake-format==0.6.*
 typer==0.20.*
 rich==14.3.*
+pyyaml==6.0.*

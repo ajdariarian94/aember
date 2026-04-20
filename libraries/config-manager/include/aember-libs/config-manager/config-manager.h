@@ -16,6 +16,7 @@
 
 #include <aember-libs/service-manager/service.h>
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/service/service-config.h>
 
 #include <nlohmann/json.hpp>
 
@@ -91,7 +92,7 @@ class ConfigManager {
    *
    * @return Vector of ServiceConfig objects.
    */
-  std::vector<aember::service_manager::ServiceConfig> GetServices() const;
+  std::vector<aember::utils::service::ServiceConfig> GetServices() const;
 
   /**
    * @brief Retrieve a specific service configuration by name.
@@ -99,7 +100,7 @@ class ConfigManager {
    * @param name Service name.
    * @return ServiceConfig if found, std::nullopt otherwise.
    */
-  std::optional<aember::service_manager::ServiceConfig> GetService(
+  std::optional<aember::utils::service::ServiceConfig> GetService(
       const std::string& name) const;
 
   /**
@@ -147,12 +148,12 @@ class ConfigManager {
    * @brief Parse a single service entry.
    */
   bool ParseService(const nlohmann::json& service_json,
-                    aember::service_manager::ServiceConfig& config);
+                    aember::utils::service::ServiceConfig& config);
 
   /**
    * @brief Convert restart policy string to enum.
    */
-  aember::service_manager::RestartPolicy ParseRestartPolicy(
+  aember::utils::service::RestartPolicy ParseRestartPolicy(
       const std::string& policy_str);
 
   /**
@@ -165,11 +166,11 @@ class ConfigManager {
    */
   void SetError(const ConfigError& error);
 
-  std::vector<aember::service_manager::ServiceConfig>
-      services_;                           // Loaded services
-  bool loaded_ = false;                    // Load state
-  std::optional<ConfigError> last_error_;  // Last error
-  mutable aember::utils::Logger log_;      // Logger
+  std::vector<aember::utils::service::ServiceConfig>
+      services_;                                // Loaded services
+  bool loaded_ = false;                         // Load state
+  std::optional<ConfigError> last_error_;       // Last error
+  mutable aember::utils::logging::Logger log_;  // Logger
 };
 
 }  // namespace aember::config_manager

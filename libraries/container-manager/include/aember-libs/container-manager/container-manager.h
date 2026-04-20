@@ -10,6 +10,8 @@
 #pragma once
 
 #include <aember-libs/mount-manager/mount-manager.h>
+#include <aember-libs/utils/container/container-entry.h>
+#include <aember-libs/utils/container/container-state.h>
 #include <aember-libs/utils/logging/logging.h>
 
 #include <functional>
@@ -18,44 +20,7 @@
 #include <string>
 #include <vector>
 
-struct lxc_container;
-
 namespace aember::container_manager {
-
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-enum class ContainerState {
-  kStopped,
-  kStarting,
-  kRunning,
-  kStopping,
-  kFailed,
-};
-
-std::string ContainerStateToString(ContainerState state);
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
-struct ContainerConfig {
-  std::string name;
-  std::string squashfs;
-  std::string rootfs;
-  std::vector<std::string> args;
-};
-
-// ---------------------------------------------------------------------------
-// Runtime
-// ---------------------------------------------------------------------------
-
-struct ContainerEntry {
-  ContainerConfig config;
-  ContainerState state{ContainerState::kStopped};
-  lxc_container* lxc{nullptr};
-};
 
 // ---------------------------------------------------------------------------
 // ContainerManager
@@ -63,6 +28,11 @@ struct ContainerEntry {
 
 class ContainerManager {
  public:
+  using ContainerConfig = aember::utils::container::ContainerConfig;
+  using ContainerEntry = aember::utils::container::ContainerEntry;
+  using ContainerState = aember::utils::container::ContainerState;
+  using Logger = aember::utils::logging::Logger;
+
   using StateCallback =
       std::function<void(const std::string&, ContainerState, ContainerState)>;
 
@@ -108,7 +78,7 @@ class ContainerManager {
 
   StateCallback callback_;
 
-  aember::utils::Logger log_{"container-manager"};
+  Logger log_{"container-manager"};
 
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
 };

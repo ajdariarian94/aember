@@ -12,6 +12,13 @@
 #pragma once
 
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/network/bridge-config.h>
+#include <aember-libs/utils/network/connectivity-status.h>
+#include <aember-libs/utils/network/interface-config.h>
+#include <aember-libs/utils/network/interface-state.h>
+#include <aember-libs/utils/network/ip-mode.h>
+#include <aember-libs/utils/network/network-config.h>
+#include <aember-libs/utils/network/network-info.h>
 
 #include <nlohmann/json.hpp>
 
@@ -25,88 +32,6 @@
 #include <vector>
 
 namespace aember::network {
-
-// ---------------------------------------------------------------------------
-// Data structures
-// ---------------------------------------------------------------------------
-
-/**
- * @brief IP configuration mode for a network interface.
- */
-enum class IpMode {
-  kDhcp,    ///< Obtain address via DHCP (udhcpc)
-  kStatic,  ///< Use a statically configured address
-};
-
-/**
- * @brief Configuration for a single network interface, loaded from JSON.
- */
-struct InterfaceConfig {
-  std::string name;            ///< e.g. "eth0"
-  IpMode mode{IpMode::kDhcp};  ///< DHCP or static
-  std::string address;         ///< Static IP in CIDR, e.g. "192.168.1.10/24"
-  std::string gateway;         ///< Default gateway, e.g. "192.168.1.1"
-  std::vector<std::string>
-      dns_servers;       ///< DNS servers to write to resolv.conf
-  bool required{false};  ///< If true, init blocks until this IF is up
-};
-
-/**
- * @brief Configuration for a Linux bridge interface, loaded from JSON.
- */
-struct BridgeConfig {
-  std::string name;     ///< Bridge name e.g. "lxcbr0"
-  std::string address;  ///< IP in CIDR e.g. "10.0.3.1/24"
-};
-
-/**
- * @brief Runtime state of a network interface.
- */
-enum class InterfaceState {
-  kDown,        ///< Interface not yet brought up
-  kBringingUp,  ///< Currently running udhcpc / applying static config
-  kUp,          ///< Interface is up and has an address
-  kFailed,      ///< Failed to come up after all retries
-};
-
-/**
- * @brief Full network configuration loaded from the config file.
- */
-struct NetworkConfig {
-  std::vector<InterfaceConfig> interfaces;
-  std::vector<BridgeConfig> bridges;   ///< Bridge interfaces to create
-  std::string ping_target{"8.8.8.8"};  ///< TCP probe target
-  std::chrono::milliseconds ping_interval{std::chrono::seconds(10)};
-  int ping_retries{3};
-  std::chrono::milliseconds dhcp_timeout{std::chrono::seconds(30)};
-  int dhcp_retries{3};
-};
-
-/**
- * @brief Connectivity status reported via the status callback.
- */
-struct ConnectivityStatus {
-  bool online{false};
-  std::string interface;
-  int rtt_ms{-1};
-  int64_t timestamp_ms{0};
-};
-
-/**
- * @brief Snapshot of the current network state.
- */
-struct NetworkInfo {
-  std::string interface;
-  std::string ip_address;
-  std::string netmask;
-  int prefix_len{0};
-  std::string broadcast;
-  std::string gateway;
-  std::string mac_address;
-  std::vector<std::string> dns_servers;
-  bool online{false};
-  int rtt_ms{-1};
-};
 
 // ---------------------------------------------------------------------------
 // NetworkManager
@@ -128,6 +53,14 @@ struct NetworkInfo {
  */
 class NetworkManager {
  public:
+  using ConnectivityStatus = aember::utils::network::ConnectivityStatus;
+  using NetworkInfo = aember::utils::network::NetworkInfo;
+  using NetworkConfig = aember::utils::network::NetworkConfig;
+  using InterfaceConfig = aember::utils::network::InterfaceConfig;
+  using BridgeConfig = aember::utils::network::BridgeConfig;
+  using InterfaceState = aember::utils::network::InterfaceState;
+  using Logger = aember::utils::logging::Logger;
+
   explicit NetworkManager(
       const nlohmann::json& config,
       std::function<void(const ConnectivityStatus&)> on_status = nullptr);
@@ -226,7 +159,7 @@ class NetworkManager {
   std::condition_variable cv_;
   std::mutex cv_mutex_;
 
-  aember::utils::Logger log_;
+  Logger log_;
 };
 
 }  // namespace aember::network

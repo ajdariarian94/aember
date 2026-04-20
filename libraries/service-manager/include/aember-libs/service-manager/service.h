@@ -9,6 +9,11 @@
  */
 #pragma once
 
+#include <aember-libs/utils/service/restart-policy.h>
+#include <aember-libs/utils/service/service-config.h>
+#include <aember-libs/utils/service/service-state.h>
+#include <aember-libs/utils/service/service-type.h>
+
 #include <chrono>
 #include <map>
 #include <mutex>
@@ -21,62 +26,6 @@
 namespace aember::service_manager {
 
 /**
- * @brief Possible states a service can be in.
- */
-enum class ServiceState {
-  STOPPED,   ///< Service is not running
-  STARTING,  ///< Service is starting up
-  RUNNING,   ///< Service is currently running
-  STOPPING,  ///< Service is stopping
-  FAILED     ///< Service failed (crashed or exited with error)
-};
-
-/**
- * @brief Defines when a service should be restarted after it stops.
- */
-enum class RestartPolicy {
-  NEVER,       ///< Do not restart automatically
-  ON_FAILURE,  ///< Restart only if the service failed
-  ALWAYS       ///< Always restart regardless of exit code
-};
-
-/**
- * @brief Specifications for container-based services.
- */
-struct ContainerSpec {
-  std::string rootfs;  ///< Root filesystem path for the container
-  std::string squashfs;
-  std::vector<std::string> args;  ///< Arguments passed to container runtime
-};
-
-/**
- * @brief Type of service: process or container.
- */
-enum class ServiceType { PROCESS, CONTAINER };
-
-/**
- * @brief Configuration data for a service.
- */
-struct ServiceConfig {
-  std::string name;                                ///< Service name
-  std::string command;                             ///< Command to execute
-  std::vector<std::string> args;                   ///< Command-line arguments
-  std::map<std::string, std::string> environment;  ///< Environment variables
-  std::string working_directory;  ///< Working directory for the service
-  RestartPolicy restart_policy = RestartPolicy::NEVER;  ///< Restart behavior
-  std::vector<std::string>
-      dependencies;              ///< Services that must start before this one
-  int max_restart_attempts = 5;  ///< Maximum number of automatic restarts
-  std::chrono::seconds restart_delay{5};   ///< Delay between restarts
-  ServiceType type{ServiceType::PROCESS};  ///< Process or container
-  std::optional<ContainerSpec> container;  ///< Optional container spec
-
-  ServiceConfig() = default;
-  ServiceConfig(const std::string& n, const std::string& cmd)
-      : name(n), command(cmd) {}
-};
-
-/**
  * @brief Represents a running service and tracks its state.
  *
  * Provides getters and setters for managing service state, PID, exit code, and
@@ -84,6 +33,9 @@ struct ServiceConfig {
  */
 class Service {
  public:
+  using ServiceConfig = aember::utils::service::ServiceConfig;
+  using ServiceState = aember::utils::service::ServiceState;
+
   /**
    * @brief Constructs a Service with the given configuration.
    */
@@ -145,15 +97,5 @@ class Service {
       last_restart_time_;     ///< Last restart time
   mutable std::mutex mutex_;  ///< Protects access to state and counters
 };
-
-/**
- * @brief Convert a ServiceState enum to a human-readable string.
- */
-std::string ServiceStateToString(ServiceState state);
-
-/**
- * @brief Convert a RestartPolicy enum to a human-readable string.
- */
-std::string RestartPolicyToString(RestartPolicy policy);
 
 }  // namespace aember::service_manager

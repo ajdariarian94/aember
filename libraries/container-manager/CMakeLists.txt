@@ -1,9 +1,21 @@
-set(COMPONENT "container-manager")
+set(COMPONENT
+    "container-manager"
+)
 
-set(${COMPONENT}_${PROJECT_NAME}_VERSION ${VERSION})
+set(${COMPONENT}_${PROJECT_NAME}_VERSION
+    ${VERSION}
+)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LXC REQUIRED IMPORTED_TARGET lxc)
+find_package(
+  PkgConfig
+  REQUIRED
+)
+pkg_check_modules(
+  LXC
+  REQUIRED
+  IMPORTED_TARGET
+  lxc
+)
 
 # ##############################################################################
 #
@@ -11,21 +23,39 @@ pkg_check_modules(LXC REQUIRED IMPORTED_TARGET lxc)
 #
 # ##############################################################################
 
-add_library(${COMPONENT} STATIC src/container-manager.cpp)
+add_library(
+  ${COMPONENT}
+  STATIC
+  src/container-manager.cpp
+)
 
-add_library(${PROJECT_NAME}::${COMPONENT} ALIAS ${COMPONENT})
+add_library(
+  ${PROJECT_NAME}::${COMPONENT}
+  ALIAS
+  ${COMPONENT}
+)
 
 target_include_directories(
-  ${COMPONENT} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-                      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  ${COMPONENT}
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 
 target_link_libraries(
-  ${COMPONENT} PUBLIC aember-libs::mount-manager aember-libs::utils::logging
-                      PkgConfig::LXC)
+  ${COMPONENT}
+  PUBLIC aember-libs::mount-manager
+         aember-libs::utils::container
+         aember-libs::utils::logging
+         PkgConfig::LXC
+)
 
 set_target_properties(
-  ${COMPONENT} PROPERTIES VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}
-                          OUTPUT_NAME ${COMPONENT}_${PROJECT_NAME})
+  ${COMPONENT}
+  PROPERTIES VERSION
+             ${${COMPONENT}_${PROJECT_NAME}_VERSION}
+             OUTPUT_NAME
+             ${COMPONENT}_${PROJECT_NAME}
+)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -33,26 +63,37 @@ include(GNUInstallDirs)
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
   VERSION ${${COMPONENT}_${PROJECT_NAME}_VERSION}
-  COMPATIBILITY AnyNewerVersion)
+  COMPATIBILITY AnyNewerVersion
+)
 
 configure_package_config_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${COMPONENT})
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${COMPONENT}
+)
 
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(
+  DIRECTORY include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
 
-install(TARGETS ${COMPONENT} EXPORT ${COMPONENT})
+install(
+  TARGETS ${COMPONENT}
+  EXPORT ${COMPONENT}
+)
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
-              ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT})
+install(
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}Config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${COMPONENT}ConfigVersion.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
+)
 
 install(
   EXPORT ${COMPONENT}
   FILE ${COMPONENT}Targets.cmake
   NAMESPACE ${PROJECT_NAME}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT})
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
+)
 
 # -----------------------------------------------------------------------------
 # Tests

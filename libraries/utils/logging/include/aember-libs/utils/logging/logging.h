@@ -17,7 +17,7 @@
 #include <memory>
 #include <string>
 
-namespace aember::utils {
+namespace aember::utils::logging {
 
 void enable_console_silence();
 
@@ -96,4 +96,4 @@ class Logger {
   std::shared_ptr<spdlog::logger> logger_;
 };
 
-}  // namespace aember::utils
+}  // namespace aember::utils::logging

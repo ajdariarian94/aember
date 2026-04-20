@@ -1,0 +1,19 @@
+line_width: 80
+
+dangle_parens: true
+
+# forces grouping awareness
+max_pargs_hwrap: 1
+max_subgroups_hwrap: 1
+
+always_wrap:
+  - target_link_libraries
+  - target_include_directories
+  - add_library
+  - add_executable
+
+separate_ctrl_name_with_space: true
+separate_fn_name_with_space: false
+
+tab_size: 2
+use_tabchars: false

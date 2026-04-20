@@ -12,7 +12,7 @@
 
 #include <aember-libs/utils/logging/logging.h>
 
-namespace aember::utils {
+namespace aember::utils::shell {
 
 class DebugShell {
  public:
@@ -25,7 +25,7 @@ class DebugShell {
   void SilenceAemberInBackground();
 
  private:
-  aember::utils::Logger log_;
+  aember::utils::logging::Logger log_;
 };
 
-}  // namespace aember::utils
+}  // namespace aember::utils::shell

@@ -11,28 +11,13 @@
 #pragma once
 
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/mount/mount-point.h>
 
 #include <functional>
 #include <string>
 #include <vector>
 
 namespace aember::mount_manager {
-
-/**
- * @brief Represents a single mount point with its properties.
- */
-struct MountPoint {
-  std::string source;   ///< What to mount (e.g., "proc", "none")
-  std::string target;   ///< Mount point path (e.g., "/proc")
-  std::string fstype;   ///< Filesystem type (e.g., "proc", "sysfs")
-  unsigned long flags;  ///< Mount flags (MS_NOEXEC, MS_NOSUID, etc.)
-  std::string data;     ///< Mount options (e.g., "mode=0755")
-
-  MountPoint(const std::string& src, const std::string& tgt,
-             const std::string& type, unsigned long f = 0,
-             const std::string& d = "")
-      : source(src), target(tgt), fstype(type), flags(f), data(d) {}
-};
 
 /**
  * @brief Manages mounting and unmounting of filesystems.
@@ -45,6 +30,9 @@ struct MountPoint {
  */
 class MountManager {
  public:
+  using Logger = aember::utils::logging::Logger;
+  using MountPoint = aember::utils::mount::MountPoint;
+
   MountManager();
   ~MountManager();
 
@@ -111,7 +99,7 @@ class MountManager {
    */
   bool CheckMountStatus(const std::string& target);
 
-  aember::utils::Logger log_;  ///< Logger instance
+  Logger log_;  ///< Logger instance
   std::vector<std::string>
       mounted_targets_;  ///< List of targets that have been mounted
 };

@@ -41,8 +41,8 @@ MountManager::~MountManager() {
 /**
  * @brief Returns a list of essential early-boot filesystem mounts.
  */
-std::vector<MountPoint> MountManager::GetEarlyMounts() const {
-  std::vector<MountPoint> mounts;
+std::vector<MountManager::MountPoint> MountManager::GetEarlyMounts() const {
+  std::vector<MountManager::MountPoint> mounts;
 
   // /dev/pts - pseudo-terminals
   mounts.emplace_back("devpts",

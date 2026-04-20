@@ -11,21 +11,40 @@ project(
   HOMEPAGE_URL
     "https://github.com/ajdariarian94/aember/tree/main/executables/aember"
   DESCRIPTION "aember executable"
-  LANGUAGES CXX)
+  LANGUAGES CXX
+)
 
 # Dependencies
-find_package(CLI11 CONFIG REQUIRED)
-find_package(aember-libs REQUIRED COMPONENTS aember-init)
+find_package(
+  CLI11
+  CONFIG
+  REQUIRED
+)
+find_package(
+  aember-libs
+  REQUIRED
+  COMPONENTS aember-init
+)
 
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -no-pie")
+set(CMAKE_EXE_LINKER_FLAGS
+    "${CMAKE_EXE_LINKER_FLAGS} -no-pie"
+)
 
-add_executable(${PROJECT_NAME} main.cpp)
+add_executable(
+  ${PROJECT_NAME}
+  main.cpp
+)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE aember-libs::aember-init
-                                              CLI11::CLI11)
+target_link_libraries(
+  ${PROJECT_NAME}
+  PRIVATE aember-libs::aember-init
+          CLI11::CLI11
+)
 
 target_include_directories(
-  ${PROJECT_NAME} PRIVATE $<BUILD_INTERFACE:${CMAKE_INSTALL_PREFIX}/include>)
+  ${PROJECT_NAME}
+  PRIVATE $<BUILD_INTERFACE:${CMAKE_INSTALL_PREFIX}/include>
+)
 
 # ##############################################################################
 #
@@ -34,4 +53,7 @@ target_include_directories(
 # ##############################################################################
 
 include(GNUInstallDirs)
-install(TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+install(
+  TARGETS ${PROJECT_NAME}
+  DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+)

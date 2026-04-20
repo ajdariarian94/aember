@@ -121,7 +121,7 @@ bool ConfigManager::ParseServices(const nlohmann::json& json) {
       return false;
     }
 
-    aember::service_manager::ServiceConfig config;
+    aember::utils::service::ServiceConfig config;
     if (!ParseService(service_json, config)) { return false; }
 
     services_.push_back(config);
@@ -138,7 +138,7 @@ bool ConfigManager::ParseServices(const nlohmann::json& json) {
  */
 bool ConfigManager::ParseService(
     const nlohmann::json& service_json,
-    aember::service_manager::ServiceConfig& config) {
+    aember::utils::service::ServiceConfig& config) {
   // Required: name
   if (!service_json.contains("name") || !service_json["name"].is_string()) {
     SetError("Service missing required field: 'name' or it is not a string");
@@ -154,14 +154,14 @@ bool ConfigManager::ParseService(
   if (service_json.contains("type") && service_json["type"].is_string()) {
     std::string type_str = service_json["type"].get<std::string>();
     if (type_str == "container") {
-      config.type = aember::service_manager::ServiceType::CONTAINER;
+      config.type = aember::utils::service::ServiceType::CONTAINER;
     } else {
-      config.type = aember::service_manager::ServiceType::PROCESS;
+      config.type = aember::utils::service::ServiceType::PROCESS;
     }
   }
 
   // PROCESS type requires command
-  if (config.type == aember::service_manager::ServiceType::PROCESS) {
+  if (config.type == aember::utils::service::ServiceType::PROCESS) {
     if (!service_json.contains("command") ||
         !service_json["command"].is_string()) {
       SetError("Process service '" + config.name +
@@ -187,7 +187,7 @@ bool ConfigManager::ParseService(
   }
 
   // CONTAINER type requires container.rootfs
-  if (config.type == aember::service_manager::ServiceType::CONTAINER) {
+  if (config.type == aember::utils::service::ServiceType::CONTAINER) {
     if (!service_json.contains("container") ||
         !service_json["container"].is_object()) {
       SetError("Container service '" + config.name +
@@ -203,7 +203,7 @@ bool ConfigManager::ParseService(
       return false;
     }
 
-    aember::service_manager::ContainerSpec container;
+    aember::utils::container::ContainerSpec container;
     container.rootfs = container_json["rootfs"].get<std::string>();
     container.squashfs = container_json["squashfs"].get<std::string>();
 
@@ -292,24 +292,24 @@ bool ConfigManager::ParseService(
 /**
  * @brief Convert restart policy string to enum.
  */
-aember::service_manager::RestartPolicy ConfigManager::ParseRestartPolicy(
+aember::utils::service::RestartPolicy ConfigManager::ParseRestartPolicy(
     const std::string& policy_str) {
   if (policy_str == "never") {
-    return aember::service_manager::RestartPolicy::NEVER;
+    return aember::utils::service::RestartPolicy::NEVER;
   } else if (policy_str == "on-failure" || policy_str == "on_failure") {
-    return aember::service_manager::RestartPolicy::ON_FAILURE;
+    return aember::utils::service::RestartPolicy::ON_FAILURE;
   } else if (policy_str == "always") {
-    return aember::service_manager::RestartPolicy::ALWAYS;
+    return aember::utils::service::RestartPolicy::ALWAYS;
   } else {
     log_.warn("Unknown restart policy '{}', defaulting to 'never'", policy_str);
-    return aember::service_manager::RestartPolicy::NEVER;
+    return aember::utils::service::RestartPolicy::NEVER;
   }
 }
 
 /**
  * @brief Return all loaded service configurations.
  */
-std::vector<aember::service_manager::ServiceConfig> ConfigManager::GetServices()
+std::vector<aember::utils::service::ServiceConfig> ConfigManager::GetServices()
     const {
   return services_;
 }
@@ -317,7 +317,7 @@ std::vector<aember::service_manager::ServiceConfig> ConfigManager::GetServices()
 /**
  * @brief Return a specific service configuration by name.
  */
-std::optional<aember::service_manager::ServiceConfig> ConfigManager::GetService(
+std::optional<aember::utils::service::ServiceConfig> ConfigManager::GetService(
     const std::string& name) const {
   for (const auto& service : services_) {
     if (service.name == name) { return service; }
