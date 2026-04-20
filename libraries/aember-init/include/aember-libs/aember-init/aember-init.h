@@ -12,7 +12,6 @@
 #pragma once
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
-#include <aember-libs/config-manager/config-manager.h>
 #include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/device-health/heartbeat.h>
 #include <aember-libs/module-loader/module-loader.h>
@@ -169,14 +168,6 @@ class AemberInit {
    * services are started.
    */
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
-
-  /**
-   * @brief Config manager.
-   *
-   * Responsible for mounting early filesystems required before
-   * services are started.
-   */
-  std::unique_ptr<aember::config_manager::ConfigManager> config_manager_;
 
   /**
    * @brief Root manager instance.

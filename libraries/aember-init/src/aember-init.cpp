@@ -167,32 +167,29 @@ void AemberInit::StartRoot() {
   // ----------------------------
   // Load service configuration
   // ----------------------------
-  config_manager_ = std::make_unique<aember::config_manager::ConfigManager>();
   std::string config_path = "/etc/aember/services.json";
 
-  if (config_manager_->LoadFromFile(config_path)) {
-    log_.info("Loaded service configuration from {}", config_path);
+  auto services = service_manager_->LoadServices(config_path);
 
-    for (const auto& service_config : config_manager_->GetServices()) {
-      if (service_manager_->AddService(service_config)) {
-        log_.info("Added service: {}", service_config.name);
-      } else {
-        log_.error("Failed to add service: {}", service_config.name);
-      }
-    }
+  log_.info("Loaded service configuration from {}", config_path);
 
-    if (debug_shell) {
-      spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
-      aember::utils::logging::enable_console_silence();
-      debug_shell_->SilenceAemberInBackground();
-
-      service_manager_->StartAll();
-      debug_shell_->SpawnDebugShell();
+  for (const auto& service_config : services) {
+    if (service_manager_->AddService(service_config)) {
+      log_.info("Added service: {}", service_config.name);
     } else {
-      service_manager_->StartAll();
+      log_.error("Failed to add service: {}", service_config.name);
     }
+  }
+
+  if (debug_shell) {
+    spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
+    aember::utils::logging::enable_console_silence();
+    debug_shell_->SilenceAemberInBackground();
+
+    service_manager_->StartAll();
+    debug_shell_->SpawnDebugShell();
   } else {
-    log_.warn("No service configuration found at {}", config_path);
+    service_manager_->StartAll();
   }
 
   // ----------------------------

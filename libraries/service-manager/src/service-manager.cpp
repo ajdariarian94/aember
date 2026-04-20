@@ -34,6 +34,7 @@ ServiceManager::ServiceManager(
         container_manager)
     : child_supervisor_(supervisor),
       container_manager_(std::move(container_manager)),
+      config_manager_(std::make_unique<aember::utils::config::ConfigManager>()),
       log_("service-manager") {
   log_.info("ServiceManager initialized");
 }
@@ -383,6 +384,14 @@ void ServiceManager::HandleServiceExit(pid_t pid, int exit_code) {
       lock.unlock();
       ScheduleRestart(service_name);
     }
+  }
+}
+
+std::vector<ServiceManager::ServiceConfig> ServiceManager::LoadServices(
+    const std::string& name) {
+  if (config_manager_->LoadFromFile(name)) {
+    log_.info("Loaded service configuration from {}", name);
+    return config_manager_->GetServices();
   }
 }
 

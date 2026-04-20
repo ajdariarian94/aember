@@ -35,6 +35,7 @@ target_link_libraries(
   ${COMPONENT}
   PUBLIC aember-libs::child-supervisor
          aember-libs::container-manager
+         aember-libs::utils::config
          aember-libs::utils::logging
          aember-libs::utils::service
 )

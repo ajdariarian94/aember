@@ -36,7 +36,6 @@ find_package(
 # Common
 add_subdirectory(aember-init)
 add_subdirectory(child-supervisor)
-add_subdirectory(config-manager)
 add_subdirectory(container-manager)
 add_subdirectory(device-health)
 add_subdirectory(module-loader)

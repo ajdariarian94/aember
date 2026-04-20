@@ -11,6 +11,7 @@ set(${COMPONENT}_${PROJECT_NAME}_VERSION
 # Subcomponents
 # -----------------------------------------------------------------------------
 set(SUBCOMPONENTS
+    config
     container
     logging
     module

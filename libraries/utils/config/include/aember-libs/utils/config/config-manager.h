@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <aember-libs/service-manager/service.h>
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/service/service-config.h>
 
@@ -24,7 +23,7 @@
 #include <string>
 #include <vector>
 
-namespace aember::config_manager {
+namespace aember::utils::config {
 
 /**
  * @brief Describes a configuration parsing or validation error.
@@ -173,4 +172,4 @@ class ConfigManager {
   mutable aember::utils::logging::Logger log_;  // Logger
 };
 
-}  // namespace aember::config_manager
+}  // namespace aember::utils::config

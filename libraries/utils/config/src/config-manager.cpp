@@ -9,12 +9,12 @@
  * parses optional fields, and converts restart policy strings into enums.
  */
 
-#include <aember-libs/config-manager/config-manager.h>
+#include <aember-libs/utils/config/config-manager.h>
 
 #include <fstream>
 #include <sstream>
 
-namespace aember::config_manager {
+namespace aember::utils::config {
 
 /**
  * @brief Construct a new ConfigManager and initialize logger.
@@ -395,4 +395,4 @@ bool ConfigManager::ValidateJson(const nlohmann::json& config,
   return result;
 }
 
-}  // namespace aember::config_manager
+}  // namespace aember::utils::config
