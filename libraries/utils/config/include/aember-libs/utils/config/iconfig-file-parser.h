@@ -14,22 +14,24 @@
 
 #pragma once
 
-#include <memory>
-#include <optional>
+#include <string>
+#include <nlohmann/json.hpp>
 
 #include <aember-libs/utils/config/config-error.h>
-#include <aember-libs/utils/config/iconfig-file-parser.h>
 
 namespace aember::utils::config {
 
-class ConfigManager {
+class IConfigFileParser {
 public:
-  bool Load(IConfigFileParser& parser, const std::string& path);
+  virtual ~IConfigFileParser() = default;
 
-  const std::optional<ConfigError>& GetLastError() const;
+  virtual bool ParseFile(const std::string& path,
+                         ConfigError& error) = 0;
 
-private:
-  std::optional<ConfigError> last_error_;
+protected:
+  bool LoadJsonFromFile(const std::string& path,
+                        nlohmann::json& json,
+                        ConfigError& error);
 };
 
 }

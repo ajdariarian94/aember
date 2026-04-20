@@ -6,6 +6,7 @@ add_library(
   ${CONFIG_TARGET}
   STATIC
   src/config-manager.cpp
+  src/config-file-parser.cpp
 )
 
 add_library(

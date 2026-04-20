@@ -12,10 +12,10 @@
 #include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/service-manager/service.h>
-#include <aember-libs/utils/config/config-manager.h>
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/service/service-config.h>
 #include <aember-libs/utils/service/service-state.h>
+#include <aember-libs/utils/service/service-parser.h>
 
 #include <functional>
 #include <map>
@@ -208,7 +208,7 @@ class ServiceManager {
   std::shared_ptr<aember::container_manager::ContainerManager>
       container_manager_;
 
-  std::unique_ptr<aember::utils::config::ConfigManager> config_manager_;
+  aember::utils::service::ServicesConfigParser parser_{};
 
   mutable Logger log_;  ///< Logger instance
 };

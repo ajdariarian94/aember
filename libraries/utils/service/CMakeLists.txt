@@ -7,6 +7,7 @@ add_library(
   STATIC
   src/restart-policy.cpp
   src/service-config.cpp
+  src/service-parser.cpp
   src/service-state.cpp
 )
 
@@ -25,6 +26,7 @@ target_include_directories(
 target_link_libraries(
   ${SERVICE_TARGET}
   PUBLIC aember-libs::utils::container
+        aember-libs::utils::config
 )
 
 set_target_properties(
