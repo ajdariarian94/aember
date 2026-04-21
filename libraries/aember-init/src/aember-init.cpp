@@ -155,7 +155,7 @@ void AemberInit::StartRoot() {
   // Initialize Service Manager
   // ----------------------------
   service_manager_ = std::make_unique<aember::service_manager::ServiceManager>(
-      child_supervisor_, container_manager_);
+      child_supervisor_);
 
   service_manager_->SetStateChangeCallback(
       std::bind(&AemberInit::OnServiceStateChangeCallback,
@@ -164,20 +164,60 @@ void AemberInit::StartRoot() {
                 std::placeholders::_2,
                 std::placeholders::_3));
 
+  service_manager_->SetContainerStateCallback(
+      [this](const std::string& name, ContainerState state) -> bool {
+        log_.info("Starting containers with name: {}", name);
+        switch (state) {
+          case ContainerState::kStarting:
+            return container_manager_->StartContainer(name);
+
+          case ContainerState::kStopped:
+            return container_manager_->StopContainer(name);
+
+          case ContainerState::kRunning:
+            // optional: ignore or log
+            return true;
+
+          case ContainerState::kStopping:
+            // optional: graceful stop
+            return container_manager_->StopContainer(name);
+
+          case ContainerState::kFailed:
+            // optional: cleanup or restart logic
+            return container_manager_->StopContainer(name);
+        }
+
+        return false;
+      });
+
   // ----------------------------
   // Load service configuration
   // ----------------------------
-  std::string config_path = "/etc/aember/services.json";
+  std::string services_path = "/etc/aember/services.json";
+  auto services = service_manager_->LoadServices(services_path);
+  log_.info("Loaded service configuration from {}", services_path);
 
-  auto services = service_manager_->LoadServices(config_path);
-
-  log_.info("Loaded service configuration from {}", config_path);
+  std::string containers_path = "/etc/aember/containers.json";
+  auto containers = container_manager_->LoadContainers(containers_path);
 
   for (const auto& service_config : services) {
     if (service_manager_->AddService(service_config)) {
       log_.info("Added service: {}", service_config.name);
     } else {
       log_.error("Failed to add service: {}", service_config.name);
+    }
+  }
+
+  for (const auto& container_config : containers) {
+    if (!container_manager_->AddContainer(container_config)) {
+      log_.error("Failed to register container: {}", container_config.name);
+      continue;
+    }
+
+    if (service_manager_->AddContainer(container_config)) {
+      log_.info("Added container service: {}", container_config.name);
+    } else {
+      log_.error("Failed to add container service: {}", container_config.name);
     }
   }
 

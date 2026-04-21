@@ -36,4 +36,4 @@ struct ConfigError {
       : message(msg), file(f), line(l) {}
 };
 
-}
+}  // namespace aember::utils::config

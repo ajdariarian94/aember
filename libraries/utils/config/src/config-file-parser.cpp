@@ -15,11 +15,9 @@
 
 namespace aember::utils::config {
 
-bool IConfigFileParser::LoadJsonFromFile(
-    const std::string& path,
-    nlohmann::json& json,
-    ConfigError& error) {
-
+bool IConfigFileParser::LoadJsonFromFile(const std::string& path,
+                                         nlohmann::json& json,
+                                         ConfigError& error) {
   std::ifstream file(path);
   if (!file.is_open()) {
     error = ConfigError("Failed to open file: " + path, path);
@@ -29,12 +27,11 @@ bool IConfigFileParser::LoadJsonFromFile(
   try {
     file >> json;
   } catch (const nlohmann::json::parse_error& e) {
-    error = ConfigError(
-        "JSON parse error: " + std::string(e.what()), path);
+    error = ConfigError("JSON parse error: " + std::string(e.what()), path);
     return false;
   }
 
   return true;
 }
 
-}
+}  // namespace aember::utils::config

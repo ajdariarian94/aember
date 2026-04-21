@@ -9,30 +9,27 @@
  */
 #include <vector>
 
-#include <aember-libs/utils/service/service-config.h>
 #include <aember-libs/utils/config/iconfig-file-parser.h>
+#include <aember-libs/utils/service/service-config.h>
 
 namespace aember::utils::service {
 
 class ServicesConfigParser : public config::IConfigFileParser {
-public:
-  bool ParseFile(const std::string& path,
-                 config::ConfigError& error) override;
+ public:
+  bool ParseFile(const std::string& path, config::ConfigError& error) override;
 
   const std::vector<ServiceConfig>& GetServices() const;
 
-private:
-  bool Parse(const nlohmann::json& json,
-             config::ConfigError& error);
+ private:
+  bool Parse(const nlohmann::json& json, config::ConfigError& error);
 
-  bool ParseService(const nlohmann::json& json,
-                    ServiceConfig& svc,
+  bool ParseService(const nlohmann::json& json, ServiceConfig& svc,
                     config::ConfigError& error);
 
   RestartPolicy ParseRestartPolicy(const std::string& policy);
 
-private:
+ private:
   std::vector<ServiceConfig> services_;
 };
 
-}
+}  // namespace aember::utils::service

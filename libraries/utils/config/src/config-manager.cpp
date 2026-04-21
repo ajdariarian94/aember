@@ -13,9 +13,7 @@
 
 namespace aember::utils::config {
 
-bool ConfigManager::Load(IConfigFileParser& parser,
-                         const std::string& path) {
-
+bool ConfigManager::Load(IConfigFileParser& parser, const std::string& path) {
   ConfigError error;
 
   if (!parser.ParseFile(path, error)) {
@@ -26,9 +24,8 @@ bool ConfigManager::Load(IConfigFileParser& parser,
   return true;
 }
 
-const std::optional<ConfigError>&
-ConfigManager::GetLastError() const {
+const std::optional<ConfigError>& ConfigManager::GetLastError() const {
   return last_error_;
 }
 
-}
+}  // namespace aember::utils::config

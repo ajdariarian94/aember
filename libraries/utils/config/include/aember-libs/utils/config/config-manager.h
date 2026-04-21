@@ -23,13 +23,13 @@
 namespace aember::utils::config {
 
 class ConfigManager {
-public:
+ public:
   bool Load(IConfigFileParser& parser, const std::string& path);
 
   const std::optional<ConfigError>& GetLastError() const;
 
-private:
+ private:
   std::optional<ConfigError> last_error_;
 };
 
-}
+}  // namespace aember::utils::config

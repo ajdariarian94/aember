@@ -25,8 +25,7 @@ target_include_directories(
 
 target_link_libraries(
   ${SERVICE_TARGET}
-  PUBLIC aember-libs::utils::container
-        aember-libs::utils::config
+  PUBLIC aember-libs::utils::config
 )
 
 set_target_properties(

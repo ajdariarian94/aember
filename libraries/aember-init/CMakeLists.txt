@@ -41,6 +41,7 @@ target_link_libraries(
          aember-libs::root-manager
          aember-libs::service-manager
          aember-libs::utils::config
+         aember-libs::utils::container
          aember-libs::utils::logging
          aember-libs::utils::service
          aember-libs::utils::shell

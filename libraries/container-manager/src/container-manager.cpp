@@ -266,6 +266,20 @@ void ContainerManager::Release(aember::utils::container::ContainerEntry& e) {
   }
 }
 
+std::vector<ContainerManager::ContainerConfig> ContainerManager::LoadContainers(
+    const std::string& name) {
+  aember::utils::config::ConfigError error;
+
+  if (!parser_.ParseFile(name, error)) {
+    log_.error("Failed to load containers: {}", error.message);
+    return {};
+  }
+
+  log_.info("Loaded container configuration from {}", name);
+
+  return parser_.GetContainers();
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

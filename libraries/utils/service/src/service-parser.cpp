@@ -12,24 +12,18 @@
 
 namespace aember::utils::service {
 
-bool ServicesConfigParser::ParseFile(
-    const std::string& path,
-    config::ConfigError& error) {
-
+bool ServicesConfigParser::ParseFile(const std::string& path,
+                                     config::ConfigError& error) {
   nlohmann::json json;
 
-  if (!LoadJsonFromFile(path, json, error)) {
-    return false;
-  }
+  if (!LoadJsonFromFile(path, json, error)) { return false; }
 
   services_.clear();
   return Parse(json, error);
 }
 
-bool ServicesConfigParser::Parse(
-    const nlohmann::json& json,
-    config::ConfigError& error) {
-
+bool ServicesConfigParser::Parse(const nlohmann::json& json,
+                                 config::ConfigError& error) {
   if (!json.is_object() || !json.contains("services")) {
     error = config::ConfigError("Missing or invalid 'services'");
     return false;
@@ -43,9 +37,7 @@ bool ServicesConfigParser::Parse(
   for (const auto& item : json["services"]) {
     ServiceConfig svc;
 
-    if (!ParseService(item, svc, error)) {
-      return false;
-    }
+    if (!ParseService(item, svc, error)) { return false; }
 
     services_.push_back(std::move(svc));
   }
@@ -53,11 +45,9 @@ bool ServicesConfigParser::Parse(
   return true;
 }
 
-bool ServicesConfigParser::ParseService(
-    const nlohmann::json& json,
-    ServiceConfig& svc,
-    config::ConfigError& error) {
-
+bool ServicesConfigParser::ParseService(const nlohmann::json& json,
+                                        ServiceConfig& svc,
+                                        config::ConfigError& error) {
   // -------------------------
   // NAME (required)
   // -------------------------
@@ -73,13 +63,10 @@ bool ServicesConfigParser::ParseService(
   std::string type = json.value("type", "process");
 
   if (type == "container") {
-   
-  }
-  else {
+  } else {
     svc.type = ServiceType::PROCESS;
 
-    if (!json.contains("command") ||
-        !json["command"].is_string()) {
+    if (!json.contains("command") || !json["command"].is_string()) {
       error = config::ConfigError("Process service missing 'command'");
       return false;
     }
@@ -125,9 +112,8 @@ bool ServicesConfigParser::ParseService(
       return false;
     }
 
-    for (auto it = json["environment"].begin();
-         it != json["environment"].end(); ++it) {
-
+    for (auto it = json["environment"].begin(); it != json["environment"].end();
+         ++it) {
       if (!it.value().is_string()) {
         error = config::ConfigError("Environment values must be strings");
         return false;
@@ -185,8 +171,7 @@ bool ServicesConfigParser::ParseService(
     }
 
     svc.max_restart_attempts = attempts;
-  }
-  else {
+  } else {
     svc.max_restart_attempts = 0;
   }
 
@@ -207,8 +192,7 @@ bool ServicesConfigParser::ParseService(
     }
 
     svc.restart_delay = std::chrono::seconds(delay);
-  }
-  else {
+  } else {
     svc.restart_delay = std::chrono::seconds(0);
   }
 
@@ -217,25 +201,19 @@ bool ServicesConfigParser::ParseService(
 
 RestartPolicy ServicesConfigParser::ParseRestartPolicy(
     const std::string& policy) {
-
-  if (policy == "always") {
-    return RestartPolicy::ALWAYS;
-  }
+  if (policy == "always") { return RestartPolicy::ALWAYS; }
 
   if (policy == "on-failure" || policy == "on_failure") {
     return RestartPolicy::ON_FAILURE;
   }
 
-  if (policy == "never") {
-    return RestartPolicy::NEVER;
-  }
+  if (policy == "never") { return RestartPolicy::NEVER; }
 
   return RestartPolicy::NEVER;
 }
 
-const std::vector<ServiceConfig>&
-ServicesConfigParser::GetServices() const {
+const std::vector<ServiceConfig>& ServicesConfigParser::GetServices() const {
   return services_;
 }
 
-} // namespace aember::utils::service
+}  // namespace aember::utils::service
