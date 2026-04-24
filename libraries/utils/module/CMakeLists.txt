@@ -1,10 +1,11 @@
 # -----------------------------------------------------------------------------
-# Module subcomponent
+# module subcomponent
 # -----------------------------------------------------------------------------
 
 add_library(
   ${MODULE_TARGET}
-  INTERFACE
+  STATIC
+  src/module-parser.cpp
 )
 
 add_library(
@@ -15,8 +16,13 @@ add_library(
 
 target_include_directories(
   ${MODULE_TARGET}
-  INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+target_link_libraries(
+  ${MODULE_TARGET}
+  PUBLIC aember-libs::utils::config
 )
 
 set_target_properties(

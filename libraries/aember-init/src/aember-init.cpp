@@ -94,7 +94,11 @@ void AemberInit::StartRoot() {
   // Load kernel modules
   // ----------------------------
   module_loader_.emplace();
-  if (!module_loader_->LoadFromConfig("/etc/aember/modules.json")) {
+  // Step 1: parse
+  auto modules = module_loader_->LoadModules("/etc/aember/modules.json");
+
+  // Step 2: execute
+  if (!module_loader_->Load(modules)) {
     log_.warn("Some kernel modules failed to load, continuing anyway");
   }
 
