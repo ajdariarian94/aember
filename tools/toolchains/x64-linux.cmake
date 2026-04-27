@@ -24,6 +24,9 @@ set(ENV{PKG_CONFIG_PATH}
 # =====================================
 set(CMAKE_C_COMPILER gcc)
 set(CMAKE_CXX_COMPILER g++)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # =====================================
 # Common compiler flags (all configs)
