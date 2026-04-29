@@ -39,6 +39,8 @@ RUN apt update && apt install -y \
 RUN apt update && apt install -y    \
     apt-utils                       \
     build-essential                 \
+    gcc-12                          \
+    g++-12                          \
     gcc-14                          \
     g++-14                          \
     clang                           \
@@ -111,10 +113,14 @@ RUN apt update && apt install -y    \
     lsb-release &&                  \
     gem install lolcat
 
-# ---- Set GCC 14 as default ----
-RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100 && \
-    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-14 100
+# ---- Set GCC 12 as default ----
+# Register both compilers
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 50 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 50 && \
+    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-12 100 && \
+    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-14 50
 
 RUN apt update && apt install -y \
     libgl1-mesa-dri \
