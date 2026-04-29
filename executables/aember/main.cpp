@@ -2,6 +2,8 @@
 
 #include <CLI/CLI.hpp>
 
+#include <print>
+
 int main(int argc, char** argv) {
   CLI::App app{"Aember"};
 
@@ -13,6 +15,8 @@ int main(int argc, char** argv) {
 
   // Enforce exactly one mode
   app.require_option(1);
+
+  std::println("HELLO");
 
   CLI11_PARSE(app, argc, argv);
 

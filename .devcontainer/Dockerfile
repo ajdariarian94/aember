@@ -28,10 +28,21 @@ RUN \
 RUN groupadd -g ${DOCKER_GID} docker || true \
     && usermod -aG ${DOCKER_GID} dev
 
+# ---- Add Ubuntu Toolchain PPA for GCC 14 ----
+RUN apt update && apt install -y \
+    software-properties-common \
+    gnupg && \
+    add-apt-repository ppa:ubuntu-toolchain-r/test && \
+    apt update
+
 # ---- Install system dependencies ----
 RUN apt update && apt install -y    \
     apt-utils                       \
     build-essential                 \
+    gcc-12                          \
+    g++-12                          \
+    gcc-14                          \
+    g++-14                          \
     clang                           \
     clang-tools                     \
     clang-tidy                      \
@@ -44,7 +55,6 @@ RUN apt update && apt install -y    \
     gawk                            \
     gdb                             \
     genext2fs                       \
-    gnupg                           \
     graphviz                        \
     gcc-aarch64-linux-gnu           \         
     gcc-arm-linux-gnueabihf         \
@@ -72,7 +82,6 @@ RUN apt update && apt install -y    \
     libsystemd-dev                  \
     libguestfs-tools                \
     apt-transport-https             \
-    software-properties-common      \
     zip                             \
     unzip                           \
     tar                             \
@@ -103,6 +112,15 @@ RUN apt update && apt install -y    \
     e2fsprogs                       \
     lsb-release &&                  \
     gem install lolcat
+
+# ---- Set GCC 12 as default ----
+# Register both compilers
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 50 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 50 && \
+    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-12 100 && \
+    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-14 50
 
 RUN apt update && apt install -y \
     libgl1-mesa-dri \
@@ -146,4 +164,3 @@ RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
 # ---- Set default user and working directory ----
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
-    

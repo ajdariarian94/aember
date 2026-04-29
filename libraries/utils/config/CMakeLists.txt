@@ -1,34 +1,37 @@
 # -----------------------------------------------------------------------------
-# module subcomponent
+# Config subcomponent
 # -----------------------------------------------------------------------------
 
 add_library(
-  ${MODULE_TARGET}
+  ${CONFIG_TARGET}
   STATIC
-  src/module-parser.cpp
+  src/config-manager.cpp
+  src/config-file-parser.cpp
 )
 
 add_library(
-  ${PROJECT_NAME}::${COMPONENT}::${MODULE_COMPONENT}
+  ${PROJECT_NAME}::${COMPONENT}::${CONFIG_COMPONENT}
   ALIAS
-  ${MODULE_TARGET}
+  ${CONFIG_TARGET}
 )
 
 target_include_directories(
-  ${MODULE_TARGET}
+  ${CONFIG_TARGET}
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 target_link_libraries(
-  ${MODULE_TARGET}
-  PUBLIC aember-libs::utils::config
+  ${CONFIG_TARGET}
+  PUBLIC aember-libs::utils::logging
+         aember-libs::utils::service
+         nlohmann_json::nlohmann_json
 )
 
 set_target_properties(
-  ${MODULE_TARGET}
+  ${CONFIG_TARGET}
   PROPERTIES EXPORT_NAME
-             ${COMPONENT}::${MODULE_COMPONENT}
+             ${COMPONENT}::${CONFIG_COMPONENT}
 )
 
 # -----------------------------------------------------------------------------
@@ -39,5 +42,5 @@ if (BUILD_TESTS)
   include(CTest)
   enable_testing()
 
-  # add_subdirectory(tests)
+  add_subdirectory(tests)
 endif ()

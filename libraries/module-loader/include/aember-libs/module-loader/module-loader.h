@@ -7,89 +7,62 @@
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
-
 #pragma once
 
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-libs/utils/module/module-error-code.h>
+#include <aember-libs/utils/module/module-parser.h>
 #include <aember-libs/utils/module/module-result.h>
+#include <aember-libs/utils/module/module-status.h>
 
-#include <nlohmann/json.hpp>
-
-#include <algorithm>
 #include <string>
 #include <vector>
 
 namespace aember::module_loader {
 
-/**
- * @class ModuleLoader
- * @brief Loads kernel modules via modprobe during early boot, after pivot
- *        to real root. Reads module list from JSON config or accepts
- *        explicit Load() calls.
- *
- * Usage:
- * @code
- *   ModuleLoader loader;
- *   loader.LoadFromConfig("/etc/aember/modules.json");
- *   // or explicitly:
- *   loader.Load("bridge");
- *   loader.Load("veth");
- *   loader.Load("br_netfilter");
- * @endcode
- */
 class ModuleLoader {
  public:
   using ModuleResult = aember::utils::module::ModuleResult;
+  using ModuleConfig = aember::utils::module::ModuleConfig;
+  using ModuleStatus = aember::utils::module::ModuleStatus;
+  using ModuleErrorCode = aember::utils::module::ModuleErrorCode;
+  using Logger = aember::utils::logging::Logger;
+  using ModulesConfigParser = aember::utils::module::ModulesConfigParser;
 
   ModuleLoader();
   ~ModuleLoader() = default;
 
-  // Non-copyable
   ModuleLoader(const ModuleLoader&) = delete;
   ModuleLoader& operator=(const ModuleLoader&) = delete;
 
-  /**
-   * @brief Load a single kernel module by name via modprobe.
-   * @param name  Module name e.g. "bridge", "veth", "br_netfilter"
-   * @return true if module loaded successfully or was already loaded.
-   */
+  // --------------------------
+  // Module loading
+  // --------------------------
+
   bool Load(const std::string& name);
+  bool Load(const std::vector<ModuleConfig>& modules);
 
   /**
-   * @brief Load all modules listed in a JSON config file.
-   * @param config_path  Path to JSON file containing module list.
-   * @return true if all modules loaded successfully.
+   * @brief Parse + return module configs (same style as ContainerManager)
    */
-  bool LoadFromConfig(const std::string& config_path);
+  std::vector<ModuleConfig> LoadModules(const std::string& path);
 
-  /**
-   * @brief Load all modules from a parsed JSON object.
-   * @param config  JSON object with "modules" array of strings.
-   * @return true if all modules loaded successfully.
-   */
-  bool LoadFromJson(const nlohmann::json& config);
+  // --------------------------
+  // Queries
+  // --------------------------
 
-  /**
-   * @brief Check if a module is currently loaded.
-   * @param name  Module name.
-   * @return true if module appears in /proc/modules.
-   */
   bool IsLoaded(const std::string& name) const;
 
-  /**
-   * @brief Returns results of all load attempts since construction.
-   */
   const std::vector<ModuleResult>& GetResults() const { return results_; }
 
  private:
-  /**
-   * @brief Runs modprobe for the given module name.
-   * @return Exit code, 0 on success.
-   */
   int RunModprobe(const std::string& name);
 
-  std::vector<ModuleResult> results_;  ///< Results of all load attempts
-  aember::utils::logging::Logger log_{"module-loader"};
+ private:
+  std::vector<ModuleResult> results_;
+  Logger log_{"module-loader"};
+
+  ModulesConfigParser parser_{};  // 👈 same pattern as container manager
 };
 
 }  // namespace aember::module_loader

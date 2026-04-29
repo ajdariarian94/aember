@@ -10,6 +10,9 @@
 
 #pragma once
 
+#include <aember-libs/utils/module/module-error-code.h>
+#include <aember-libs/utils/module/module-status.h>
+
 #include <string>
 
 namespace aember::utils::module {
@@ -18,9 +21,10 @@ namespace aember::utils::module {
  * @brief Result of a single module load attempt.
  */
 struct ModuleResult {
-  std::string name;    ///< Module name e.g. "bridge"
-  bool loaded{false};  ///< true if load succeeded
-  std::string error;   ///< Error message if failed
+  std::string name;
+  ModuleStatus status{ModuleStatus::Failed};
+  ModuleErrorCode code{ModuleErrorCode::Unknown};
+  std::string error;
 };
 
 }  // namespace aember::utils::module

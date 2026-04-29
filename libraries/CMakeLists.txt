@@ -12,17 +12,6 @@ project(
   LANGUAGES CXX
 )
 
-# Set language standards
-set(CMAKE_CXX_STANDARD
-    17
-)
-set(CMAKE_CXX_STANDARD_REQUIRED
-    ON
-)
-set(CMAKE_EXPORT_COMPILE_COMMANDS
-    ON
-)
-
 # Dependencies
 find_package(
   nlohmann_json
@@ -36,7 +25,6 @@ find_package(
 # Common
 add_subdirectory(aember-init)
 add_subdirectory(child-supervisor)
-add_subdirectory(config-manager)
 add_subdirectory(container-manager)
 add_subdirectory(device-health)
 add_subdirectory(module-loader)

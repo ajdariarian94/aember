@@ -40,6 +40,15 @@ if [ -f /etc/bash_completion ]; then
     . /etc/bash_completion
 fi
 
+source /opt/poky/5.2.99+snapshot/environment-setup-core2-64-poky-linux
+
+source /venv/bin/activate
+
+aember --install-completion  
+
+unset CC
+unset CXX
+
 EOF
 
 # Source helper scripts
@@ -47,11 +56,8 @@ for script in "$SCRIPT_DIR"/bashrc.d/*.sh; do
     [ -e "$script" ] && source "$script"
 done
 
-# Activate bashrc and virtualenv immediately
+# Activate bashrc
 source "$HOME/.bashrc"
-source /venv/bin/activate
-
-aember --install-completion  
 
 sudo rm -rf /root/.config/git
 

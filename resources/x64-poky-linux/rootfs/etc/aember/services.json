@@ -1,0 +1,16 @@
+{
+  "services": [
+    {
+      "name": "echo-aember",
+      "type": "process",
+      "command": "/usr/bin/echo-aember",
+      "args": [""],
+      "working_directory": "",
+      "environment": {},
+      "restart_policy": "always",
+      "dependencies": [],
+      "max_restart_attempts": 5,
+      "restart_delay": 5
+    }
+  ]
+}

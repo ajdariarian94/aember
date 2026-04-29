@@ -11,6 +11,7 @@
 
 #include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/utils/container/container-entry.h>
+#include <aember-libs/utils/container/container-parser.h>
 #include <aember-libs/utils/container/container-state.h>
 #include <aember-libs/utils/logging/logging.h>
 
@@ -59,6 +60,8 @@ class ContainerManager {
   ContainerState GetContainerState(const std::string& name) const;
   bool IsRunning(const std::string& name) const;
 
+  std::vector<ContainerConfig> LoadContainers(const std::string& name);
+
  private:
   // LXC lifecycle
   bool Create(ContainerEntry& e);
@@ -79,6 +82,8 @@ class ContainerManager {
   StateCallback callback_;
 
   Logger log_{"container-manager"};
+
+  aember::utils::container::ContainersConfigParser parser_{};
 
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
 };

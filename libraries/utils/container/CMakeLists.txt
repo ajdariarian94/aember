@@ -5,6 +5,7 @@
 add_library(
   ${CONTAINER_TARGET}
   STATIC
+  src/container-parser.cpp
   src/container-state.cpp
 )
 
@@ -18,6 +19,11 @@ target_include_directories(
   ${CONTAINER_TARGET}
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+target_link_libraries(
+  ${CONTAINER_TARGET}
+  PUBLIC aember-libs::utils::config
 )
 
 set_target_properties(
