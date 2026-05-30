@@ -6,15 +6,53 @@ set(${COMPONENT}_${PROJECT_NAME}_VERSION
     ${VERSION}
 )
 
+if (NOT
+    DEFINED
+    ARCHITECTURE
+)
+  message(
+    FATAL_ERROR
+      "ARCHITECTURE must be defined (e.g. -DARCHITECTURE=x64-poky-linux)"
+  )
+endif ()
+
 find_package(
   PkgConfig
   REQUIRED
 )
-pkg_check_modules(
-  LXC
-  REQUIRED
-  IMPORTED_TARGET
-  lxc
+
+set(LXC_INCLUDE_DIR
+    "/aember_ws/aember/yocto/build/${ARCHITECTURE}/virtualization/include"
+)
+set(LXC_LIBRARY
+    "/aember_ws/aember/yocto/build/${ARCHITECTURE}/virtualization/libs/liblxc.so"
+)
+
+if (NOT
+    EXISTS
+    ${LXC_INCLUDE_DIR}/lxc/lxccontainer.h
+)
+  message(FATAL_ERROR "lxccontainer.h not found at ${LXC_INCLUDE_DIR}")
+endif ()
+
+if (NOT
+    EXISTS
+    ${LXC_LIBRARY}
+)
+  message(FATAL_ERROR "liblxc.so not found at ${LXC_LIBRARY}")
+endif ()
+
+add_library(
+  LXC::LXC
+  SHARED
+  IMPORTED
+)
+set_target_properties(
+  LXC::LXC
+  PROPERTIES IMPORTED_LOCATION
+             "${LXC_LIBRARY}"
+             INTERFACE_INCLUDE_DIRECTORIES
+             "${LXC_INCLUDE_DIR}"
 )
 
 # ##############################################################################
@@ -46,7 +84,7 @@ target_link_libraries(
   PUBLIC aember-libs::mount-manager
          aember-libs::utils::container
          aember-libs::utils::logging
-         PkgConfig::LXC
+         LXC::LXC
 )
 
 set_target_properties(

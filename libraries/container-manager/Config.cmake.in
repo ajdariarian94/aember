@@ -3,16 +3,15 @@
 include(CMakeFindDependencyMacro)
 find_dependency(aember-libs REQUIRED COMPONENTS mount-manager utils)
 
-# Reconstruct lxc imported target for consumers
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LXC REQUIRED lxc)   # no IMPORTED_TARGET here
+# Reconstruct LXC imported target for consumers
+set(LXC_INCLUDE_DIR "/aember_ws/aember/yocto/build/@ARCHITECTURE@/virtualization/include")
+set(LXC_LIBRARY "/aember_ws/aember/yocto/build/@ARCHITECTURE@/virtualization/libs/liblxc.so")
 
-if(NOT TARGET PkgConfig::LXC)
-    add_library(PkgConfig::LXC INTERFACE IMPORTED)
-    set_target_properties(PkgConfig::LXC PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${LXC_INCLUDE_DIRS}"
-        INTERFACE_LINK_LIBRARIES      "${LXC_LINK_LIBRARIES}"
-        INTERFACE_COMPILE_OPTIONS     "${LXC_CFLAGS_OTHER}"
+if(NOT TARGET LXC::LXC)
+    add_library(LXC::LXC SHARED IMPORTED)
+    set_target_properties(LXC::LXC PROPERTIES
+        IMPORTED_LOCATION "${LXC_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${LXC_INCLUDE_DIR}"
     )
 endif()
 

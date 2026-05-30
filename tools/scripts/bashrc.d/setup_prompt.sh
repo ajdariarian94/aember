@@ -27,6 +27,9 @@ if [[ ":\$PATH:" != *":/venv/bin:"* ]]; then
     export PATH="/venv/bin:\$PATH"
 fi
 
+# Suppress (venv) prefix in prompt
+VIRTUAL_ENV_DISABLE_PROMPT=1
+
 # Properly escaped PS1
 PS1="${FIXED_PS1}"
 # END AEMBER PROMPT
