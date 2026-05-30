@@ -40,14 +40,7 @@ if [ -f /etc/bash_completion ]; then
     . /etc/bash_completion
 fi
 
-source /opt/poky/5.2.99+snapshot/environment-setup-core2-64-poky-linux
-
-source /venv/bin/activate
-
-aember --install-completion  
-
-unset CC
-unset CXX
+aember --install-completion > /dev/null 2>&1
 
 EOF
 

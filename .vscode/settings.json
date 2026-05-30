@@ -1,4 +1,5 @@
 {
+  "python.terminal.activateEnvironment": false,
   "testMate.cpp.test.advancedExecutables": [
     {
       "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/child-supervisor-unittest",
