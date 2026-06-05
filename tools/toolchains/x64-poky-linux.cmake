@@ -8,7 +8,7 @@ set(CMAKE_SYSROOT ${POKY_SYSROOT})
 
 # Compilers
 set(CMAKE_C_COMPILER "${POKY_SDK_ROOT}/usr/bin/x86_64-poky-linux/x86_64-poky-linux-gcc")
-set(CMAKE_CXX_COMPILER "${POKY_SDK_ROOT}/usr/bin/x86_64-poky-linux/x86_64-poky-linux-g++")
+set(CMAKE_CXX_COMPILER "/aember_ws/aember/yocto/build/x64-poky-linux/gcc-reflection/install/bin/g++")
 
 # Compiler Flags
 set(POKY_FLAGS "-m64 -march=core2 -mtune=core2 -msse3 -mfpmath=sse -fstack-protector-strong")

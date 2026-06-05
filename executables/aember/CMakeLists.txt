@@ -48,7 +48,14 @@ target_include_directories(
 
 target_compile_features(
   ${PROJECT_NAME}
-  PRIVATE cxx_std_23
+  PRIVATE cxx_std_26
+)
+
+target_link_options(
+  ${PROJECT_NAME}
+  PRIVATE
+  -static-libstdc++
+  -static-libgcc
 )
 
 # ##############################################################################

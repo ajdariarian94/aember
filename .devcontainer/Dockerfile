@@ -130,6 +130,16 @@ RUN apt update && apt install -y \
     libwayland-cursor0 \
     libglfw3
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgmp-dev \
+    libmpfr-dev \
+    libmpc-dev \
+    flex \
+    bison \
+    libelf-dev \
+    texinfo \
+    && rm -rf /var/lib/apt/lists/*
+
 # Add Kitware APT repo for latest CMake
 RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
     gpg --dearmor - | \
