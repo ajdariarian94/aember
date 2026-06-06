@@ -7,7 +7,7 @@
 
 #include <spdlog/pattern_formatter.h>
 #include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/stdout_sinks.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -37,24 +37,24 @@ void enable_console_silence() {
   spdlog::apply_all([](std::shared_ptr<spdlog::logger> logger) {
     auto& sinks = logger->sinks();
     sinks.erase(
-        std::remove_if(sinks.begin(),
-                       sinks.end(),
-                       [](const spdlog::sink_ptr& s) {
-                         return std::dynamic_pointer_cast<
-                                    spdlog::sinks::stdout_color_sink_mt>(s) !=
-                                nullptr;
-                       }),
+        std::remove_if(
+            sinks.begin(),
+            sinks.end(),
+            [](const spdlog::sink_ptr& s) {
+              return std::dynamic_pointer_cast<spdlog::sinks::stdout_sink_mt>(
+                         s) != nullptr;
+            }),
         sinks.end());
   });
   // Also remove from global_sinks so new loggers don't get it either
   global_sinks.erase(
-      std::remove_if(global_sinks.begin(),
-                     global_sinks.end(),
-                     [](const spdlog::sink_ptr& s) {
-                       return std::dynamic_pointer_cast<
-                                  spdlog::sinks::stdout_color_sink_mt>(s) !=
-                              nullptr;
-                     }),
+      std::remove_if(
+          global_sinks.begin(),
+          global_sinks.end(),
+          [](const spdlog::sink_ptr& s) {
+            return std::dynamic_pointer_cast<spdlog::sinks::stdout_sink_mt>(
+                       s) != nullptr;
+          }),
       global_sinks.end());
 }
 
@@ -66,7 +66,7 @@ void init_early_logging() {
   spdlog::drop_all();    // drop registered loggers
   global_sinks.clear();  // NO spdlog::shutdown() here
 
-  auto stdout_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+  auto stdout_sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
   stdout_sink->set_formatter(make_formatter());
   global_sinks.push_back(stdout_sink);
 
@@ -118,7 +118,7 @@ Logger::Logger(const std::string& name) {
     spdlog::drop_all();
     global_sinks.clear();
 
-    auto stdout_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    auto stdout_sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
     stdout_sink->set_formatter(make_formatter());
     global_sinks.push_back(stdout_sink);
 
