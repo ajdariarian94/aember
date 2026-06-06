@@ -202,6 +202,30 @@ bool MountManager::MountSquashFS(const std::string& image,
   return true;
 }
 
+std::vector<MountManager::MountPoint> MountManager::GetInitramfsMounts() const {
+  return {
+      {"proc", "/proc", "proc", MS_NOEXEC | MS_NOSUID | MS_NODEV, ""},
+      {"sysfs", "/sys", "sysfs", MS_NOEXEC | MS_NOSUID | MS_NODEV, ""},
+      {"devtmpfs", "/dev", "devtmpfs", MS_NOSUID, ""},
+      {"tmpfs", "/tmp", "tmpfs", MS_NOEXEC | MS_NOSUID | MS_NODEV, "mode=1777"},
+      {"tmpfs", "/mnt", "tmpfs", MS_NOEXEC | MS_NOSUID | MS_NODEV, ""},
+  };
+}
+
+bool MountManager::MountInitramfsFilesystems() {
+  log_.info("Mounting initramfs filesystems...");
+
+  for (const auto& mp : GetInitramfsMounts()) {
+    if (!Mount(mp)) {
+      log_.error("Critical: failed to mount {}", mp.target);
+      return false;
+    }
+  }
+
+  log_.info("Initramfs filesystems mounted successfully");
+  return true;
+}
+
 /**
  * @brief Mount all early boot filesystems.
  *
