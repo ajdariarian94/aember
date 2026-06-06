@@ -41,6 +41,9 @@ void AemberInit::StartInitramfs() {
   // Mount early filesystems
   // ----------------------------
   mount_manager_ = std::make_shared<aember::mount_manager::MountManager>();
+
+  mount_manager_->MountInitramfsFilesystems();
+
   if (!mount_manager_->MountEarlyFilesystems()) {
     log_.warn("Some early filesystems failed to mount, continuing anyway");
   }

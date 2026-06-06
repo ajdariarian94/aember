@@ -56,6 +56,10 @@ class MountManager {
   bool MountSquashFS(const std::string& image, const std::string& target,
                      bool read_only = true);
 
+  std::vector<MountManager::MountPoint> GetInitramfsMounts() const;
+
+  bool MountInitramfsFilesystems();
+
   /**
    * @brief Unmount a filesystem at the given target.
    * @param target Mount point path.
