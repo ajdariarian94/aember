@@ -21,7 +21,7 @@ namespace aember::utils::shell {
 DebugShell::DebugShell() : log_("debug-shell") {}
 
 bool DebugShell::CheckDebugShell() {
-  log_.info("Press 'd' within 3 seconds for debug shell");
+  log_.info("Press 'd' within 5 seconds for debug shell");
 
   int console_fd = open("/dev/console", O_RDWR);
   if (console_fd < 0) {
@@ -39,7 +39,7 @@ bool DebugShell::CheckDebugShell() {
   struct timeval timeout;
   FD_ZERO(&set);
   FD_SET(console_fd, &set);
-  timeout.tv_sec = 3;
+  timeout.tv_sec = 5;
   timeout.tv_usec = 0;
 
   int rv = select(console_fd + 1, &set, nullptr, nullptr, &timeout);

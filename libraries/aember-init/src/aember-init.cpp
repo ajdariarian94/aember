@@ -93,6 +93,11 @@ void AemberInit::StartRoot() {
     log_.warn("Some early filesystems failed to mount, continuing anyway");
   }
 
+  debug_shell_.emplace();
+  if (!debug_shell_) { log_.warn("Debug Shell not available"); }
+
+  bool debug_shell = debug_shell_->CheckDebugShell();
+
   // ----------------------------
   // Load kernel modules
   // ----------------------------
@@ -109,11 +114,6 @@ void AemberInit::StartRoot() {
   // Enable file logging
   // ----------------------------
   aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
-
-  debug_shell_.emplace();
-  if (!debug_shell_) { log_.warn("Debug Shell not available"); }
-
-  bool debug_shell = debug_shell_->CheckDebugShell();
 
   // ----------------------------
   // Network
@@ -228,16 +228,7 @@ void AemberInit::StartRoot() {
     }
   }
 
-  if (debug_shell) {
-    spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
-    aember::utils::logging::enable_console_silence();
-    debug_shell_->SilenceAemberInBackground();
-
-    service_manager_->StartAll();
-    debug_shell_->SpawnDebugShell();
-  } else {
-    service_manager_->StartAll();
-  }
+  service_manager_->StartAll();
 
   // ----------------------------
   // Signals
@@ -269,6 +260,13 @@ void AemberInit::StartRoot() {
 
   log_.info("Aember Init System started successfully");
 
+  if (debug_shell) {
+    spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
+    aember::utils::logging::enable_console_silence();
+    debug_shell_->SilenceAemberInBackground();
+
+    debug_shell_->SpawnDebugShell();
+  }
   RunLoop();
   Stop();
 }
