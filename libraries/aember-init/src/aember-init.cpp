@@ -83,6 +83,11 @@ void AemberInit::StartInitramfs() {
 void AemberInit::StartRoot() {
   if (running_.load()) return;
 
+  // ----------------------------
+  // Enable file logging
+  // ----------------------------
+  aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
+
   log_.info("Starting Aember in root mode");
 
   // ----------------------------
@@ -109,11 +114,6 @@ void AemberInit::StartRoot() {
   if (!module_loader_->Load(modules)) {
     log_.warn("Some kernel modules failed to load, continuing anyway");
   }
-
-  // ----------------------------
-  // Enable file logging
-  // ----------------------------
-  aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
 
   // ----------------------------
   // Network

@@ -6,6 +6,7 @@
 int main() {
   aember::utils::logging::Logger log_{"echo-aember"};
 
+  aember::utils::logging::enable_console_silence();
   aember::utils::logging::enable_file_logging("/var/log/echo-aember.log");
 
   while (true) {
