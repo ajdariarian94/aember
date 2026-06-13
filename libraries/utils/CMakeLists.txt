@@ -17,8 +17,9 @@ set(SUBCOMPONENTS
     module
     mount
     network
+    process
     root
-    service
+    # service
     shell
     signal
 )

@@ -1,5 +1,5 @@
 set(COMPONENT
-    "aember-init"
+    "process-manager"
 )
 
 set(${COMPONENT}_${PROJECT_NAME}_VERSION
@@ -15,7 +15,7 @@ set(${COMPONENT}_${PROJECT_NAME}_VERSION
 add_library(
   ${COMPONENT}
   STATIC
-  src/aember-init.cpp
+  src/process-manager.cpp
 )
 
 add_library(
@@ -32,21 +32,8 @@ target_include_directories(
 
 target_link_libraries(
   ${COMPONENT}
-  PUBLIC aember-libs::child-supervisor
-         aember-libs::container-manager
-         aember-libs::device-health
-         aember-libs::module-loader
-         aember-libs::mount-manager
-         aember-libs::network-manager
-         aember-libs::process-manager
-         aember-libs::root-manager
-         aember-libs::service-manager
-         aember-libs::utils::config
-         aember-libs::utils::container
-         aember-libs::utils::logging
-         # aember-libs::utils::service
-         aember-libs::utils::shell
-         aember-libs::utils::signal
+  PUBLIC aember-libs::utils::logging
+         aember-libs::utils::process
 )
 
 set_target_properties(
@@ -94,3 +81,11 @@ install(
   NAMESPACE ${PROJECT_NAME}::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
 )
+
+# -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
+
+# if(BUILD_TESTS) include(CTest) enable_testing()
+
+# add_subdirectory(tests) endif()

@@ -1,0 +1,100 @@
+/**
+ * @file dependency-resolver.cpp
+ * @author Arian Ajdari
+ * @brief DependencyResolver implementation.
+ * @version 0.3
+ * @date 2026-06-12
+ *
+ * @copyright Copyright (c) 2025, Aember, All rights reserved.
+ */
+
+#include <aember-libs/service-manager/dependency-resolver.h>
+
+#include <stdexcept>
+#include <unordered_map>
+
+namespace aember::service_manager {
+
+// ---------------------------------------------------------------------------
+// Ctor
+// ---------------------------------------------------------------------------
+
+DependencyResolver::DependencyResolver(StateQuery is_running)
+    : is_running_(std::move(is_running)) {}
+
+// ---------------------------------------------------------------------------
+// CheckDependencies
+// ---------------------------------------------------------------------------
+
+bool DependencyResolver::CheckDependencies(const std::string& name,
+                                           const DependencyGraph& graph) const {
+  auto it = graph.find(name);
+  if (it == graph.end()) {
+    log_.error("CheckDependencies: '{}' not in graph", name);
+    return false;
+  }
+
+  for (const auto& dep : it->second) {
+    if (graph.find(dep) == graph.end()) {
+      log_.error("'{}' has unknown dependency '{}'", name, dep);
+      return false;
+    }
+
+    if (!is_running_(dep)) {
+      log_.warn("Dependency '{}' of '{}' is not running", dep, name);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// ResolveStartOrder — Kahn's algorithm
+// ---------------------------------------------------------------------------
+
+std::vector<std::string> DependencyResolver::ResolveStartOrder(
+    const DependencyGraph& graph) const {
+  // in_degree: unresolved dependency count per name.
+  std::unordered_map<std::string, int> in_degree;
+  // dependents: dep → names that depend on it.
+  std::unordered_map<std::string, std::vector<std::string>> dependents;
+
+  for (const auto& [name, deps] : graph) {
+    if (!in_degree.count(name)) { in_degree[name] = 0; }
+
+    for (const auto& dep : deps) {
+      dependents[dep].push_back(name);
+      ++in_degree[name];
+    }
+  }
+
+  // Seed with names that have no dependencies.
+  std::vector<std::string> queue;
+  for (const auto& [name, degree] : in_degree) {
+    if (degree == 0) { queue.push_back(name); }
+  }
+
+  std::vector<std::string> order;
+  order.reserve(graph.size());
+
+  while (!queue.empty()) {
+    const std::string current = queue.back();
+    queue.pop_back();
+    order.push_back(current);
+
+    for (const auto& dependent : dependents[current]) {
+      if (--in_degree[dependent] == 0) { queue.push_back(dependent); }
+    }
+  }
+
+  if (order.size() != graph.size()) {
+    throw std::runtime_error(
+        "DependencyResolver: cycle detected in dependency graph");
+  }
+
+  log_.info("Resolved start order for {} entries", order.size());
+  return order;
+}
+
+}  // namespace aember::service_manager

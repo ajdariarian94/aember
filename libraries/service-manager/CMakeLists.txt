@@ -15,7 +15,7 @@ set(${COMPONENT}_${PROJECT_NAME}_VERSION
 add_library(
   ${COMPONENT}
   STATIC
-  src/service.cpp
+  src/dependency-resolver.cpp
   src/service-manager.cpp
 )
 
@@ -33,11 +33,13 @@ target_include_directories(
 
 target_link_libraries(
   ${COMPONENT}
-  PUBLIC aember-libs::child-supervisor
+  PUBLIC aember-libs::container-manager
+         aember-libs::process-manager
+         aember-libs::child-supervisor
          aember-libs::utils::config
          aember-libs::utils::container
          aember-libs::utils::logging
-         aember-libs::utils::service
+         # aember-libs::utils::service
 )
 
 set_target_properties(

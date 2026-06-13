@@ -1,36 +1,69 @@
 /**
  * @file service-manager.cpp
  * @author Arian Ajdari
- * @brief Implementation of ServiceManager
- * @version 0.2
- * @date 2026-03-24
+ * @brief ServiceManager implementation — pure coordinator.
+ * @version 0.4
+ * @date 2026-06-12
  *
- * @copyright Copyright (c) 2025-2026, Aember, All rights reserved.
+ * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
 
 #include <aember-libs/service-manager/service-manager.h>
-#include <aember-libs/utils/logging/logging.h>
 
-#include <errno.h>
-#include <signal.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-#include <algorithm>
-#include <iostream>
 #include <thread>
 
 namespace aember::service_manager {
 
-// --------------------------
-// Constructor / Destructor
-// --------------------------
+using ProcessState = aember::process_manager::ProcessManager::ProcessState;
+
+// ---------------------------------------------------------------------------
+// Ctor / Dtor
+// ---------------------------------------------------------------------------
 
 ServiceManager::ServiceManager(
+    aember::process_manager::ProcessManager& process_manager,
+    aember::container_manager::ContainerManager& container_manager,
+    DependencyResolver& dependency_resolver,
     aember::child_supervisor::ChildSupervisor& supervisor)
-    : child_supervisor_(supervisor), log_("service-manager") {
+    : process_manager_(process_manager),
+      container_manager_(container_manager),
+      dependency_resolver_(dependency_resolver),
+      child_supervisor_(supervisor) {
+  // Mirror ProcessManager state changes upward.
+  process_manager_.SetExitCallback(
+      [this](const std::string& name, pid_t /*pid*/, int /*exit_code*/) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        MirrorState(name, process_manager_.GetState(name));
+      });
+
+  // Mirror ContainerManager state changes upward.
+  container_manager_.SetStateCallback(
+      [this](const std::string& name,
+             aember::utils::container::ContainerState /*old*/,
+             aember::utils::container::ContainerState new_state) {
+        using CS = aember::utils::container::ContainerState;
+        ProcessState ps = ProcessState::Stopped;
+        switch (new_state) {
+          case CS::kStarting:
+            ps = ProcessState::Starting;
+            break;
+          case CS::kRunning:
+            ps = ProcessState::Running;
+            break;
+          case CS::kStopping:
+            ps = ProcessState::Stopping;
+            break;
+          case CS::kStopped:
+            ps = ProcessState::Stopped;
+            break;
+          case CS::kFailed:
+            ps = ProcessState::Failed;
+            break;
+        }
+        std::lock_guard<std::mutex> lock(mutex_);
+        MirrorState(name, ps);
+      });
+
   log_.info("ServiceManager initialized");
 }
 
@@ -38,407 +71,242 @@ ServiceManager::~ServiceManager() {
   StopAll();
 }
 
-// --------------------------
-// Add / Remove Services
-// --------------------------
+// ---------------------------------------------------------------------------
+// Registry
+// ---------------------------------------------------------------------------
 
-bool ServiceManager::AddService(
-    const aember::utils::service::ServiceConfig& config) {
+bool ServiceManager::AddProcess(const std::string& name) {
+  if (!process_manager_.HasProcess(name)) {
+    log_.error("AddProcess: '{}' not registered in ProcessManager", name);
+    return false;
+  }
+
   std::lock_guard<std::mutex> lock(mutex_);
+  states_[name] = ProcessState::Stopped;
 
-  if (config.name.empty()) {
-    log_.error("Cannot add service with empty name");
-    return false;
-  }
-
-  if (config.type == aember::utils::service::ServiceType::PROCESS &&
-      config.command.empty()) {
-    log_.error("Cannot add process service '{}' with empty command",
-               config.name);
-    return false;
-  }
-
-  if (services_.find(config.name) != services_.end()) {
-    log_.warn("Service '{}' already exists", config.name);
-    return false;
-  }
-
-  auto service = std::make_shared<Service>(config);
-  services_[config.name] = service;
-
-  log_.info("Added service '{}'", config.name);
+  log_.info("Registered process '{}'", name);
   return true;
 }
 
-// --------------------------
-// Container Registration
-// --------------------------
+bool ServiceManager::AddContainer(const std::string& name) {
+  if (!container_manager_.HasContainer(name)) {
+    log_.error("AddContainer: '{}' not registered in ContainerManager", name);
+    return false;
+  }
 
-bool ServiceManager::AddContainer(
-    const aember::utils::container::ContainerConfig& config) {
   std::lock_guard<std::mutex> lock(mutex_);
+  states_[name] = ProcessState::Stopped;
+  containers_.insert(name);
 
-  if (config.name.empty()) {
-    log_.error("Cannot add container with empty name");
-    return false;
-  }
-
-  if (containers_.find(config.name) != containers_.end()) {
-    log_.warn("Container '{}' already exists", config.name);
-    return false;
-  }
-
-  containers_[config.name] = config;
-
-  log_.info("Registered container '{}'", config.name);
+  log_.info("Registered container '{}'", name);
   return true;
 }
 
-std::vector<aember::utils::container::ContainerConfig>
-ServiceManager::GetContainers() const {
+bool ServiceManager::Remove(const std::string& name) {
+  StopInternal(name);
+
   std::lock_guard<std::mutex> lock(mutex_);
 
-  std::vector<aember::utils::container::ContainerConfig> result;
-  result.reserve(containers_.size());
-
-  for (const auto& [name, config] : containers_) { result.push_back(config); }
-
-  return result;
-}
-
-bool ServiceManager::RemoveService(const std::string& name) {
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  auto it = services_.find(name);
-  if (it == services_.end()) {
-    log_.warn("Service '{}' not found", name);
+  if (!states_.count(name)) {
+    log_.warn("Remove: '{}' not found", name);
     return false;
   }
 
-  auto service = it->second;
-  if (service->GetState() == aember::utils::service::ServiceState::RUNNING ||
-      service->GetState() == aember::utils::service::ServiceState::STARTING) {
-    log_.error("Cannot remove running service '{}'", name);
-    return false;
+  if (containers_.count(name)) {
+    containers_.erase(name);
+  } else {
+    process_manager_.RemoveProcess(name);
   }
 
-  services_.erase(it);
-  log_.info("Removed service '{}'", name);
+  states_.erase(name);
+  log_.info("Removed '{}'", name);
   return true;
 }
 
-// --------------------------
-// Start / Stop / Restart
-// --------------------------
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
 
-bool ServiceManager::StartService(const std::string& name) {
-  return StartServiceInternal(name, false);
+bool ServiceManager::Start(const std::string& name) {
+  return StartInternal(name, false);
 }
 
-bool ServiceManager::StartServiceInternal(const std::string& name,
-                                          bool is_restart) {
-  std::vector<std::string> dependencies;
-  aember::utils::service::ServiceConfig config_copy;
-  aember::utils::service::ServiceType type;
-
+bool ServiceManager::StartInternal(const std::string& name, bool is_restart) {
   {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
 
-    auto it = services_.find(name);
-    if (it == services_.end()) {
-      log_.error("Service '{}' not found", name);
+    if (!states_.count(name)) {
+      log_.error("Start: '{}' not registered", name);
       return false;
     }
 
-    auto service = it->second;
-
-    if (service->GetState() == aember::utils::service::ServiceState::RUNNING ||
-        service->GetState() == aember::utils::service::ServiceState::STARTING) {
+    const auto state = states_.at(name);
+    if (state == ProcessState::Running || state == ProcessState::Starting) {
       return true;
     }
 
-    if (!CheckDependencies(name)) {
+    // Build a name → dependencies graph from ProcessManager for the resolver.
+    const auto all_configs = process_manager_.GetConfigs();
+    DependencyResolver::DependencyGraph graph;
+    for (const auto& cfg : all_configs) { graph[cfg.name] = cfg.dependencies; }
+
+    if (!containers_.count(name) &&
+        !dependency_resolver_.CheckDependencies(name, graph)) {
       log_.error("Dependencies not met for '{}'", name);
       return false;
     }
 
-    dependencies = service->GetConfig().dependencies;
-    config_copy = service->GetConfig();
-    type = config_copy.type;
-
-    ChangeServiceState(name, aember::utils::service::ServiceState::STARTING);
+    MirrorState(name, ProcessState::Starting);
   }
 
-  for (const auto& dep : dependencies) { StartService(dep); }
+  log_.info("Starting '{}'{}", name, is_restart ? " (restart)" : "");
 
-  log_.info("Starting service '{}'{}", name, is_restart ? " (restart)" : "");
-
-  pid_t pid = -1;
   bool success = false;
 
-  if (type == aember::utils::service::ServiceType::PROCESS) {
-    pid = SpawnProcess(config_copy);
-    success = (pid >= 0);
-  } else if (type == aember::utils::service::ServiceType::CONTAINER) {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (containers_.find(name) == containers_.end()) {
-        log_.error("Container '{}' not registered", name);
-        success = false;
-      }
-    }
-
-    if (!container_state_callback_) {
-      log_.error("No container callback set");
-      success = false;
-    } else {
-      success = container_state_callback_(
-          name, aember::utils::container::ContainerState::kRunning);
-    }
-  }
-
-  if (!success) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    ChangeServiceState(name, aember::utils::service::ServiceState::FAILED);
-    return false;
+  if (IsContainer(name)) {
+    success = container_manager_.StartContainer(name);
+  } else {
+    auto pid = process_manager_.Start(name);
+    success = pid.has_value();
+    if (success) { child_supervisor_.AddChild(*pid, name); }
   }
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto service = services_[name];
-
-    if (type == aember::utils::service::ServiceType::PROCESS) {
-      service->SetPid(pid);
-      pid_to_service_[pid] = name;
-    } else {
-      service->SetPid(-1);
-    }
-
-    service->SetStartTime();
-
-    if (is_restart) {
-      service->IncrementRestartCount();
-      service->SetLastRestartTime();
-    }
-
-    ChangeServiceState(name, aember::utils::service::ServiceState::RUNNING);
+    MirrorState(name, success ? ProcessState::Running : ProcessState::Failed);
   }
 
-  if (type == aember::utils::service::ServiceType::PROCESS) {
-    child_supervisor_.AddChild(pid, name);
-  }
-
-  return true;
+  return success;
 }
 
-bool ServiceManager::StopService(const std::string& name) {
-  return StopServiceInternal(name);
+bool ServiceManager::Stop(const std::string& name) {
+  return StopInternal(name);
 }
 
-bool ServiceManager::StopServiceInternal(const std::string& name) {
+bool ServiceManager::StopInternal(const std::string& name) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  auto it = services_.find(name);
-  if (it == services_.end()) {
-    log_.error("Service '{}' not found", name);
+  if (!states_.count(name)) {
+    log_.error("Stop: '{}' not registered", name);
     return false;
   }
 
-  auto service = it->second;
-
-  if (service->GetState() == aember::utils::service::ServiceState::STOPPED ||
-      service->GetState() == aember::utils::service::ServiceState::STOPPING) {
+  const auto state = states_.at(name);
+  if (state == ProcessState::Stopped || state == ProcessState::Stopping) {
     return true;
   }
 
-  ChangeServiceState(name, aember::utils::service::ServiceState::STOPPING);
+  MirrorState(name, ProcessState::Stopping);
 
-  if (service->GetConfig().type ==
-      aember::utils::service::ServiceType::PROCESS) {
-    pid_t pid = service->GetPid();
-    if (pid > 0) { kill(pid, SIGTERM); }
-    service->SetPid(-1);
+  if (containers_.count(name)) {
+    container_manager_.StopContainer(name);
   } else {
-    if (container_state_callback_) {
-      container_state_callback_(
-          name, aember::utils::container::ContainerState::kStopped);
-    }
+    process_manager_.Stop(name);
   }
-
-  ChangeServiceState(name, aember::utils::service::ServiceState::STOPPED);
 
   return true;
 }
 
-bool ServiceManager::RestartService(const std::string& name) {
-  if (!StopServiceInternal(name)) return false;
+bool ServiceManager::Restart(const std::string& name) {
+  if (!StopInternal(name)) return false;
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  return StartServiceInternal(name, true);
+  return StartInternal(name, true);
 }
 
-// --------------------------
-// Bulk
-// --------------------------
+// ---------------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------------
 
 void ServiceManager::StartAll() {
-  // 1. start services
-  for (const auto& name : GetServiceNames()) { StartService(name); }
+  const auto all_configs = process_manager_.GetConfigs();
+  DependencyResolver::DependencyGraph graph;
+  for (const auto& cfg : all_configs) { graph[cfg.name] = cfg.dependencies; }
+  const auto ordered = dependency_resolver_.ResolveStartOrder(graph);
 
-  // 2. explicitly trigger container lifecycle
-  for (const auto& [name, config] : containers_) {
-    log_.info("Triggering container start: {}", name);
+  for (const auto& name : ordered) { Start(name); }
 
-    if (container_state_callback_) {
-      container_state_callback_(
-          name, aember::utils::container::ContainerState::kStarting);
-    }
+  // Start containers — they have no dependency ordering for now.
+  std::vector<std::string> container_names;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    container_names.assign(containers_.begin(), containers_.end());
   }
-}
-
-std::vector<std::string> ServiceManager::GetServiceNames() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  std::vector<std::string> names;
-  names.reserve(services_.size());
-
-  for (const auto& [name, service] : services_) { names.push_back(name); }
-
-  return names;
-}
-
-bool ServiceManager::CheckDependencies(const std::string& name) const {
-  auto it = services_.find(name);
-  if (it == services_.end()) { return false; }
-
-  const auto& deps = it->second->GetConfig().dependencies;
-
-  for (const auto& dep : deps) {
-    if (services_.find(dep) == services_.end()) {
-      log_.error("Missing dependency '{}' for service '{}'", dep, name);
-      return false;
-    }
-  }
-
-  return true;
+  for (const auto& name : container_names) { Start(name); }
 }
 
 void ServiceManager::StopAll() {
-  auto names = GetServiceNames();
-  for (auto it = names.rbegin(); it != names.rend(); ++it) { StopService(*it); }
+  const auto names = GetNames();
+  for (auto it = names.rbegin(); it != names.rend(); ++it) {
+    StopInternal(*it);
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
+
+bool ServiceManager::Has(const std::string& name) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return states_.count(name) > 0;
+}
+
+bool ServiceManager::IsContainer(const std::string& name) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return containers_.count(name) > 0;
+}
+
+ServiceManager::ProcessState ServiceManager::GetState(
+    const std::string& name) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = states_.find(name);
+  return it != states_.end() ? it->second : ProcessState::Failed;
+}
+
+std::vector<std::string> ServiceManager::GetNames() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::vector<std::string> names;
+  names.reserve(states_.size());
+  for (const auto& [name, _] : states_) { names.push_back(name); }
+  return names;
+}
+
+// ---------------------------------------------------------------------------
+// SIGCHLD integration
+// ---------------------------------------------------------------------------
+
+void ServiceManager::HandleExit(pid_t pid, int exit_code) {
+  // Dispatch to whichever manager owns this PID.
+  // State updates flow back via the callbacks wired in the constructor.
+  if (!process_manager_.HandleExit(pid, exit_code)) {
+    container_manager_.HandleExit(pid, exit_code);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Callbacks
+// ---------------------------------------------------------------------------
 
 void ServiceManager::SetStateChangeCallback(StateChangeCallback callback) {
   std::lock_guard<std::mutex> lock(mutex_);
   state_change_callback_ = std::move(callback);
 }
 
-void ServiceManager::HandleServiceExit(pid_t pid, int exit_code) {
-  std::unique_lock<std::mutex> lock(mutex_);
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
-  auto it = pid_to_service_.find(pid);
-  if (it == pid_to_service_.end()) { return; }
+void ServiceManager::MirrorState(const std::string& name,
+                                 ProcessState new_state) {
+  // Caller must hold mutex_.
+  auto it = states_.find(name);
+  if (it == states_.end()) return;
 
-  const std::string service_name = it->second;
-  pid_to_service_.erase(it);
-
-  auto service_it = services_.find(service_name);
-  if (service_it == services_.end()) { return; }
-
-  auto service = service_it->second;
-  service->SetPid(-1);
-  service->SetExitCode(exit_code);
-
-  const auto state = service->GetState();
-  const auto was_stopping =
-      (state == aember::utils::service::ServiceState::STOPPING);
-
-  if (exit_code == 0 || was_stopping) {
-    ChangeServiceState(service_name,
-                       aember::utils::service::ServiceState::STOPPED);
-  } else {
-    ChangeServiceState(service_name,
-                       aember::utils::service::ServiceState::FAILED);
-  }
-}
-
-// --------------------------
-// Queries
-// --------------------------
-
-bool ServiceManager::HasService(const std::string& name) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return services_.find(name) != services_.end();
-  ;
-}
-
-// --------------------------
-// Callbacks
-// --------------------------
-
-void ServiceManager::SetContainerStateCallback(
-    ContainerStateCallback callback) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  container_state_callback_ = callback;
-}
-
-// --------------------------
-
-std::vector<ServiceManager::ServiceConfig> ServiceManager::LoadServices(
-    const std::string& name) {
-  aember::utils::config::ConfigError error;
-
-  if (!parser_.ParseFile(name, error)) {
-    log_.error("Failed to load services: {}", error.message);
-    return {};
-  }
-
-  return parser_.GetServices();
-}
-
-// --------------------------
-
-pid_t ServiceManager::SpawnProcess(
-    const aember::utils::service::ServiceConfig& config) {
-  pid_t pid = fork();
-
-  if (pid == 0) {
-    if (!config.working_directory.empty()) {
-      chdir(config.working_directory.c_str());
-    }
-
-    for (const auto& [k, v] : config.environment) {
-      setenv(k.c_str(), v.c_str(), 1);
-    }
-
-    std::vector<char*> argv;
-    argv.push_back(const_cast<char*>(config.command.c_str()));
-
-    for (const auto& arg : config.args) {
-      argv.push_back(const_cast<char*>(arg.c_str()));
-    }
-
-    argv.push_back(nullptr);
-
-    execvp(config.command.c_str(), argv.data());
-    _exit(1);
-  }
-
-  return pid;
-}
-
-// --------------------------
-
-void ServiceManager::ChangeServiceState(
-    const std::string& name, aember::utils::service::ServiceState new_state) {
-  auto it = services_.find(name);
-  if (it == services_.end()) return;
-
-  auto service = it->second;
-  auto old = service->GetState();
-
+  const auto old = it->second;
   if (old == new_state) return;
 
-  service->SetState(new_state);
+  it->second = new_state;
+
+  log_.info("'{}': {} -> {}", name, ToString(old), ToString(new_state));
 
   if (state_change_callback_) { state_change_callback_(name, old, new_state); }
 }

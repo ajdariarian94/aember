@@ -100,17 +100,13 @@ void AemberInit::StartRoot() {
 
   debug_shell_.emplace();
   if (!debug_shell_) { log_.warn("Debug Shell not available"); }
-
   bool debug_shell = debug_shell_->CheckDebugShell();
 
   // ----------------------------
   // Load kernel modules
   // ----------------------------
   module_loader_.emplace();
-  // Step 1: parse
   auto modules = module_loader_->LoadModules("/etc/aember/modules.json");
-
-  // Step 2: execute
   if (!module_loader_->Load(modules)) {
     log_.warn("Some kernel modules failed to load, continuing anyway");
   }
@@ -118,12 +114,11 @@ void AemberInit::StartRoot() {
   // ----------------------------
   // Network
   // ----------------------------
-  nlohmann::json net_cfg;
   std::string net_config_path = "/etc/aember/network.json";
-
   std::ifstream net_file(net_config_path);
   if (net_file.is_open()) {
     try {
+      nlohmann::json net_cfg;
       net_file >> net_cfg;
 
       network_manager_ = std::make_unique<aember::network::NetworkManager>(
@@ -135,19 +130,17 @@ void AemberInit::StartRoot() {
       network_manager_->Start();
 
       if (!network_manager_->WaitForConnectivity(std::chrono::seconds(30))) {
-        log_.warn("No internet connectivity after 60s, continuing anyway");
+        log_.warn("No internet connectivity after 30s, continuing anyway");
       }
-
     } catch (const std::exception& e) {
       log_.error("Failed to initialize NetworkManager: {}", e.what());
     }
   } else {
-    log_.warn("No network config found at {}, skipping network setup",
-              net_config_path);
+    log_.warn("No network config found at {}, skipping", net_config_path);
   }
 
   // ----------------------------
-  // Initialize Container Manager 🔥
+  // Container Manager
   // ----------------------------
   container_manager_ =
       std::make_shared<aember::container_manager::ContainerManager>(
@@ -159,9 +152,30 @@ void AemberInit::StartRoot() {
                     std::placeholders::_3));
 
   // ----------------------------
-  // Initialize Service Manager
+  // Process Manager
+  // ----------------------------
+  process_manager_ =
+      std::make_unique<aember::process_manager::ProcessManager>();
+
+  // ----------------------------
+  // Dependency Resolver
+  // ----------------------------
+  dependency_resolver_ =
+      std::make_unique<aember::service_manager::DependencyResolver>(
+          [this](const std::string& name) {
+            return service_manager_ &&
+                   service_manager_->GetState(name) ==
+                       aember::process_manager::ProcessManager::ProcessState::
+                           Running;
+          });
+
+  // ----------------------------
+  // Service Manager
   // ----------------------------
   service_manager_ = std::make_unique<aember::service_manager::ServiceManager>(
+      *process_manager_,
+      *container_manager_,
+      *dependency_resolver_,
       child_supervisor_);
 
   service_manager_->SetStateChangeCallback(
@@ -171,63 +185,47 @@ void AemberInit::StartRoot() {
                 std::placeholders::_2,
                 std::placeholders::_3));
 
-  service_manager_->SetContainerStateCallback(
-      [this](const std::string& name, ContainerState state) -> bool {
-        log_.info("Starting containers with name: {}", name);
-        switch (state) {
-          case ContainerState::kStarting:
-            return container_manager_->StartContainer(name);
-
-          case ContainerState::kStopped:
-            return container_manager_->StopContainer(name);
-
-          case ContainerState::kRunning:
-            // optional: ignore or log
-            return true;
-
-          case ContainerState::kStopping:
-            // optional: graceful stop
-            return container_manager_->StopContainer(name);
-
-          case ContainerState::kFailed:
-            // optional: cleanup or restart logic
-            return container_manager_->StopContainer(name);
-        }
-
-        return false;
-      });
-
   // ----------------------------
-  // Load service configuration
+  // Load and register processes
   // ----------------------------
   std::string services_path = "/etc/aember/services.json";
-  auto services = service_manager_->LoadServices(services_path);
-  log_.info("Loaded service configuration from {}", services_path);
+  auto process_configs = process_manager_->LoadProcesses(services_path);
+  log_.info("Loaded process configs from {}", services_path);
 
-  std::string containers_path = "/etc/aember/containers.json";
-  auto containers = container_manager_->LoadContainers(containers_path);
-
-  for (const auto& service_config : services) {
-    if (service_manager_->AddService(service_config)) {
-      log_.info("Added service: {}", service_config.name);
-    } else {
-      log_.error("Failed to add service: {}", service_config.name);
-    }
-  }
-
-  for (const auto& container_config : containers) {
-    if (!container_manager_->AddContainer(container_config)) {
-      log_.error("Failed to register container: {}", container_config.name);
+  for (const auto& config : process_configs) {
+    if (!process_manager_->AddProcess(config)) {
+      log_.error("Failed to register process: {}", config.name);
       continue;
     }
-
-    if (service_manager_->AddContainer(container_config)) {
-      log_.info("Added container service: {}", container_config.name);
+    if (!service_manager_->AddProcess(config.name)) {
+      log_.error("Failed to add process to service manager: {}", config.name);
     } else {
-      log_.error("Failed to add container service: {}", container_config.name);
+      log_.info("Registered process: {}", config.name);
     }
   }
 
+  // ----------------------------
+  // Load and register containers
+  // ----------------------------
+  std::string containers_path = "/etc/aember/containers.json";
+  auto container_configs = container_manager_->LoadContainers(containers_path);
+  log_.info("Loaded container configs from {}", containers_path);
+
+  for (const auto& config : container_configs) {
+    if (!container_manager_->AddContainer(config)) {
+      log_.error("Failed to register container: {}", config.name);
+      continue;
+    }
+    if (!service_manager_->AddContainer(config.name)) {
+      log_.error("Failed to add container to service manager: {}", config.name);
+    } else {
+      log_.info("Registered container: {}", config.name);
+    }
+  }
+
+  // ----------------------------
+  // Start everything
+  // ----------------------------
   service_manager_->StartAll();
 
   // ----------------------------
@@ -242,7 +240,7 @@ void AemberInit::StartRoot() {
     pid_t pid;
 
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-      service_manager_->HandleServiceExit(pid, WEXITSTATUS(status));
+      service_manager_->HandleExit(pid, WEXITSTATUS(status));
     }
 
     child_supervisor_.HandleSIGCHLD();
@@ -264,9 +262,9 @@ void AemberInit::StartRoot() {
     spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
     aember::utils::logging::enable_console_silence();
     debug_shell_->SilenceAemberInBackground();
-
     debug_shell_->SpawnDebugShell();
   }
+
   RunLoop();
   Stop();
 }
@@ -328,13 +326,13 @@ void AemberInit::HeartbeatCallback(const nlohmann::json& heartbeat_payload) {
   log_.info("Heartbeat: {}", heartbeat_payload.dump());
 }
 
-void AemberInit::OnServiceStateChangeCallback(
-    const std::string& name, aember::utils::service::ServiceState old_state,
-    aember::utils::service::ServiceState new_state) {
+void AemberInit::OnServiceStateChangeCallback(const std::string& name,
+                                              ProcessState old_state,
+                                              ProcessState new_state) {
   log_.info("Service '{}' state changed: {} -> {}",
             name,
-            aember::utils::service::ServiceStateToString(old_state),
-            aember::utils::service::ServiceStateToString(new_state));
+            aember::utils::process::ToString(old_state),
+            aember::utils::process::ToString(new_state));
 }
 
 void AemberInit::OnNetworkStatusCallback(
