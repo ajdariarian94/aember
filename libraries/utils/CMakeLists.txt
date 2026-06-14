@@ -19,7 +19,6 @@ set(SUBCOMPONENTS
     network
     process
     root
-    # service
     shell
     signal
 )
