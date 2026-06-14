@@ -31,7 +31,7 @@ static std::unique_ptr<spdlog::formatter> make_formatter() {
 }
 
 void logging_level_debug() {
-   spdlog::set_level(spdlog::level::debug);
+  spdlog::set_level(spdlog::level::debug);
 }
 
 void logging_level_info() {

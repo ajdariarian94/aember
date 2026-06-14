@@ -23,9 +23,13 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <expected>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
+#include <string_view>
 
 namespace aember::aember_init {
 
@@ -36,39 +40,68 @@ class AemberInit {
   using ProcessState = aember::process_manager::ProcessManager::ProcessState;
   using Logger = aember::utils::logging::Logger;
 
-  AemberInit(const std::string& logger_name);
+  /// Lightweight error type used throughout init — just a message string.
+  struct Error {
+    std::string message;
+  };
+
+  template <typename T = void>
+  using Result = std::expected<T, Error>;
+
+  explicit AemberInit(std::string_view logger_name);
   ~AemberInit();
+
+  AemberInit(const AemberInit&) = delete;
+  AemberInit& operator=(const AemberInit&) = delete;
 
   void StartInitramfs();
   void StartRoot();
   void Stop();
 
  private:
+  // ---------------------------------------------------------------------------
+  // Init phases — each returns Result<> so failures chain cleanly
+  // ---------------------------------------------------------------------------
+
+  Result<> InitMounts();
+  Result<> InitNetwork();
+  Result<> InitServiceStack();
+  Result<> InitSignals();
+
+  Result<> LoadAndRegisterProcesses(std::string_view path);
+  Result<> LoadAndRegisterContainers(std::string_view path);
+
+  // ---------------------------------------------------------------------------
+  // Run loop
+  // ---------------------------------------------------------------------------
+
   void RunLoop();
 
-  void HeartbeatCallback(const nlohmann::json& heartbeat_payload);
+  // ---------------------------------------------------------------------------
+  // Callbacks — move_only_function since they're never copied
+  // ---------------------------------------------------------------------------
 
-  void OnServiceStateChangeCallback(const std::string& name,
-                                    ProcessState old_state,
-                                    ProcessState new_state);
+  void OnHeartbeat(const nlohmann::json& payload);
 
-  void OnNetworkStatusCallback(
+  void OnServiceStateChange(const std::string& name, ProcessState old_state,
+                            ProcessState new_state);
+
+  void OnNetworkStatus(
       const aember::utils::network::ConnectivityStatus& status);
 
-  void OnContainerStateCallback(const std::string& name,
-                                ContainerState old_state,
-                                ContainerState new_state);
+  void OnContainerStateChange(const std::string& name, ContainerState old_state,
+                              ContainerState new_state);
 
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
 
-  std::atomic<bool> running_;
+  std::atomic<bool> running_{false};
   std::mutex mtx_;
   std::condition_variable cv_;
 
   // ---------------------------------------------------------------------------
-  // Subsystems
+  // Subsystems — constructed in dependency order, destroyed in reverse
   // ---------------------------------------------------------------------------
 
   aember::utils::signal::SignalHandler signal_handler_;
@@ -81,21 +114,19 @@ class AemberInit {
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
   std::shared_ptr<aember::container_manager::ContainerManager>
       container_manager_;
+
   std::unique_ptr<aember::network::NetworkManager> network_manager_;
   std::unique_ptr<aember::root_manager::RootManager> root_manager_;
 
   // ---------------------------------------------------------------------------
-  // Service stack — constructed in order, injected into ServiceManager
+  // Service stack — order matters: process_manager_ and dependency_resolver_
+  // must outlive service_manager_
   // ---------------------------------------------------------------------------
 
   std::unique_ptr<aember::process_manager::ProcessManager> process_manager_;
   std::unique_ptr<aember::service_manager::DependencyResolver>
       dependency_resolver_;
   std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
-
-  // ---------------------------------------------------------------------------
-  // Logging
-  // ---------------------------------------------------------------------------
 
   Logger log_;
 };

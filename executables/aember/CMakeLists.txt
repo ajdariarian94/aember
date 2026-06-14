@@ -46,11 +46,6 @@ target_include_directories(
   PRIVATE $<BUILD_INTERFACE:${CMAKE_INSTALL_PREFIX}/include>
 )
 
-target_compile_features(
-  ${PROJECT_NAME}
-  PRIVATE cxx_std_26
-)
-
 target_link_options(
   ${PROJECT_NAME}
   PRIVATE
