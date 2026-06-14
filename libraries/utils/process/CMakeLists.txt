@@ -1,37 +1,35 @@
 # -----------------------------------------------------------------------------
-# Service subcomponent
+# Process subcomponent
 # -----------------------------------------------------------------------------
 
 add_library(
-  ${SERVICE_TARGET}
+  ${PROCESS_TARGET}
   STATIC
-  src/restart-policy.cpp
-  src/service-config.cpp
-  src/service-parser.cpp
-  src/service-state.cpp
+  src/process-config-parser.cpp
+  src/process-config.cpp
 )
 
 add_library(
-  ${PROJECT_NAME}::${COMPONENT}::${SERVICE_COMPONENT}
+  ${PROJECT_NAME}::${COMPONENT}::${PROCESS_COMPONENT}
   ALIAS
-  ${SERVICE_TARGET}
+  ${PROCESS_TARGET}
 )
 
 target_include_directories(
-  ${SERVICE_TARGET}
+  ${PROCESS_TARGET}
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 target_link_libraries(
-  ${SERVICE_TARGET}
+  ${PROCESS_TARGET}
   PUBLIC aember-libs::utils::config
 )
 
 set_target_properties(
-  ${SERVICE_TARGET}
+  ${PROCESS_TARGET}
   PROPERTIES EXPORT_NAME
-             ${COMPONENT}::${SERVICE_COMPONENT}
+             ${COMPONENT}::${PROCESS_COMPONENT}
 )
 
 # -----------------------------------------------------------------------------

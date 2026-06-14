@@ -3,10 +3,6 @@
  * @author Arian Ajdari
  * @date 2025-12-22
  * @brief Top-level init system interface for Aember.
- *
- * Defines the AemberInit class, responsible for bootstrapping the system,
- * managing services, handling signals, supervising child processes, and
- * coordinating early system initialization.
  */
 
 #pragma once
@@ -17,7 +13,9 @@
 #include <aember-libs/module-loader/module-loader.h>
 #include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/network-manager/network-manager.h>
+#include <aember-libs/process-manager/process-manager.h>
 #include <aember-libs/root-manager/root-manager.h>
+#include <aember-libs/service-manager/dependency-resolver.h>
 #include <aember-libs/service-manager/service-manager.h>
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/shell/debug-shell.h>
@@ -31,177 +29,74 @@
 
 namespace aember::aember_init {
 
-/**
- * @class AemberInit
- * @brief Top-level init system orchestrator.
- *
- * AemberInit acts as the system's init process (PID 1 or equivalent).
- * It is responsible for:
- *
- * - Mounting early filesystems
- * - Handling system signals
- * - Supervising child processes
- * - Managing service lifecycles
- * - Providing heartbeat and health reporting
- *
- * The Start() method initializes all subsystems and enters the main run loop.
- */
 class AemberInit {
  public:
   using DebugShell = aember::utils::shell::DebugShell;
   using ContainerState = aember::utils::container::ContainerState;
+  using ProcessState = aember::process_manager::ProcessManager::ProcessState;
   using Logger = aember::utils::logging::Logger;
 
-  /**
-   * @brief Construct the init system.
-   *
-   * Construction does not start any subsystems. Initialization is deferred
-   * to Start().
-   */
   AemberInit(const std::string& logger_name);
-
-  /**
-   * @brief Destructor.
-   *
-   * Ensures Stop() is called and all owned subsystems are shut down cleanly.
-   */
   ~AemberInit();
 
-  /**
-   * @brief Start the init system.
-   *
-   * Initializes logging, mounts early filesystems, installs signal handlers,
-   * initializes service management, and enters the main run loop.
-   *
-   * This function blocks until Stop() is invoked.
-   */
   void StartInitramfs();
-
   void StartRoot();
-
-  /**
-   * @brief Stop the init system.
-   *
-   * Gracefully shuts down all managed services and subsystems.
-   * Safe to call multiple times.
-   */
   void Stop();
 
  private:
-  /**
-   * @brief Main run loop for the init process.
-   *
-   * Keeps the init process alive and provides a place for periodic tasks
-   * such as health checks or housekeeping.
-   */
   void RunLoop();
 
-  /**
-   * @brief Callback invoked by the heartbeat subsystem.
-   *
-   * Receives periodic health and liveness information.
-   *
-   * @param heartbeat_payload JSON payload describing system health.
-   */
   void HeartbeatCallback(const nlohmann::json& heartbeat_payload);
 
-  /**
-   * @brief Callback invoked when a service changes state.
-   *
-   * Registered with the ServiceManager to observe service lifecycle
-   * transitions.
-   *
-   * @param name Name of the service.
-   * @param old_state Previous service state.
-   * @param new_state New service state.
-   */
-  void OnServiceStateChangeCallback(
-      const std::string& name, aember::utils::service::ServiceState old_state,
-      aember::utils::service::ServiceState new_state);
+  void OnServiceStateChangeCallback(const std::string& name,
+                                    ProcessState old_state,
+                                    ProcessState new_state);
 
-  /**
-   * @brief Indicates whether the init system is currently running.
-   *
-   * Used to control the lifetime of the main run loop and to prevent
-   * multiple starts or stops.
-   */
-  std::atomic<bool> running_;
-
-  /**
-   * @brief Mutex protecting the run loop condition variable.
-   */
-  std::mutex mtx_;
-
-  /**
-   * @brief Condition variable used to wake or block the run loop.
-   */
-  std::condition_variable cv_;
-
-  /**
-   * @brief Centralized signal handling utility.
-   *
-   * Used to register and dispatch handlers for signals such as SIGTERM,
-   * SIGINT, SIGCHLD, and SIGHUP.
-   */
-  aember::utils::signal::SignalHandler signal_handler_;
-
-  /**
-   * @brief Supervises all child processes.
-   *
-   * Tracks spawned child PIDs, assists with reaping, and provides
-   * centralized child lifecycle management.
-   */
-  aember::child_supervisor::ChildSupervisor child_supervisor_;
-
-  /**
-   * @brief Optional heartbeat subsystem.
-   *
-   * Periodically emits health and liveness information while the
-   * init system is running.
-   */
-  std::optional<aember::device_health::Heartbeat> heartbeat_;
-
-  /**
-   * @brief Optional mount manager.
-   *
-   * Responsible for mounting early filesystems required before
-   * services are started.
-   */
-  std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
-
-  /**
-   * @brief Root manager instance.
-   *
-   * Owns and controls all configured system services, including
-   * dependency management and restart policies.
-   */
-  std::unique_ptr<aember::root_manager::RootManager> root_manager_;
-
-  /**
-   * @brief Service manager instance.
-   *
-   * Owns and controls all configured system services, including
-   * dependency management and restart policies.
-   */
-  std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
-
-  std::optional<DebugShell> debug_shell_;
-
-  std::unique_ptr<aember::network::NetworkManager> network_manager_;
   void OnNetworkStatusCallback(
       const aember::utils::network::ConnectivityStatus& status);
 
-  std::shared_ptr<aember::container_manager::ContainerManager>
-      container_manager_;
   void OnContainerStateCallback(const std::string& name,
                                 ContainerState old_state,
                                 ContainerState new_state);
 
+  // ---------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------
+
+  std::atomic<bool> running_;
+  std::mutex mtx_;
+  std::condition_variable cv_;
+
+  // ---------------------------------------------------------------------------
+  // Subsystems
+  // ---------------------------------------------------------------------------
+
+  aember::utils::signal::SignalHandler signal_handler_;
+  aember::child_supervisor::ChildSupervisor child_supervisor_;
+
+  std::optional<aember::device_health::Heartbeat> heartbeat_;
+  std::optional<DebugShell> debug_shell_;
   std::optional<aember::module_loader::ModuleLoader> module_loader_;
 
-  /**
-   * @brief Logger instance for the init system.
-   */
+  std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
+  std::shared_ptr<aember::container_manager::ContainerManager>
+      container_manager_;
+  std::unique_ptr<aember::network::NetworkManager> network_manager_;
+  std::unique_ptr<aember::root_manager::RootManager> root_manager_;
+
+  // ---------------------------------------------------------------------------
+  // Service stack — constructed in order, injected into ServiceManager
+  // ---------------------------------------------------------------------------
+
+  std::unique_ptr<aember::process_manager::ProcessManager> process_manager_;
+  std::unique_ptr<aember::service_manager::DependencyResolver>
+      dependency_resolver_;
+  std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
+
+  // ---------------------------------------------------------------------------
+  // Logging
+  // ---------------------------------------------------------------------------
+
   Logger log_;
 };
 
