@@ -19,6 +19,10 @@
 
 namespace aember::utils::logging {
 
+void logging_level_debug();
+
+void logging_level_info();
+
 void enable_console_silence();
 
 /**

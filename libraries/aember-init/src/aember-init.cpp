@@ -11,9 +11,7 @@
 
 #include <aember-libs/aember-init/aember-init.h>
 
-#include <spdlog/spdlog.h>
 #include <sys/wait.h>
-#include <nlohmann/json.hpp>
 
 #include <fstream>
 
@@ -22,9 +20,9 @@ namespace aember::aember_init {
 AemberInit::AemberInit(const std::string& logger_name)
     : running_(false), log_(logger_name) {
 #ifndef NDEBUG
-  spdlog::set_level(spdlog::level::debug);
+  aember::utils::logging::logging_level_debug();
 #else
-  spdlog::set_level(spdlog::level::info);
+  aember::utils::logging::logging_level_info();
 #endif
 }
 
@@ -352,13 +350,6 @@ void AemberInit::OnContainerStateCallback(
             name,
             aember::utils::container::ContainerStateToString(old_state),
             aember::utils::container::ContainerStateToString(new_state));
-
-  // 🔥 Optional (next step): sync to ServiceManager
-  // Example:
-  //
-  // if (service_manager_) {
-  //   // map container state → service state
-  // }
 }
 
 void AemberInit::RunLoop() {

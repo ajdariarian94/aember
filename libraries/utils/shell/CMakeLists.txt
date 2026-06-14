@@ -22,7 +22,7 @@ target_include_directories(
 
 target_link_libraries(
   ${SHELL_TARGET}
-  PUBLIC aember-libs::utils
+  PUBLIC aember-libs::utils::logging
 )
 
 set_target_properties(
