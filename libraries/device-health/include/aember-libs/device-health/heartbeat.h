@@ -1,10 +1,9 @@
 /**
  * @file heartbeat.h
  * @author Arian Ajdari
- * @brief Library definition for Heartbeat service used for device health
- * monitoring.
- * @version 0.1
- * @date 2025-07-18
+ * @brief Heartbeat service for device health monitoring.
+ * @version 0.2
+ * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
@@ -15,70 +14,59 @@
 
 #include <nlohmann/json.hpp>
 
-#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <functional>
-#include <mutex>
+#include <stop_token>
 #include <thread>
 
 namespace aember::device_health {
 
 /**
- * @class Heartbeat
- * @brief Sends periodic heartbeat signals with JSON payload for monitoring
- * purposes.
+ * Sends periodic heartbeat signals with a JSON payload for monitoring.
+ *
+ * Uses std::jthread + std::stop_token (C++20) so there is no manual
+ * running_ flag, no condition variable, and no explicit join — the thread
+ * is stopped and joined automatically when the Heartbeat is destroyed or
+ * Stop() is called.
+ *
+ * The callback is move_only_function: it is captured once at construction
+ * and never copied.
  */
 class Heartbeat {
  public:
   using Logger = aember::utils::logging::Logger;
+  using Callback = std::move_only_function<void(const nlohmann::json&)>;
 
   /**
-   * @brief Constructs a Heartbeat object.
-   * @param callback Function to be called with heartbeat JSON payload.
-   * @param interval Time interval between heartbeats (default 1000ms).
+   * @param callback Invoked with a JSON payload on every heartbeat tick.
+   * @param interval Time between ticks (default 1000 ms).
    */
-  explicit Heartbeat(const std::function<void(const nlohmann::json&)>& callback,
-                     const std::chrono::milliseconds& interval =
-                         std::chrono::milliseconds(1000));
+  explicit Heartbeat(Callback callback, std::chrono::milliseconds interval =
+                                            std::chrono::milliseconds{1000});
 
-  /**
-   * @brief Destructor. Stops the heartbeat thread if running.
-   */
+  /// Stops and joins the background thread.
   ~Heartbeat();
 
-  /**
-   * @brief Starts the heartbeat background thread.
-   * If already running, this does nothing.
-   */
+  Heartbeat(const Heartbeat&) = delete;
+  Heartbeat& operator=(const Heartbeat&) = delete;
+
+  /// Starts the background thread. No-op if already running.
   void Start();
 
-  /**
-   * @brief Stops the heartbeat background thread.
-   * Blocks until the thread exits.
-   */
+  /// Requests the background thread to stop and blocks until it exits.
   void Stop();
 
-  /**
-   * @brief Sends a heartbeat immediately by calling the callback.
-   */
+  /// Fire one heartbeat immediately (callable from any thread).
   void Beep();
 
  private:
-  /**
-   * @brief Internal thread function that periodically sends heartbeats.
-   */
-  void Run();
+  /// Thread body — receives the stop_token from jthread automatically.
+  void Run(std::stop_token stop_token);
 
-  std::atomic_bool running_{false};     ///< True if heartbeat thread is running
-  std::chrono::milliseconds interval_;  ///< Time interval between heartbeats
-  std::function<void(const nlohmann::json&)>
-      callback_;              ///< Callback function for heartbeats
-  std::thread check_thread_;  ///< Background thread for heartbeats
-  std::condition_variable
-      cv_;            ///< Condition variable for thread synchronization
-  std::mutex mutex_;  ///< Mutex for thread synchronization
-  Logger log_;        ///< Logger instance
+  std::chrono::milliseconds interval_;
+  Callback callback_;
+  std::jthread thread_;
+  Logger log_{"heartbeat"};
 };
 
 }  // namespace aember::device_health
