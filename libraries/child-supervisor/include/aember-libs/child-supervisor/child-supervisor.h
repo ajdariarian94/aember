@@ -34,7 +34,7 @@ class ChildSupervisor {
 
   ChildSupervisor();
 
-  ChildSupervisor(const ChildSupervisor&)            = delete;
+  ChildSupervisor(const ChildSupervisor&) = delete;
   ChildSupervisor& operator=(const ChildSupervisor&) = delete;
 
   // ---------------------------------------------------------------------------

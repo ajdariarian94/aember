@@ -68,12 +68,10 @@ void ChildSupervisor::ReapChildren() {
     int status = 0;
     const pid_t pid = ::waitpid(-1, &status, WNOHANG);
 
-    if (pid == 0)  { break; }  // no more exited children
+    if (pid == 0) { break; }  // no more exited children
 
     if (pid < 0) {
-      if (errno != ECHILD) {
-        log_.error("waitpid failed: errno={}", errno);
-      }
+      if (errno != ECHILD) { log_.error("waitpid failed: errno={}", errno); }
       break;
     }
 
