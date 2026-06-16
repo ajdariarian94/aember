@@ -2,7 +2,7 @@
  * @file container-manager.cpp
  * @author Arian Ajdari
  * @brief ContainerManager implementation using LXC.
- * @version 0.2
+ * @version 0.3
  * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -14,6 +14,9 @@
 
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include <format>
+#include <ranges>
 
 namespace aember::container_manager {
 
@@ -29,8 +32,7 @@ ContainerManager::ContainerManager(
 }
 
 ContainerManager::~ContainerManager() {
-  std::lock_guard<std::mutex> lock(mutex_);
-
+  std::lock_guard lock{mutex_};
   for (auto& e : containers_) {
     Stop(e);
     Release(e);
@@ -42,7 +44,7 @@ ContainerManager::~ContainerManager() {
 // ---------------------------------------------------------------------------
 
 bool ContainerManager::AddContainer(const ContainerConfig& config) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock{mutex_};
 
   if (config.name.empty() || config.rootfs.empty()) {
     log_.error("Invalid container config — name and rootfs are required");
@@ -63,36 +65,38 @@ bool ContainerManager::AddContainer(const ContainerConfig& config) {
   return true;
 }
 
-bool ContainerManager::RemoveContainer(const std::string& name) {
-  std::lock_guard<std::mutex> lock(mutex_);
+bool ContainerManager::RemoveContainer(std::string_view name) {
+  std::lock_guard lock{mutex_};
 
-  for (auto it = containers_.begin(); it != containers_.end(); ++it) {
-    if (it->config.name != name) continue;
+  auto it = std::ranges::find_if(containers_, [name](const ContainerEntry& e) {
+    return e.config.name == name;
+  });
 
-    // Clean up pid_to_name_ entry if the container had a running init PID.
-    if (it->lxc && it->lxc->is_running(it->lxc)) {
-      pid_t init_pid = it->lxc->init_pid(it->lxc);
-      if (init_pid > 0) { pid_to_name_.erase(init_pid); }
-    }
-
-    Stop(*it);
-    Release(*it);
-    containers_.erase(it);
-
-    log_.info("Removed container '{}'", name);
-    return true;
+  if (it == containers_.end()) {
+    log_.warn("RemoveContainer: '{}' not found", name);
+    return false;
   }
 
-  log_.warn("RemoveContainer: '{}' not found", name);
-  return false;
+  if (it->lxc && it->lxc->is_running(it->lxc)) {
+    if (const pid_t pid = it->lxc->init_pid(it->lxc); pid > 0) {
+      pid_to_name_.erase(pid);
+    }
+  }
+
+  Stop(*it);
+  Release(*it);
+  containers_.erase(it);
+
+  log_.info("Removed container '{}'", name);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-bool ContainerManager::StartContainer(const std::string& name) {
-  std::lock_guard<std::mutex> lock(mutex_);
+bool ContainerManager::StartContainer(std::string_view name) {
+  std::lock_guard lock{mutex_};
 
   auto* e = Find(name);
   if (!e) {
@@ -112,21 +116,17 @@ bool ContainerManager::StartContainer(const std::string& name) {
     SetState(*e, ContainerState::kFailed);
     return false;
   }
-
   if (!Start(*e)) {
     SetState(*e, ContainerState::kFailed);
     return false;
   }
 
-  // Record the host-visible init PID so HandleExit can route SIGCHLD events.
   if (e->lxc) {
-    pid_t init_pid = e->lxc->init_pid(e->lxc);
-    if (init_pid > 0) {
-      pid_to_name_[init_pid] = name;
-      log_.debug("Container '{}' init PID: {}", name, init_pid);
+    if (const pid_t pid = e->lxc->init_pid(e->lxc); pid > 0) {
+      pid_to_name_[pid] = std::string{name};
+      log_.debug("Container '{}' init PID: {}", name, pid);
     } else {
-      log_.warn(
-          "Container '{}' started but init_pid() returned {}", name, init_pid);
+      log_.warn("Container '{}' started but init_pid() returned {}", name, pid);
     }
   }
 
@@ -134,8 +134,8 @@ bool ContainerManager::StartContainer(const std::string& name) {
   return true;
 }
 
-bool ContainerManager::StopContainer(const std::string& name) {
-  std::lock_guard<std::mutex> lock(mutex_);
+bool ContainerManager::StopContainer(std::string_view name) {
+  std::lock_guard lock{mutex_};
 
   auto* e = Find(name);
   if (!e) {
@@ -148,16 +148,16 @@ bool ContainerManager::StopContainer(const std::string& name) {
     return true;
   }
 
-  // Remove the init PID mapping before we stop.
   if (e->lxc) {
-    pid_t init_pid = e->lxc->init_pid(e->lxc);
-    if (init_pid > 0) { pid_to_name_.erase(init_pid); }
+    if (const pid_t pid = e->lxc->init_pid(e->lxc); pid > 0) {
+      pid_to_name_.erase(pid);
+    }
   }
 
   log_.info("Stopping container '{}'", name);
   SetState(*e, ContainerState::kStopping);
 
-  bool ok = Stop(*e);
+  const bool ok = Stop(*e);
   Release(*e);
 
   SetState(*e, ok ? ContainerState::kStopped : ContainerState::kFailed);
@@ -169,25 +169,18 @@ bool ContainerManager::StopContainer(const std::string& name) {
 // ---------------------------------------------------------------------------
 
 bool ContainerManager::HandleExit(pid_t pid, int exit_code) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock{mutex_};
 
   auto it = pid_to_name_.find(pid);
-  if (it == pid_to_name_.end()) {
-    // Not our PID — caller should try ProcessManager.
-    return false;
-  }
+  if (it == pid_to_name_.end()) { return false; }
 
-  const std::string name = it->second;
+  const std::string name = std::move(it->second);
   pid_to_name_.erase(it);
 
   auto* e = Find(name);
-  if (!e) {
-    // Entry was already removed — nothing more to do.
-    return true;
-  }
+  if (!e) { return true; }
 
   const bool was_stopping = (e->state == ContainerState::kStopping);
-
   Release(*e);
 
   if (was_stopping || exit_code == 0) {
@@ -209,47 +202,44 @@ bool ContainerManager::HandleExit(pid_t pid, int exit_code) {
 // Queries
 // ---------------------------------------------------------------------------
 
-bool ContainerManager::HasContainer(const std::string& name) const {
-  std::lock_guard<std::mutex> lock(mutex_);
+bool ContainerManager::HasContainer(std::string_view name) const {
+  std::lock_guard lock{mutex_};
   return Find(name) != nullptr;
 }
 
 ContainerManager::ContainerState ContainerManager::GetContainerState(
-    const std::string& name) const {
-  std::lock_guard<std::mutex> lock(mutex_);
+    std::string_view name) const {
+  std::lock_guard lock{mutex_};
   const auto* e = Find(name);
   return e ? e->state : ContainerState::kFailed;
 }
 
-bool ContainerManager::IsRunning(const std::string& name) const {
+bool ContainerManager::IsRunning(std::string_view name) const {
   return GetContainerState(name) == ContainerState::kRunning;
 }
 
-std::optional<pid_t> ContainerManager::GetInitPid(
-    const std::string& name) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-
+std::optional<pid_t> ContainerManager::GetInitPid(std::string_view name) const {
+  std::lock_guard lock{mutex_};
   const auto* e = Find(name);
   if (!e || !e->lxc) return std::nullopt;
-
-  pid_t init_pid = e->lxc->init_pid(e->lxc);
-  return init_pid > 0 ? std::optional<pid_t>(init_pid) : std::nullopt;
+  const pid_t pid = e->lxc->init_pid(e->lxc);
+  return pid > 0 ? std::optional<pid_t>{pid} : std::nullopt;
 }
 
 // ---------------------------------------------------------------------------
-// Config loading
+// Config loading + callback
 // ---------------------------------------------------------------------------
 
 void ContainerManager::SetStateCallback(StateCallback callback) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock{mutex_};
   callback_ = std::move(callback);
 }
 
 std::vector<ContainerManager::ContainerConfig> ContainerManager::LoadContainers(
-    const std::string& source) {
+    std::string_view source) {
   aember::utils::config::ConfigError error;
 
-  if (!parser_.ParseFile(source, error)) {
+  if (!parser_.ParseFile(std::string{source}, error)) {
     log_.error(
         "Failed to load containers from '{}': {}", source, error.message);
     return {};
@@ -277,7 +267,6 @@ bool ContainerManager::Create(ContainerEntry& e) {
     return false;
   }
 
-  // Mount SquashFS if specified.
   if (!e.config.squashfs.empty()) {
     if (!mount_manager_->MountSquashFS(e.config.squashfs, e.config.rootfs)) {
       log_.error("Failed to mount squashfs '{}' at '{}'",
@@ -289,21 +278,19 @@ bool ContainerManager::Create(ContainerEntry& e) {
         "Mounted squashfs '{}' at '{}'", e.config.squashfs, e.config.rootfs);
   }
 
-  // Configure rootfs.
   if (!e.lxc->set_config_item(
           e.lxc, "lxc.rootfs.path", e.config.rootfs.c_str())) {
     log_.error("Failed to set rootfs for '{}'", e.config.name);
     return false;
   }
 
-  // Standard LXC identity and mounts.
   e.lxc->set_config_item(e.lxc, "lxc.uts.name", e.config.name.c_str());
   e.lxc->set_config_item(e.lxc, "lxc.mount.auto", "proc:mixed sys:mixed");
   e.lxc->set_config_item(e.lxc, "lxc.autodev", "1");
   e.lxc->set_config_item(e.lxc, "lxc.net.0.type", "empty");
   e.lxc->set_config_item(e.lxc, "lxc.pty.max", "1");
 
-  const std::string log_file = "/tmp/lxc-" + e.config.name + ".log";
+  const auto log_file = std::format("/tmp/lxc-{}.log", e.config.name);
   e.lxc->set_config_item(e.lxc, "lxc.log.level", "TRACE");
   e.lxc->set_config_item(e.lxc, "lxc.log.file", log_file.c_str());
 
@@ -319,13 +306,15 @@ bool ContainerManager::Start(ContainerEntry& e) {
 
   log_.debug("Starting LXC container '{}'", e.config.name);
 
+  // LXC C API requires char* argv — const_cast is unavoidable here.
   std::vector<char*> argv;
-  for (auto& a : e.config.args) {
-    argv.push_back(const_cast<char*>(a.c_str()));
-  }
+  argv.reserve(e.config.args.size() + 1);
+  std::ranges::transform(e.config.args, std::back_inserter(argv), [](auto& a) {
+    return const_cast<char*>(a.c_str());
+  });
   if (!argv.empty()) { argv.push_back(nullptr); }
 
-  bool ok = e.lxc->start(e.lxc, 0, argv.empty() ? nullptr : argv.data());
+  const bool ok = e.lxc->start(e.lxc, 0, argv.empty() ? nullptr : argv.data());
 
   if (!ok) {
     log_.error("lxc start failed for '{}' — check /tmp/lxc-{}.log",
@@ -339,8 +328,7 @@ bool ContainerManager::Start(ContainerEntry& e) {
 }
 
 bool ContainerManager::Stop(ContainerEntry& e) {
-  if (!e.lxc) return true;
-  if (!e.lxc->is_running(e.lxc)) return true;
+  if (!e.lxc || !e.lxc->is_running(e.lxc)) return true;
 
   log_.debug("Stopping LXC container '{}'", e.config.name);
 
@@ -355,7 +343,6 @@ bool ContainerManager::Stop(ContainerEntry& e) {
 
 void ContainerManager::Release(ContainerEntry& e) {
   if (!e.lxc) return;
-
   log_.debug("Releasing LXC handle for '{}'", e.config.name);
   lxc_container_put(e.lxc);
   e.lxc = nullptr;
@@ -367,7 +354,6 @@ void ContainerManager::Release(ContainerEntry& e) {
 
 void ContainerManager::SetState(ContainerEntry& e, ContainerState s) {
   if (e.state == s) return;
-
   const auto old = e.state;
   e.state = s;
 
@@ -380,19 +366,19 @@ void ContainerManager::SetState(ContainerEntry& e, ContainerState s) {
 }
 
 ContainerManager::ContainerEntry* ContainerManager::Find(
-    const std::string& name) {
-  for (auto& e : containers_) {
-    if (e.config.name == name) return &e;
-  }
-  return nullptr;
+    std::string_view name) {
+  auto it = std::ranges::find_if(containers_, [name](const ContainerEntry& e) {
+    return e.config.name == name;
+  });
+  return it != containers_.end() ? &*it : nullptr;
 }
 
 const ContainerManager::ContainerEntry* ContainerManager::Find(
-    const std::string& name) const {
-  for (const auto& e : containers_) {
-    if (e.config.name == name) return &e;
-  }
-  return nullptr;
+    std::string_view name) const {
+  auto it = std::ranges::find_if(containers_, [name](const ContainerEntry& e) {
+    return e.config.name == name;
+  });
+  return it != containers_.end() ? &*it : nullptr;
 }
 
 }  // namespace aember::container_manager

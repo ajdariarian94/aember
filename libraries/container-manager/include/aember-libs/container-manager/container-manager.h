@@ -3,7 +3,7 @@
  * @author Arian Ajdari
  * @brief ContainerManager — manages LXC container lifecycle, including the
  *        container init PIDs that are visible from the host.
- * @version 0.2
+ * @version 0.3
  * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -17,10 +17,12 @@
 #include <aember-libs/utils/logging/logging.h>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace aember::container_manager {
@@ -33,10 +35,9 @@ namespace aember::container_manager {
  * tracks those PIDs. ProcessManager must never see them.
  *
  * PID dispatch contract (with ServiceManager):
- *   ServiceManager::HandleServiceExit calls HandleExit on both managers in
- *   order. The one that owns the PID returns true and cleans up; the other
- *   returns false. Callers must not assume ownership without checking the
- *   return value.
+ *   ServiceManager::HandleExit calls HandleExit on both managers in order.
+ *   The one that owns the PID returns true and cleans up; the other returns
+ *   false.
  */
 class ContainerManager {
  public:
@@ -45,16 +46,10 @@ class ContainerManager {
   using ContainerState = aember::utils::container::ContainerState;
   using Logger = aember::utils::logging::Logger;
 
-  /**
-   * Fired when a container transitions between states.
-   *
-   * @param name      Container name.
-   * @param old_state Previous state.
-   * @param new_state New state.
-   */
-  using StateCallback = std::function<void(const std::string& /*name*/,
-                                           ContainerState /*old_state*/,
-                                           ContainerState /*new_state*/)>;
+  /// move_only_function — callbacks are never copied.
+  using StateCallback = std::move_only_function<void(
+      const std::string& /*name*/, ContainerState /*old_state*/,
+      ContainerState /*new_state*/)>;
 
   explicit ContainerManager(
       std::shared_ptr<aember::mount_manager::MountManager> mount_manager,
@@ -69,14 +64,14 @@ class ContainerManager {
   // ---------------------------------------------------------------------------
 
   bool AddContainer(const ContainerConfig& config);
-  bool RemoveContainer(const std::string& name);
+  bool RemoveContainer(std::string_view name);
 
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
-  bool StartContainer(const std::string& name);
-  bool StopContainer(const std::string& name);
+  bool StartContainer(std::string_view name);
+  bool StopContainer(std::string_view name);
 
   // ---------------------------------------------------------------------------
   // SIGCHLD integration
@@ -84,10 +79,8 @@ class ContainerManager {
 
   /**
    * Called by ServiceManager when ChildSupervisor delivers an exit event.
-   *
-   * Returns true if @p pid belongs to a container tracked here (entry is
-   * cleaned up and StateCallback fired). Returns false if the PID is
-   * unknown — the caller should then try ProcessManager::HandleExit.
+   * Returns true if @p pid belongs to a container tracked here.
+   * Returns false if unknown — caller should try ProcessManager::HandleExit.
    */
   bool HandleExit(pid_t pid, int exit_code);
 
@@ -95,21 +88,20 @@ class ContainerManager {
   // Queries
   // ---------------------------------------------------------------------------
 
-  [[nodiscard]] bool HasContainer(const std::string& name) const;
-  [[nodiscard]] ContainerState GetContainerState(const std::string& name) const;
-  [[nodiscard]] bool IsRunning(const std::string& name) const;
+  [[nodiscard]] bool HasContainer(std::string_view name) const;
+  [[nodiscard]] ContainerState GetContainerState(std::string_view name) const;
+  [[nodiscard]] bool IsRunning(std::string_view name) const;
 
   /** Returns the host-visible init PID for @p name, or nullopt if not running.
    */
-  [[nodiscard]] std::optional<pid_t> GetInitPid(const std::string& name) const;
+  [[nodiscard]] std::optional<pid_t> GetInitPid(std::string_view name) const;
 
-  std::vector<ContainerConfig> LoadContainers(const std::string& source);
+  std::vector<ContainerConfig> LoadContainers(std::string_view source);
 
   // ---------------------------------------------------------------------------
   // Callbacks
   // ---------------------------------------------------------------------------
 
-  /** Replace the state-change callback after construction. */
   void SetStateCallback(StateCallback callback);
 
  private:
@@ -128,8 +120,8 @@ class ContainerManager {
 
   void SetState(ContainerEntry& e, ContainerState s);
 
-  ContainerEntry* Find(const std::string& name);
-  const ContainerEntry* Find(const std::string& name) const;
+  ContainerEntry* Find(std::string_view name);
+  const ContainerEntry* Find(std::string_view name) const;
 
   // ---------------------------------------------------------------------------
   // Members
