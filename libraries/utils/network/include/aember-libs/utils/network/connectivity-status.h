@@ -19,8 +19,8 @@ namespace aember::utils::network {
  */
 struct ConnectivityStatus {
   bool online{false};
-  std::string interface;
   int rtt_ms{-1};
+  std::string interface;
   int64_t timestamp_ms{0};
 };
 
