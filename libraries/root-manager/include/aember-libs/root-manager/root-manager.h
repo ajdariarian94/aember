@@ -1,3 +1,13 @@
+/**
+ * @file root-manager.h
+ * @author Arian Ajdari
+ * @brief RootManager — mounts the real root filesystem and performs
+ *        pivot_root to switch from initramfs to the real root.
+ * @version 0.2
+ * @date 2026-06-12
+ *
+ * @copyright Copyright (c) 2025, Aember, All rights reserved.
+ */
 #pragma once
 
 #include <aember-libs/mount-manager/mount-manager.h>
@@ -6,6 +16,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace aember::root_manager {
 
@@ -14,47 +25,62 @@ class RootManager {
   using RootConfig = aember::utils::root::RootConfig;
   using Logger = aember::utils::logging::Logger;
 
-  RootManager(aember::mount_manager::MountManager& mount_manager);
-  ~RootManager();
+  /**
+   * @param mount_manager Shared ownership — MountManager must outlive
+   *                      RootManager. Taking shared_ptr avoids dangling
+   *                      reference if the caller resets its own pointer.
+   */
+  explicit RootManager(
+      std::shared_ptr<aember::mount_manager::MountManager> mount_manager);
 
-  // Non-copyable
+  ~RootManager() = default;
+
   RootManager(const RootManager&) = delete;
   RootManager& operator=(const RootManager&) = delete;
 
-  // Mount the real root filesystem
-  bool MountRealRoot(const RootConfig& config);
+  // ---------------------------------------------------------------------------
+  // Public API
+  // ---------------------------------------------------------------------------
 
-  // Perform pivot_root to switch to the new root
-  bool PivotToNewRoot();
-
-  // Complete pivot process (mount + pivot + cleanup)
+  /** Complete pivot: mount real root + pivot_root + cleanup. */
   bool PerformPivot(const RootConfig& config);
 
-  // Check if we're currently in initramfs
-  static bool IsInInitramfs();
+  /** Mount the real root filesystem at config.new_root_path. */
+  bool MountRealRoot(const RootConfig& config);
 
-  // Get the path where new root is mounted
-  std::string GetNewRootPath() const { return new_root_path_; }
+  /** Perform pivot_root to switch to the already-mounted new root. */
+  bool PivotToNewRoot();
 
-  void DumpMountInfo(const char* reason);
+  /** Returns true if running inside initramfs (no services.json present). */
+  [[nodiscard]] static bool IsInInitramfs();
 
-  std::string ResolveSymlink(const std::string& path);
+  /** Returns the path where the new root is mounted. */
+  [[nodiscard]] std::string_view GetNewRootPath() const {
+    return new_root_path_;
+  }
+
+  /** Dump /proc/self/mountinfo to the log for diagnostics. */
+  void DumpMountInfo(std::string_view reason);
+
+  /** Resolve a symlink to its real device path. */
+  [[nodiscard]] std::string ResolveSymlink(std::string_view path);
 
  private:
   bool PrepareNewRoot();
   bool MountEssentialFilesystems();
-  bool UnmountOldRoot();
   bool SwitchRoot();
+  bool UnmountOldRoot();
 
-  std::string ResolveDevice(const std::string& device);
-  std::string FindDeviceByUUID(const std::string& uuid);
-  std::string FindDeviceByLabel(const std::string& label);
+  [[nodiscard]] std::string ResolveDevice(std::string_view device);
+  [[nodiscard]] std::string FindDeviceByUUID(std::string_view uuid);
+  [[nodiscard]] std::string FindDeviceByLabel(std::string_view label);
 
-  aember::mount_manager::MountManager& mount_manager_;
+  std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
+
   std::string new_root_path_;
-  bool pivoted_ = false;
+  bool pivoted_{false};
 
-  mutable Logger log_;
+  mutable Logger log_{"root-manager"};
 };
 
 }  // namespace aember::root_manager

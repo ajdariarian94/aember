@@ -52,7 +52,7 @@ void AemberInit::StartInitramfs() {
   log_.info("Initramfs detected, preparing to pivot to real root");
 
   root_manager_ =
-      std::make_unique<aember::root_manager::RootManager>(*mount_manager_);
+      std::make_unique<aember::root_manager::RootManager>(mount_manager_);
 
   aember::utils::root::RootConfig root_config;
   root_config.ParseFromProcCmdline();

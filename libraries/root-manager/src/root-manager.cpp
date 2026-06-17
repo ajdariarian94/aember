@@ -1,3 +1,13 @@
+/**
+ * @file root-manager.cpp
+ * @author Arian Ajdari
+ * @brief RootManager implementation.
+ * @version 0.2
+ * @date 2026-06-12
+ *
+ * @copyright Copyright (c) 2025, Aember, All rights reserved.
+ */
+
 #include <aember-libs/root-manager/root-manager.h>
 
 #include <dirent.h>
@@ -7,43 +17,42 @@
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 
+#include <array>
+#include <format>
 #include <fstream>
-#include <sstream>
-#include <vector>
 
 namespace aember::root_manager {
 
-static std::string ErrnoString(const char* action) {
-  return std::string(action) + ": errno=" + std::to_string(errno) + " (" +
-         strerror(errno) + ")";
-}
+// ---------------------------------------------------------------------------
+// Ctor
+// ---------------------------------------------------------------------------
 
-RootManager::RootManager(aember::mount_manager::MountManager& mount_manager)
-    : mount_manager_(mount_manager), log_("root-manager") {
+RootManager::RootManager(
+    std::shared_ptr<aember::mount_manager::MountManager> mount_manager)
+    : mount_manager_(std::move(mount_manager)) {
   log_.info("RootManager initialized");
 }
 
-RootManager::~RootManager() = default;
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
-bool RootManager::PerformPivot(const aember::utils::root::RootConfig& config) {
-  log_.info("Starting complete root pivot operation");
+bool RootManager::PerformPivot(const RootConfig& config) {
+  log_.info("Starting root pivot operation");
 
-  // Make mount propagation private (CRITICAL)
-  log_.info("Setting mount propagation to MS_PRIVATE");
   if (mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0) {
-    log_.error("Failed to set MS_PRIVATE: {}", ErrnoString("mount"));
+    log_.error(
+        "Failed to set MS_PRIVATE: errno={} ({})", errno, strerror(errno));
     return false;
   }
 
   if (!MountRealRoot(config)) { return false; }
-
   return PivotToNewRoot();
 }
 
-bool RootManager::MountRealRoot(const aember::utils::root::RootConfig& config) {
+bool RootManager::MountRealRoot(const RootConfig& config) {
   log_.info("Mounting real root filesystem");
 
   if (config.device.empty()) {
@@ -56,7 +65,7 @@ bool RootManager::MountRealRoot(const aember::utils::root::RootConfig& config) {
     return false;
   }
 
-  std::string device = ResolveDevice(config.device);
+  const auto device = ResolveDevice(config.device);
   if (device.empty()) {
     log_.error("Failed to resolve root device: {}", config.device);
     return false;
@@ -66,7 +75,7 @@ bool RootManager::MountRealRoot(const aember::utils::root::RootConfig& config) {
 
   new_root_path_ = config.new_root_path;
 
-  if (!mount_manager_.EnsureDirectory(new_root_path_)) {
+  if (!mount_manager_->EnsureDirectory(new_root_path_)) {
     log_.error("Failed to create new root directory: {}", new_root_path_);
     return false;
   }
@@ -82,7 +91,8 @@ bool RootManager::MountRealRoot(const aember::utils::root::RootConfig& config) {
             config.fstype.c_str(),
             0,
             options) != 0) {
-    log_.error("Failed to mount real root: {}", ErrnoString("mount"));
+    log_.error(
+        "Failed to mount real root: errno={} ({})", errno, strerror(errno));
     DumpMountInfo("mount real root failed");
     return false;
   }
@@ -99,9 +109,7 @@ bool RootManager::PivotToNewRoot() {
   }
 
   if (!PrepareNewRoot()) { return false; }
-
   if (!MountEssentialFilesystems()) { return false; }
-
   if (!SwitchRoot()) { return false; }
 
   if (!UnmountOldRoot()) {
@@ -113,64 +121,69 @@ bool RootManager::PivotToNewRoot() {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Private — pivot stages
+// ---------------------------------------------------------------------------
+
 bool RootManager::PrepareNewRoot() {
   log_.info("Preparing new root");
 
-  if (!mount_manager_.IsMounted(new_root_path_)) {
+  if (!mount_manager_->IsMounted(new_root_path_)) {
     log_.error("New root is not a mount point: {}", new_root_path_);
     DumpMountInfo("new root not mounted");
     return false;
   }
 
-  std::string old_root_dir = new_root_path_ + "/.oldroot";
-  if (!mount_manager_.EnsureDirectory(old_root_dir)) {
+  const auto old_root_dir = std::format("{}/.oldroot", new_root_path_);
+
+  if (!mount_manager_->EnsureDirectory(old_root_dir)) {
     log_.error("Failed to create {}", old_root_dir);
     return false;
   }
 
-  // Ensure .oldroot is empty
+  // Ensure .oldroot is empty before pivot_root.
   DIR* d = opendir(old_root_dir.c_str());
   if (!d) {
-    log_.error("Failed to open {}: {}", old_root_dir, ErrnoString("opendir"));
+    log_.error("Failed to open {}: errno={}", old_root_dir, errno);
     return false;
   }
 
-  struct dirent* e;
-  while ((e = readdir(d)) != nullptr) {
-    if (strcmp(e->d_name, ".") && strcmp(e->d_name, "..")) {
-      log_.error("{} is not empty, cannot pivot_root", old_root_dir);
-      closedir(d);
-      return false;
+  bool empty = true;
+  while (const struct dirent* e = readdir(d)) {
+    if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) {
+      empty = false;
+      break;
     }
   }
   closedir(d);
+
+  if (!empty) {
+    log_.error("{} is not empty, cannot pivot_root", old_root_dir);
+    return false;
+  }
 
   return true;
 }
 
 bool RootManager::MountEssentialFilesystems() {
-  log_.info("Moving essential filesystems");
+  log_.info("Moving essential filesystems to new root");
 
-  struct Move {
-    const char* src;
-    std::string dst;
+  const std::array moves{
+      std::pair{"/dev", std::format("{}/dev", new_root_path_)},
+      std::pair{"/proc", std::format("{}/proc", new_root_path_)},
+      std::pair{"/sys", std::format("{}/sys", new_root_path_)},
   };
 
-  std::vector<Move> moves = {
-      {"/dev", new_root_path_ + "/dev"},
-      {"/proc", new_root_path_ + "/proc"},
-      {"/sys", new_root_path_ + "/sys"},
-  };
-
-  for (const auto& m : moves) {
-    if (!mount_manager_.EnsureDirectory(m.dst)) {
-      log_.error("Failed to create {}", m.dst);
+  for (const auto& [src, dst] : moves) {
+    if (!mount_manager_->EnsureDirectory(dst)) {
+      log_.error("Failed to create {}", dst);
       return false;
     }
 
-    log_.info("MS_MOVE {} -> {}", m.src, m.dst);
-    if (mount(m.src, m.dst.c_str(), nullptr, MS_MOVE, nullptr) != 0) {
-      log_.error("Failed to move {}: {}", m.src, ErrnoString("mount"));
+    log_.info("MS_MOVE {} -> {}", src, dst);
+    if (mount(src, dst.c_str(), nullptr, MS_MOVE, nullptr) != 0) {
+      log_.error(
+          "Failed to move {}: errno={} ({})", src, errno, strerror(errno));
       DumpMountInfo("MS_MOVE failed");
       return false;
     }
@@ -180,86 +193,94 @@ bool RootManager::MountEssentialFilesystems() {
 }
 
 bool RootManager::SwitchRoot() {
-  char* args[] = {
-      (char*)"/bin/switch_root",  // Path to busybox or switch_root symlink
-      (char*)"/mnt/root",         // The new root (current dir)
-      (char*)"/usr/bin/aember",   // The path to the binary INSIDE the new root
-      (char*)"--root",            // Argument to indicate root mode
-      nullptr};
-
   log_.info("Executing switch_root...");
 
-  // Use execv to avoid PATH dependency issues in the minimal initramfs
-  execv(args[0], args);
+  // switch_root argv — these string literals are valid for the lifetime of
+  // this stack frame; execv replaces the process image immediately.
+  std::array<char*, 5> args{
+      const_cast<char*>("/bin/switch_root"),
+      const_cast<char*>("/mnt/root"),
+      const_cast<char*>("/usr/bin/aember"),
+      const_cast<char*>("--root"),
+      nullptr,
+  };
 
-  // If execv returns, it failed
-  log_.error("switch_root failed: {}", strerror(errno));
+  execv(args[0], args.data());
+
+  // execv only returns on failure.
+  log_.error("switch_root failed: errno={} ({})", errno, strerror(errno));
   return false;
 }
 
 bool RootManager::UnmountOldRoot() {
   log_.info("Unmounting old root");
 
-  const char* old_root = "/.oldroot";
-
-  if (umount2(old_root, MNT_DETACH) != 0) {
-    log_.warn("Failed to unmount old root: {}", ErrnoString("umount2"));
+  if (umount2("/.oldroot", MNT_DETACH) != 0) {
+    log_.warn(
+        "Failed to unmount old root: errno={} ({})", errno, strerror(errno));
     return false;
   }
 
-  if (rmdir(old_root) != 0) {
-    log_.debug("Failed to remove old root dir: {}", ErrnoString("rmdir"));
+  if (rmdir("/.oldroot") != 0) {
+    log_.debug("Failed to remove /.oldroot dir: errno={}", errno);
   }
 
   return true;
 }
 
-std::string RootManager::ResolveDevice(const std::string& device) {
-  if (device.rfind("UUID=", 0) == 0) {
+// ---------------------------------------------------------------------------
+// Device resolution
+// ---------------------------------------------------------------------------
+
+std::string RootManager::ResolveDevice(std::string_view device) {
+  if (device.starts_with("UUID=")) {
     return FindDeviceByUUID(device.substr(5));
   }
-
-  if (device.rfind("LABEL=", 0) == 0) {
+  if (device.starts_with("LABEL=")) {
     return FindDeviceByLabel(device.substr(6));
   }
-
-  return device;
+  return std::string{device};
 }
 
-std::string RootManager::FindDeviceByUUID(const std::string& uuid) {
+std::string RootManager::FindDeviceByUUID(std::string_view uuid) {
   log_.debug("Searching device by UUID={}", uuid);
-  return ResolveSymlink("/dev/disk/by-uuid/" + uuid);
+  return ResolveSymlink(std::format("/dev/disk/by-uuid/{}", uuid));
 }
 
-std::string RootManager::FindDeviceByLabel(const std::string& label) {
+std::string RootManager::FindDeviceByLabel(std::string_view label) {
   log_.debug("Searching device by LABEL={}", label);
-  return ResolveSymlink("/dev/disk/by-label/" + label);
+  return ResolveSymlink(std::format("/dev/disk/by-label/{}", label));
 }
 
-std::string RootManager::ResolveSymlink(const std::string& path) {
-  struct stat st;
-  if (lstat(path.c_str(), &st) != 0 || !S_ISLNK(st.st_mode)) { return {}; }
+std::string RootManager::ResolveSymlink(std::string_view path) {
+  const std::string path_str{path};
+
+  struct stat st {};
+  if (lstat(path_str.c_str(), &st) != 0 || !S_ISLNK(st.st_mode)) { return {}; }
 
   char link[PATH_MAX];
-  ssize_t len = readlink(path.c_str(), link, sizeof(link) - 1);
+  const ssize_t len = readlink(path_str.c_str(), link, sizeof(link) - 1);
   if (len <= 0) { return {}; }
   link[len] = '\0';
 
   char real[PATH_MAX];
-  if (realpath(path.c_str(), real)) { return real; }
+  if (realpath(path_str.c_str(), real)) { return real; }
 
   return {};
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
 bool RootManager::IsInInitramfs() {
-  std::ifstream f("/etc/aember/services.json");
-  return !f.good();
+  return !std::ifstream{"/etc/aember/services.json"}.good();
 }
 
-void RootManager::DumpMountInfo(const char* reason) {
+void RootManager::DumpMountInfo(std::string_view reason) {
   log_.error("Dumping mountinfo due to: {}", reason);
 
-  std::ifstream f("/proc/self/mountinfo");
+  std::ifstream f{"/proc/self/mountinfo"};
   std::string line;
   while (std::getline(f, line)) { log_.error("mountinfo: {}", line); }
 }
