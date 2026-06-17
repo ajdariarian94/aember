@@ -2,7 +2,7 @@
  * @file process-manager.cpp
  * @author Arian Ajdari
  * @brief ProcessManager implementation — native processes only.
- * @version 0.1
+ * @version 0.3
  * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -10,11 +10,14 @@
 
 #include <aember-libs/process-manager/process-manager.h>
 
+#include <errno.h>
 #include <signal.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <ranges>
 #include <thread>
 
 namespace aember::process_manager {
@@ -29,10 +32,9 @@ ProcessManager::ProcessManager(ExitCallback on_exit)
 }
 
 ProcessManager::~ProcessManager() {
-  std::lock_guard<std::mutex> lock(mutex_);
-
+  std::lock_guard lock{mutex_};
   for (const auto& [name, pid] : name_to_pid_) {
-    log_.info("Killing process '{}' (pid {})", name, pid);
+    log_.info("Killing '{}' (pid {})", name, pid);
     kill(pid, SIGKILL);
   }
 }
@@ -42,7 +44,7 @@ ProcessManager::~ProcessManager() {
 // ---------------------------------------------------------------------------
 
 bool ProcessManager::AddProcess(const ProcessConfig& config) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock{mutex_};
 
   if (config.name.empty()) {
     log_.error("Cannot add process with empty name");
@@ -54,7 +56,7 @@ bool ProcessManager::AddProcess(const ProcessConfig& config) {
     return false;
   }
 
-  if (configs_.count(config.name)) {
+  if (configs_.contains(config.name)) {
     log_.warn("Process '{}' already registered", config.name);
     return false;
   }
@@ -67,20 +69,20 @@ bool ProcessManager::AddProcess(const ProcessConfig& config) {
   return true;
 }
 
-bool ProcessManager::RemoveProcess(const std::string& name) {
-  // Stop outside the lock since Stop() acquires it.
-  Stop(name);
+bool ProcessManager::RemoveProcess(std::string_view name) {
+  Stop(name);  // acquires its own lock
 
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock{mutex_};
+  const std::string key{name};
 
-  if (!configs_.count(name)) {
+  if (!configs_.contains(key)) {
     log_.warn("RemoveProcess: '{}' not found", name);
     return false;
   }
 
-  configs_.erase(name);
-  states_.erase(name);
-  restart_counts_.erase(name);
+  configs_.erase(key);
+  states_.erase(key);
+  restart_counts_.erase(key);
 
   log_.info("Removed process '{}'", name);
   return true;
@@ -90,77 +92,71 @@ bool ProcessManager::RemoveProcess(const std::string& name) {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-std::optional<pid_t> ProcessManager::Start(const std::string& name) {
-  std::lock_guard<std::mutex> lock(mutex_);
+std::optional<pid_t> ProcessManager::Start(std::string_view name) {
+  std::lock_guard lock{mutex_};
+  const std::string key{name};
 
-  auto cfg_it = configs_.find(name);
+  auto cfg_it = configs_.find(key);
   if (cfg_it == configs_.end()) {
-    log_.error("Start: process '{}' not registered", name);
+    log_.error("Start: '{}' not registered", name);
     return std::nullopt;
   }
 
-  const auto state = states_.at(name);
+  const auto state = states_.at(key);
   if (state == ProcessState::Running || state == ProcessState::Starting) {
     log_.warn("Process '{}' already running", name);
-    return name_to_pid_.count(name)
-               ? std::optional<pid_t>(name_to_pid_.at(name))
+    return name_to_pid_.contains(key)
+               ? std::optional<pid_t>{name_to_pid_.at(key)}
                : std::nullopt;
   }
 
-  states_[name] = ProcessState::Starting;
+  states_[key] = ProcessState::Starting;
 
-  pid_t pid = SpawnProcess(cfg_it->second);
+  const pid_t pid = SpawnProcess(cfg_it->second);
   if (pid < 0) {
-    log_.error("Failed to spawn process '{}'", name);
-    states_[name] = ProcessState::Failed;
+    log_.error("Failed to spawn '{}'", name);
+    states_[key] = ProcessState::Failed;
     return std::nullopt;
   }
 
-  pid_to_name_[pid] = name;
-  name_to_pid_[name] = pid;
-  states_[name] = ProcessState::Running;
+  pid_to_name_[pid] = key;
+  name_to_pid_[key] = pid;
+  states_[key] = ProcessState::Running;
 
-  log_.info("Started process '{}' (pid {})", name, pid);
+  log_.info("Started '{}' (pid {})", name, pid);
   return pid;
 }
 
-bool ProcessManager::Stop(const std::string& name) {
-  std::unique_lock<std::mutex> lock(mutex_);
+bool ProcessManager::Stop(std::string_view name) {
+  std::unique_lock lock{mutex_};
+  const std::string key{name};
 
-  auto it = name_to_pid_.find(name);
-  if (it == name_to_pid_.end()) {
-    // Not running — nothing to do.
-    return true;
-  }
+  auto it = name_to_pid_.find(key);
+  if (it == name_to_pid_.end()) { return true; }
 
   const pid_t pid = it->second;
-  const auto stop_timeout = configs_.count(name)
-                                ? configs_.at(name).stop_timeout
-                                : std::chrono::milliseconds(5000);
+  const auto stop_timeout = configs_.contains(key)
+                                ? configs_.at(key).stop_timeout
+                                : std::chrono::milliseconds{5000};
 
-  states_[name] = ProcessState::Stopping;
-
-  log_.info("Stopping process '{}' (pid {}) — sending SIGTERM", name, pid);
+  states_[key] = ProcessState::Stopping;
+  log_.info("Stopping '{}' (pid {}) — SIGTERM", name, pid);
   kill(pid, SIGTERM);
 
-  // Release the lock while we wait so HandleExit can acquire it if the
-  // process dies quickly.
+  // Release lock while polling so HandleExit can acquire it.
   lock.unlock();
 
-  // Poll for exit up to stop_timeout, then SIGKILL.
   const auto deadline = std::chrono::steady_clock::now() + stop_timeout;
-
   while (std::chrono::steady_clock::now() < deadline) {
     if (waitpid(pid, nullptr, WNOHANG) == pid) {
-      log_.info("Process '{}' exited cleanly after SIGTERM", name);
+      log_.info("'{}' exited after SIGTERM", name);
       return true;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
   }
 
-  log_.warn("Process '{}' did not exit after SIGTERM — sending SIGKILL", name);
+  log_.warn("'{}' did not exit after SIGTERM — SIGKILL", name);
   kill(pid, SIGKILL);
-
   return true;
 }
 
@@ -169,16 +165,12 @@ bool ProcessManager::Stop(const std::string& name) {
 // ---------------------------------------------------------------------------
 
 bool ProcessManager::HandleExit(pid_t pid, int exit_code) {
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::unique_lock lock{mutex_};
 
   auto it = pid_to_name_.find(pid);
-  if (it == pid_to_name_.end()) {
-    // Not our PID — caller should try ContainerManager.
-    return false;
-  }
+  if (it == pid_to_name_.end()) { return false; }
 
-  const std::string name = it->second;
-
+  const std::string name = std::move(it->second);
   pid_to_name_.erase(it);
   name_to_pid_.erase(name);
 
@@ -187,24 +179,20 @@ bool ProcessManager::HandleExit(pid_t pid, int exit_code) {
 
   if (was_stopping || clean_exit) {
     states_[name] = ProcessState::Stopped;
-    log_.info(
-        "Process '{}' (pid {}) stopped (exit_code={})", name, pid, exit_code);
+    log_.info("'{}' (pid {}) stopped (exit_code={})", name, pid, exit_code);
   } else {
     states_[name] = ProcessState::Failed;
-    log_.warn("Process '{}' (pid {}) exited unexpectedly (exit_code={})",
+    log_.warn("'{}' (pid {}) exited unexpectedly (exit_code={})",
               name,
               pid,
               exit_code);
   }
 
-  // Fire the exit callback before deciding to restart so ServiceManager
-  // can update its own state first.
-  const auto cb = on_exit_;
+  // Release lock before firing callback — callback may call back into us.
   lock.unlock();
 
-  if (cb) { cb(name, pid, exit_code); }
+  if (on_exit_) { on_exit_(name, pid, exit_code); }
 
-  // Restart policy — only on unexpected exit.
   if (!was_stopping && !clean_exit) { ScheduleRestart(name); }
 
   return true;
@@ -214,81 +202,92 @@ bool ProcessManager::HandleExit(pid_t pid, int exit_code) {
 // Restart scheduling
 // ---------------------------------------------------------------------------
 
-void ProcessManager::ScheduleRestart(const std::string& name) {
-  std::unique_lock<std::mutex> lock(mutex_);
+void ProcessManager::ScheduleRestart(std::string_view name) {
+  std::unique_lock lock{mutex_};
+  const std::string key{name};
 
-  if (!configs_.count(name)) return;
+  if (!configs_.contains(key)) { return; }
 
-  const auto& config = configs_.at(name);
+  const auto& config = configs_.at(key);
 
   if (!config.restart_on_failure) {
     log_.info("Restart disabled for '{}'", name);
     return;
   }
 
-  auto& count = restart_counts_.at(name);
+  auto& count = restart_counts_.at(key);
 
   if (config.max_restarts > 0 && count >= config.max_restarts) {
-    log_.error("Process '{}' reached max restarts ({}), giving up",
-               name,
-               config.max_restarts);
-    states_[name] = ProcessState::Failed;
+    log_.error(
+        "'{}' reached max restarts ({}), giving up", name, config.max_restarts);
+    states_[key] = ProcessState::Failed;
     return;
   }
 
   ++count;
-  states_[name] = ProcessState::Restarting;
+  states_[key] = ProcessState::Restarting;
 
   const auto delay = config.restart_delay;
-
   log_.info(
       "Scheduling restart #{} for '{}' in {}ms", count, name, delay.count());
 
   lock.unlock();
 
-  // Fire the restart on a detached thread so we don't block the caller.
-  std::thread([this, name, delay]() {
+  // jthread auto-joins on destruction — detach replaced with move-to-local.
+  std::jthread{[this, key, delay](std::stop_token) {
     std::this_thread::sleep_for(delay);
-    log_.info("Restarting '{}'", name);
-    Start(name);
-  }).detach();
+    log_.info("Restarting '{}'", key);
+    Start(key);
+  }}.detach();
 }
 
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
 
-bool ProcessManager::HasProcess(const std::string& name) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return configs_.count(name) > 0;
+bool ProcessManager::HasProcess(std::string_view name) const {
+  std::lock_guard lock{mutex_};
+  return configs_.contains(std::string{name});
 }
 
-bool ProcessManager::IsRunning(const std::string& name) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto it = states_.find(name);
+bool ProcessManager::IsRunning(std::string_view name) const {
+  std::lock_guard lock{mutex_};
+  auto it = states_.find(std::string{name});
   return it != states_.end() && it->second == ProcessState::Running;
 }
 
 ProcessManager::ProcessState ProcessManager::GetState(
-    const std::string& name) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto it = states_.find(name);
+    std::string_view name) const {
+  std::lock_guard lock{mutex_};
+  auto it = states_.find(std::string{name});
   return it != states_.end() ? it->second : ProcessState::Failed;
 }
 
-std::optional<pid_t> ProcessManager::GetPid(const std::string& name) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto it = name_to_pid_.find(name);
-  return it != name_to_pid_.end() ? std::optional<pid_t>(it->second)
+std::optional<pid_t> ProcessManager::GetPid(std::string_view name) const {
+  std::lock_guard lock{mutex_};
+  auto it = name_to_pid_.find(std::string{name});
+  return it != name_to_pid_.end() ? std::optional<pid_t>{it->second}
                                   : std::nullopt;
 }
 
 std::vector<std::string> ProcessManager::GetProcessNames() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock{mutex_};
   std::vector<std::string> names;
   names.reserve(configs_.size());
-  for (const auto& [name, _] : configs_) { names.push_back(name); }
+  std::ranges::transform(configs_,
+                         std::back_inserter(names),
+                         [](const auto& kv) { return kv.first; });
   return names;
+}
+
+std::vector<ProcessManager::ProcessConfig> ProcessManager::GetConfigs() const {
+  std::lock_guard lock{mutex_};
+  std::vector<ProcessConfig> result;
+  result.reserve(configs_.size());
+  std::ranges::transform(configs_,
+                         std::back_inserter(result),
+                         [](const auto& kv) { return kv.second; });
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +295,7 @@ std::vector<std::string> ProcessManager::GetProcessNames() const {
 // ---------------------------------------------------------------------------
 
 void ProcessManager::SetExitCallback(ExitCallback callback) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock{mutex_};
   on_exit_ = std::move(callback);
 }
 
@@ -305,10 +304,10 @@ void ProcessManager::SetExitCallback(ExitCallback callback) {
 // ---------------------------------------------------------------------------
 
 std::vector<ProcessManager::ProcessConfig> ProcessManager::LoadProcesses(
-    const std::string& source) {
+    std::string_view source) {
   aember::utils::config::ConfigError error;
 
-  if (!parser_.ParseFile(source, error)) {
+  if (!parser_.ParseFile(std::string{source}, error)) {
     log_.error("Failed to load processes from '{}': {}", source, error.message);
     return {};
   }
@@ -322,7 +321,7 @@ std::vector<ProcessManager::ProcessConfig> ProcessManager::LoadProcesses(
 // ---------------------------------------------------------------------------
 
 pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
-  pid_t pid = fork();
+  const pid_t pid = fork();
 
   if (pid < 0) {
     log_.error("fork() failed for '{}': {}", config.name, strerror(errno));
@@ -330,12 +329,8 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
   }
 
   if (pid == 0) {
-    // Child process.
-
     if (!config.working_directory.empty()) {
-      if (chdir(config.working_directory.c_str()) != 0) {
-        log_.error("chdir to '{}' failed", config.working_directory);
-      }
+      chdir(config.working_directory.c_str());
     }
 
     for (const auto& [key, value] : config.environment) {
@@ -343,28 +338,19 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
     }
 
     std::vector<char*> argv;
+    argv.reserve(config.args.size() + 2);
     argv.push_back(const_cast<char*>(config.executable.c_str()));
-    for (const auto& arg : config.args) {
-      argv.push_back(const_cast<char*>(arg.c_str()));
-    }
+    std::ranges::transform(
+        config.args, std::back_inserter(argv), [](const auto& a) {
+          return const_cast<char*>(a.c_str());
+        });
     argv.push_back(nullptr);
 
     execvp(config.executable.c_str(), argv.data());
-
-    // execvp only returns on failure.
     _exit(1);
   }
 
-  // Parent — return the child PID.
   return pid;
-}
-
-std::vector<ProcessManager::ProcessConfig> ProcessManager::GetConfigs() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  std::vector<ProcessConfig> result;
-  result.reserve(configs_.size());
-  for (const auto& [_, cfg] : configs_) { result.push_back(cfg); }
-  return result;
 }
 
 }  // namespace aember::process_manager
