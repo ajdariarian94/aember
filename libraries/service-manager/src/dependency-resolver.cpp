@@ -2,7 +2,7 @@
  * @file dependency-resolver.cpp
  * @author Arian Ajdari
  * @brief DependencyResolver implementation.
- * @version 0.3
+ * @version 0.4
  * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -10,14 +10,11 @@
 
 #include <aember-libs/service-manager/dependency-resolver.h>
 
+#include <ranges>
 #include <stdexcept>
 #include <unordered_map>
 
 namespace aember::service_manager {
-
-// ---------------------------------------------------------------------------
-// Ctor
-// ---------------------------------------------------------------------------
 
 DependencyResolver::DependencyResolver(StateQuery is_running)
     : is_running_(std::move(is_running)) {}
@@ -26,16 +23,16 @@ DependencyResolver::DependencyResolver(StateQuery is_running)
 // CheckDependencies
 // ---------------------------------------------------------------------------
 
-bool DependencyResolver::CheckDependencies(const std::string& name,
+bool DependencyResolver::CheckDependencies(std::string_view name,
                                            const DependencyGraph& graph) const {
-  auto it = graph.find(name);
+  auto it = graph.find(std::string{name});
   if (it == graph.end()) {
     log_.error("CheckDependencies: '{}' not in graph", name);
     return false;
   }
 
   for (const auto& dep : it->second) {
-    if (graph.find(dep) == graph.end()) {
+    if (!graph.contains(dep)) {
       log_.error("'{}' has unknown dependency '{}'", name, dep);
       return false;
     }
@@ -55,21 +52,18 @@ bool DependencyResolver::CheckDependencies(const std::string& name,
 
 std::vector<std::string> DependencyResolver::ResolveStartOrder(
     const DependencyGraph& graph) const {
-  // in_degree: unresolved dependency count per name.
   std::unordered_map<std::string, int> in_degree;
-  // dependents: dep → names that depend on it.
   std::unordered_map<std::string, std::vector<std::string>> dependents;
 
   for (const auto& [name, deps] : graph) {
-    if (!in_degree.count(name)) { in_degree[name] = 0; }
-
+    if (!in_degree.contains(name)) { in_degree[name] = 0; }
     for (const auto& dep : deps) {
       dependents[dep].push_back(name);
       ++in_degree[name];
     }
   }
 
-  // Seed with names that have no dependencies.
+  // Seed with zero-dependency names.
   std::vector<std::string> queue;
   for (const auto& [name, degree] : in_degree) {
     if (degree == 0) { queue.push_back(name); }
@@ -79,13 +73,14 @@ std::vector<std::string> DependencyResolver::ResolveStartOrder(
   order.reserve(graph.size());
 
   while (!queue.empty()) {
-    const std::string current = queue.back();
+    const std::string current = std::move(queue.back());
     queue.pop_back();
-    order.push_back(current);
 
     for (const auto& dependent : dependents[current]) {
       if (--in_degree[dependent] == 0) { queue.push_back(dependent); }
     }
+
+    order.push_back(current);
   }
 
   if (order.size() != graph.size()) {
