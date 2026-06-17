@@ -267,6 +267,21 @@ bool ContainerManager::Create(ContainerEntry& e) {
     return false;
   }
 
+  if (e.config.config_path.empty()) {
+    log_.error("No config_path specified for container '{}' — cannot start",
+               e.config.name);
+    return false;
+  }
+
+  if (!e.lxc->load_config(e.lxc, e.config.config_path.c_str())) {
+    log_.error("Failed to load config '{}' for '{}'",
+               e.config.config_path,
+               e.config.name);
+    return false;
+  }
+
+  log_.info("Loaded container config from '{}'", e.config.config_path);
+
   if (!e.config.squashfs.empty()) {
     if (!mount_manager_->MountSquashFS(e.config.squashfs, e.config.rootfs)) {
       log_.error("Failed to mount squashfs '{}' at '{}'",
@@ -278,23 +293,7 @@ bool ContainerManager::Create(ContainerEntry& e) {
         "Mounted squashfs '{}' at '{}'", e.config.squashfs, e.config.rootfs);
   }
 
-  if (!e.lxc->set_config_item(
-          e.lxc, "lxc.rootfs.path", e.config.rootfs.c_str())) {
-    log_.error("Failed to set rootfs for '{}'", e.config.name);
-    return false;
-  }
-
-  e.lxc->set_config_item(e.lxc, "lxc.uts.name", e.config.name.c_str());
-  e.lxc->set_config_item(e.lxc, "lxc.mount.auto", "proc:mixed sys:mixed");
-  e.lxc->set_config_item(e.lxc, "lxc.autodev", "1");
-  e.lxc->set_config_item(e.lxc, "lxc.net.0.type", "empty");
-  e.lxc->set_config_item(e.lxc, "lxc.pty.max", "1");
-
-  const auto log_file = std::format("/tmp/lxc-{}.log", e.config.name);
-  e.lxc->set_config_item(e.lxc, "lxc.log.level", "TRACE");
-  e.lxc->set_config_item(e.lxc, "lxc.log.file", log_file.c_str());
-
-  log_.info("Container '{}' configured (log: {})", e.config.name, log_file);
+  log_.info("Container '{}' configured", e.config.name);
   return true;
 }
 
