@@ -32,8 +32,6 @@ add_executable(
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE aember-libs::utils::logging
-          -static-libstdc++
-          -static-libgcc
 )
 
 target_include_directories(

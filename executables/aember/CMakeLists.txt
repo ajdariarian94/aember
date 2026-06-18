@@ -46,12 +46,12 @@ target_include_directories(
   PRIVATE $<BUILD_INTERFACE:${CMAKE_INSTALL_PREFIX}/include>
 )
 
-target_link_options(
-  ${PROJECT_NAME}
-  PRIVATE
-  -static-libstdc++
-  -static-libgcc
-)
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND DEFINED AEMBER_STRIP_COMMAND)
+  add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${AEMBER_STRIP_COMMAND} $<TARGET_FILE:${PROJECT_NAME}>
+    COMMENT "Stripping aember binary"
+  )
+endif()
 
 # ##############################################################################
 #
