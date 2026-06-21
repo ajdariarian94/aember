@@ -46,12 +46,19 @@ target_include_directories(
   PRIVATE $<BUILD_INTERFACE:${CMAKE_INSTALL_PREFIX}/include>
 )
 
-if(CMAKE_BUILD_TYPE STREQUAL "Release" AND DEFINED AEMBER_STRIP_COMMAND)
-  add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+if (CMAKE_BUILD_TYPE
+    STREQUAL
+    "Release"
+    AND DEFINED
+        AEMBER_STRIP_COMMAND
+)
+  add_custom_command(
+    TARGET ${PROJECT_NAME}
+    POST_BUILD
     COMMAND ${AEMBER_STRIP_COMMAND} $<TARGET_FILE:${PROJECT_NAME}>
     COMMENT "Stripping aember binary"
   )
-endif()
+endif ()
 
 # ##############################################################################
 #
