@@ -1,0 +1,14 @@
+{
+  "processes": [
+    {
+      "name": "echo-aember",
+      "executable": "/usr/bin/echo-aember",
+      "args": [],
+      "working_directory": "",
+      "environment": {},
+      "restart_on_failure": true,
+      "max_restarts": 5,
+      "restart_delay_ms": 5000
+    }
+  ]
+}

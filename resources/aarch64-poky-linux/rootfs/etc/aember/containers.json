@@ -1,0 +1,18 @@
+{
+  "containers": [
+    {
+      "name": "alpine-echo",
+      "type": "container",
+      "container": {
+        "squashfs": "/var/lib/aember/alpine/alpine.squashfs",
+        "rootfs": "/var/lib/aember/containers/alpine",
+        "config_path": "/var/lib/aember/alpine/lxc.container.conf",
+        "args": ["/bin/sh", "/echo-alpine.sh"]
+      },
+      "restart_policy": "always",
+      "dependencies": [],
+      "max_restart_attempts": 5,
+      "restart_delay": 5
+    }
+  ]
+}
