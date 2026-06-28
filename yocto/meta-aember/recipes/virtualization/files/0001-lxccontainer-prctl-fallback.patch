@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000001 Mon Sep 17 00:00:00 2001
+From: Aember <aember@aember.io>
+Date: Mon, 28 Jun 2026 20:00:00 +0000
+Subject: [PATCH] lxccontainer: fallback to prctl(PR_SET_NAME) when setproctitle fails
+
+Upstream-Status: Inappropriate [aarch64-specific workaround]
+
+setproctitle() relies on argv[0] memory layout which differs on aarch64.
+Fall back to prctl(PR_SET_NAME) so the monitor process is correctly named
+on all architectures.
+
+Signed-off-by: Aember <aember@aember.io>
+---
+ src/lxc/lxccontainer.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/lxc/lxccontainer.c b/src/lxc/lxccontainer.c
+index 1111111..2222222 100644
+--- a/src/lxc/lxccontainer.c
++++ b/src/lxc/lxccontainer.c
+@@ -951,13 +951,15 @@
+ 		 * ugly. Similarly, we also don't care if setproctitle() fails.
+ 		 */
+ 		ret = strnprintf(title, sizeof(title), "[lxc monitor] %s %s", c->config_path, c->name);
+-		if (ret > 0) {
+-			ret = setproctitle(title);
+-			if (ret < 0)
+-				INFO("Failed to set process title to %s", title);
+-			else
+-				INFO("Set process title to %s", title);
+-		}
++        if (ret > 0) {
++            ret = setproctitle(title);
++            if (ret < 0) {
++                INFO("Failed to set process title to %s", title);
++                (void)prctl(PR_SET_NAME, c->name, 0, 0, 0);
++            } else {
++                INFO("Set process title to %s", title);
++            }
++        }
+ 
+ 		/* We fork() a second time to be reparented to init. Like
+ 		 * POSIX's daemon() function we change to "/" and redirect
+			

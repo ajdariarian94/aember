@@ -11,6 +11,7 @@ SRC_URI += " \
     file://base.conf \
     file://x64-linux.conf \
     file://arm64-linux.conf \
+    file://0001-lxccontainer-prctl-fallback.patch \
 "
 
 inherit meson pkgconfig deploy

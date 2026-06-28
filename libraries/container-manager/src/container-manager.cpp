@@ -2,8 +2,8 @@
  * @file container-manager.cpp
  * @author Arian Ajdari
  * @brief ContainerManager implementation using LXC.
- * @version 0.3
- * @date 2026-06-12
+ * @version 0.4
+ * @date 2026-06-28
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
@@ -12,10 +12,12 @@
 
 #include <lxc/lxccontainer.h>
 
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <format>
+#include <fstream>
 #include <ranges>
 
 namespace aember::container_manager {
@@ -128,6 +130,12 @@ bool ContainerManager::StartContainer(std::string_view name) {
     } else {
       log_.warn("Container '{}' started but init_pid() returned {}", name, pid);
     }
+
+    // On aarch64, LXC does not call prctl(PR_SET_NAME) on the monitor process
+    // so it shows as "/usr/bin/aember --root" in top instead of the expected
+    // "{aember} [lxc monitor] /tmp <name>". We rename it by writing to
+    // /proc/<monitor_pid>/comm — allowed from a privileged parent on Linux 3.8+.
+    RenameMonitorProcess(*e, name);
   }
 
   SetState(*e, ContainerState::kRunning);
@@ -305,7 +313,6 @@ bool ContainerManager::Start(ContainerEntry& e) {
 
   log_.debug("Starting LXC container '{}'", e.config.name);
 
-  // LXC C API requires char* argv — const_cast is unavoidable here.
   std::vector<char*> argv;
   argv.reserve(e.config.args.size() + 1);
   std::ranges::transform(e.config.args, std::back_inserter(argv), [](auto& a) {
@@ -345,6 +352,113 @@ void ContainerManager::Release(ContainerEntry& e) {
   log_.debug("Releasing LXC handle for '{}'", e.config.name);
   lxc_container_put(e.lxc);
   e.lxc = nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Monitor process renaming
+//
+// On aarch64, LXC does not call prctl(PR_SET_NAME) on the monitor process
+// so it shows as "/usr/bin/aember --root" in top instead of the expected
+// "{aember} [lxc monitor] /tmp <name>".
+//
+// Strategy:
+// 1. Try lxc.monitor.pid config item (available in some LXC versions).
+// 2. Fall back to scanning /proc for a child of getpid() whose cmdline
+//    matches our process and whose VSZ is much smaller than ours.
+// 3. Write the display name to /proc/<pid>/comm — allowed from a privileged
+//    parent on Linux 3.8+.
+// ---------------------------------------------------------------------------
+
+void ContainerManager::RenameMonitorProcess(ContainerEntry& e,
+                                            std::string_view name) {
+  pid_t monitor_pid = -1;
+
+  // Strategy 1 — ask LXC directly.
+  char buf[32]{};
+  if (e.lxc &&
+      e.lxc->get_config_item(e.lxc, "lxc.monitor.pid", buf, sizeof(buf)) > 0) {
+    try {
+      monitor_pid = std::stoi(buf);
+    } catch (...) {}
+  }
+
+  // Strategy 2 — find the monitor by scanning /proc for our direct children.
+  // The monitor is a fork() of aember with a much smaller VSZ (~20MB vs ~100MB).
+  if (monitor_pid <= 0) {
+    monitor_pid = FindMonitorPid(e);
+  }
+
+  if (monitor_pid <= 0) {
+    log_.warn("Could not find monitor PID for '{}' — skipping rename", name);
+    return;
+  }
+
+  // Write to /proc/<pid>/comm — kernel truncates to 15 chars + NUL.
+  // Use the same format LXC uses on x86: "{aember} [lxc monitor] /tmp <name>"
+  // but truncated to fit: "lxc monitor"
+  const auto display_name =
+      std::format("{{aember}} [lxc monitor] /tmp {}", name);
+  const auto comm_path = std::format("/proc/{}/comm", monitor_pid);
+
+  if (std::ofstream f{comm_path}; f.is_open()) {
+    f << display_name;
+    log_.debug("Renamed monitor PID {} to '{}'", monitor_pid, display_name);
+  } else {
+    log_.warn("Failed to write to {} for monitor rename: errno={} ({})",
+              comm_path, errno, strerror(errno));
+  }
+}
+
+pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
+  // The monitor is a direct child of aember (our PID) created by lxc->start().
+  // It has the same exe (/usr/bin/aember) but much smaller VmRSS.
+  // We scan /proc looking for children of getpid() with a small VmRSS.
+
+  const pid_t our_pid  = getpid();
+  const pid_t init_pid = e.lxc ? e.lxc->init_pid(e.lxc) : -1;
+
+  for (const auto& entry :
+       std::filesystem::directory_iterator{"/proc",
+           std::filesystem::directory_options::skip_permission_denied}) {
+
+    if (!entry.is_directory()) continue;
+
+    // Only numeric directories.
+    const auto name = entry.path().filename().string();
+    if (!std::ranges::all_of(name, ::isdigit)) continue;
+
+    pid_t pid = -1;
+    try { pid = std::stoi(name); } catch (...) { continue; }
+
+    // Skip ourselves, kernel threads, and the container init.
+    if (pid == our_pid || pid == init_pid || pid <= 1) continue;
+
+    // Check PPid is ours.
+    std::ifstream status{std::format("/proc/{}/status", pid)};
+    if (!status.is_open()) continue;
+
+    std::string line;
+    pid_t ppid = -1;
+    long vm_rss = -1;
+
+    while (std::getline(status, line)) {
+      if (line.starts_with("PPid:")) {
+        try { ppid = std::stoi(line.substr(5)); } catch (...) {}
+      } else if (line.starts_with("VmRSS:")) {
+        try { vm_rss = std::stol(line.substr(6)); } catch (...) {}
+      }
+    }
+
+    if (ppid != our_pid) continue;
+
+    // The monitor has a small RSS (< 30MB) compared to aember (~100MB).
+    if (vm_rss > 0 && vm_rss < 30000) {
+      log_.debug("Found monitor PID {} (PPid={} VmRSS={}kB)", pid, ppid, vm_rss);
+      return pid;
+    }
+  }
+
+  return -1;
 }
 
 // ---------------------------------------------------------------------------
