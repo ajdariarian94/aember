@@ -123,7 +123,8 @@ class ContainerManager {
   ContainerEntry* Find(std::string_view name);
   const ContainerEntry* Find(std::string_view name) const;
 
-  // Add these to the private section of ContainerManager in container-manager.h:
+  // Add these to the private section of ContainerManager in
+  // container-manager.h:
 
   /// Rename the LXC monitor process so it shows correctly in top/ps.
   /// On aarch64, LXC does not call prctl(PR_SET_NAME) internally.

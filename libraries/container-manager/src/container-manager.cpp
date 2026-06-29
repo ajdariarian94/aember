@@ -134,7 +134,8 @@ bool ContainerManager::StartContainer(std::string_view name) {
     // On aarch64, LXC does not call prctl(PR_SET_NAME) on the monitor process
     // so it shows as "/usr/bin/aember --root" in top instead of the expected
     // "{aember} [lxc monitor] /tmp <name>". We rename it by writing to
-    // /proc/<monitor_pid>/comm — allowed from a privileged parent on Linux 3.8+.
+    // /proc/<monitor_pid>/comm — allowed from a privileged parent on
+    // Linux 3.8+.
     RenameMonitorProcess(*e, name);
   }
 
@@ -383,10 +384,9 @@ void ContainerManager::RenameMonitorProcess(ContainerEntry& e,
   }
 
   // Strategy 2 — find the monitor by scanning /proc for our direct children.
-  // The monitor is a fork() of aember with a much smaller VSZ (~20MB vs ~100MB).
-  if (monitor_pid <= 0) {
-    monitor_pid = FindMonitorPid(e);
-  }
+  // The monitor is a fork() of aember with a much smaller VSZ (~20MB vs
+  // ~100MB).
+  if (monitor_pid <= 0) { monitor_pid = FindMonitorPid(e); }
 
   if (monitor_pid <= 0) {
     log_.warn("Could not find monitor PID for '{}' — skipping rename", name);
@@ -405,7 +405,9 @@ void ContainerManager::RenameMonitorProcess(ContainerEntry& e,
     log_.debug("Renamed monitor PID {} to '{}'", monitor_pid, display_name);
   } else {
     log_.warn("Failed to write to {} for monitor rename: errno={} ({})",
-              comm_path, errno, strerror(errno));
+              comm_path,
+              errno,
+              strerror(errno));
   }
 }
 
@@ -414,13 +416,12 @@ pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
   // It has the same exe (/usr/bin/aember) but much smaller VmRSS.
   // We scan /proc looking for children of getpid() with a small VmRSS.
 
-  const pid_t our_pid  = getpid();
+  const pid_t our_pid = getpid();
   const pid_t init_pid = e.lxc ? e.lxc->init_pid(e.lxc) : -1;
 
-  for (const auto& entry :
-       std::filesystem::directory_iterator{"/proc",
+  for (const auto& entry : std::filesystem::directory_iterator{
+           "/proc",
            std::filesystem::directory_options::skip_permission_denied}) {
-
     if (!entry.is_directory()) continue;
 
     // Only numeric directories.
@@ -428,7 +429,9 @@ pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
     if (!std::ranges::all_of(name, ::isdigit)) continue;
 
     pid_t pid = -1;
-    try { pid = std::stoi(name); } catch (...) { continue; }
+    try {
+      pid = std::stoi(name);
+    } catch (...) { continue; }
 
     // Skip ourselves, kernel threads, and the container init.
     if (pid == our_pid || pid == init_pid || pid <= 1) continue;
@@ -443,9 +446,13 @@ pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
 
     while (std::getline(status, line)) {
       if (line.starts_with("PPid:")) {
-        try { ppid = std::stoi(line.substr(5)); } catch (...) {}
+        try {
+          ppid = std::stoi(line.substr(5));
+        } catch (...) {}
       } else if (line.starts_with("VmRSS:")) {
-        try { vm_rss = std::stol(line.substr(6)); } catch (...) {}
+        try {
+          vm_rss = std::stol(line.substr(6));
+        } catch (...) {}
       }
     }
 
@@ -453,7 +460,8 @@ pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
 
     // The monitor has a small RSS (< 30MB) compared to aember (~100MB).
     if (vm_rss > 0 && vm_rss < 30000) {
-      log_.debug("Found monitor PID {} (PPid={} VmRSS={}kB)", pid, ppid, vm_rss);
+      log_.debug(
+          "Found monitor PID {} (PPid={} VmRSS={}kB)", pid, ppid, vm_rss);
       return pid;
     }
   }
