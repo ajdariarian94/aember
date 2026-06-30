@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.19.5)
 #
 # ##############################################################################
 project(
-  echo-aember
+  aember-child-demo
   VERSION ${VERSION}
   HOMEPAGE_URL "https://github.com/ajdariarian94/aember/tree/main/examples/echo"
   DESCRIPTION "echo example"
@@ -18,6 +18,7 @@ find_package(
   aember-libs
   REQUIRED
   COMPONENTS utils
+             device-health
 )
 
 set(CMAKE_EXE_LINKER_FLAGS
@@ -31,7 +32,8 @@ add_executable(
 
 target_link_libraries(
   ${PROJECT_NAME}
-  PRIVATE aember-libs::utils::logging
+  PRIVATE aember-libs::device-health
+          aember-libs::utils::logging
 )
 
 target_include_directories(
