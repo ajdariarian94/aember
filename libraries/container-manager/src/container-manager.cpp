@@ -18,7 +18,6 @@
 
 #include <format>
 #include <fstream>
-#include <ranges>
 
 namespace aember::container_manager {
 
