@@ -1,12 +1,9 @@
 /**
- * @file network_manager.cpp
+ * @file network-manager.cpp
  * @author Arian Ajdari
- * @brief Library implementation for NetworkManager.
- *        Brings up network interfaces (netlink + udhcpc fallback),
- *        creates bridge interfaces for LXC containers, and monitors
- *        internet connectivity via TCP probe.
- * @version 0.2
- * @date 2025-07-18
+ * @brief NetworkManager implementation.
+ * @version 0.3
+ * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
@@ -15,7 +12,6 @@
 
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <ifaddrs.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -26,20 +22,22 @@
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 
-#include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <format>
 #include <fstream>
+#include <ranges>
 #include <sstream>
 #include <stdexcept>
 
 namespace aember::network {
 
 // ---------------------------------------------------------------------------
-// Internal helpers (file-local)
+// File-local helpers
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -47,17 +45,19 @@ namespace {
 int RunCommand(const std::vector<std::string>& args) {
   if (args.empty()) { return -1; }
 
+  // Build argv — LXC C API pattern, const_cast unavoidable.
   std::vector<char*> argv;
   argv.reserve(args.size() + 1);
-  for (const auto& a : args) { argv.push_back(const_cast<char*>(a.c_str())); }
+  std::ranges::transform(args, std::back_inserter(argv), [](const auto& a) {
+    return const_cast<char*>(a.c_str());
+  });
   argv.push_back(nullptr);
 
-  pid_t pid = fork();
+  const pid_t pid = fork();
   if (pid < 0) { return -1; }
 
   if (pid == 0) {
-    int devnull = open("/dev/null", O_WRONLY);
-    if (devnull >= 0) {
+    if (const int devnull = open("/dev/null", O_WRONLY); devnull >= 0) {
       dup2(devnull, STDOUT_FILENO);
       dup2(devnull, STDERR_FILENO);
       close(devnull);
@@ -72,27 +72,21 @@ int RunCommand(const std::vector<std::string>& args) {
 }
 
 bool ParseCidr(const std::string& cidr, in_addr& addr, int& prefix_len) {
-  auto slash = cidr.find('/');
+  const auto slash = cidr.find('/');
   if (slash == std::string::npos) { return false; }
 
-  std::string ip_str = cidr.substr(0, slash);
-  std::string len_str = cidr.substr(slash + 1);
+  if (inet_pton(AF_INET, cidr.substr(0, slash).c_str(), &addr) != 1) {
+    return false;
+  }
 
-  if (inet_pton(AF_INET, ip_str.c_str(), &addr) != 1) { return false; }
-  prefix_len = std::stoi(len_str);
-  return (prefix_len >= 0 && prefix_len <= 32);
-}
-
-in_addr PrefixToNetmask(int prefix_len) {
-  in_addr mask{};
-  mask.s_addr = prefix_len ? htonl(~((1u << (32 - prefix_len)) - 1)) : 0;
-  return mask;
+  prefix_len = std::stoi(cidr.substr(slash + 1));
+  return prefix_len >= 0 && prefix_len <= 32;
 }
 
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Netlink helper
+// Netlink RAII socket
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -108,7 +102,7 @@ struct NetlinkSocket {
     if (fd >= 0) { close(fd); }
   }
 
-  bool Valid() const { return fd >= 0; }
+  [[nodiscard]] bool Valid() const { return fd >= 0; }
 
   bool SendAndAck(struct nlmsghdr* nlh) {
     if (!Valid()) { return false; }
@@ -128,7 +122,7 @@ struct NetlinkSocket {
     if (sendmsg(fd, &msg, 0) < 0) { return false; }
 
     alignas(NLMSG_ALIGNTO) char buf[4096];
-    ssize_t n = recv(fd, buf, sizeof(buf), 0);
+    const ssize_t n = recv(fd, buf, sizeof(buf), 0);
     if (n < 0) { return false; }
 
     auto* reply = reinterpret_cast<struct nlmsghdr*>(buf);
@@ -144,17 +138,14 @@ struct NetlinkSocket {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Constructor / Destructor
+// Ctor / Dtor
 // ---------------------------------------------------------------------------
 
-NetworkManager::NetworkManager(
-    const nlohmann::json& config,
-    std::function<void(const aember::utils::network::ConnectivityStatus&)>
-        on_status)
-    : on_status_(std::move(on_status)), log_("network-manager") {
+NetworkManager::NetworkManager(const nlohmann::json& config,
+                               StatusCallback on_status)
+    : on_status_(std::move(on_status)) {
   ParseConfig(config);
-  iface_states_.assign(config_.interfaces.size(),
-                       aember::utils::network::InterfaceState::kDown);
+  iface_states_.assign(config_.interfaces.size(), InterfaceState::kDown);
 }
 
 NetworkManager::~NetworkManager() {
@@ -162,7 +153,7 @@ NetworkManager::~NetworkManager() {
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Lifecycle
 // ---------------------------------------------------------------------------
 
 void NetworkManager::Start() {
@@ -171,40 +162,35 @@ void NetworkManager::Start() {
   BringUpInterfaces();
   CreateBridges();
 
-  {
-    std::lock_guard<std::mutex> lock(cv_mutex_);
-    running_ = true;
-  }
+  // jthread passes stop_token automatically as first argument.
+  monitor_thread_ =
+      std::jthread{[this](std::stop_token st) { MonitorLoop(std::move(st)); }};
 
-  monitor_thread_ = std::thread(&NetworkManager::MonitorLoop, this);
-  log_.info("NetworkManager started - connectivity monitor running");
+  log_.info("NetworkManager started — connectivity monitor running");
 }
 
 void NetworkManager::Stop() {
-  {
-    std::lock_guard<std::mutex> lock(cv_mutex_);
-    running_ = false;
-  }
-  cv_.notify_all();
-
+  monitor_thread_.request_stop();
   if (monitor_thread_.joinable()) { monitor_thread_.join(); }
-
   log_.info("NetworkManager stopped");
 }
 
-aember::utils::network::ConnectivityStatus NetworkManager::GetStatus() const {
-  std::lock_guard<std::mutex> lock(status_mutex_);
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
+
+NetworkManager::ConnectivityStatus NetworkManager::GetStatus() const {
+  std::lock_guard lock{status_mutex_};
   return status_;
 }
 
 bool NetworkManager::IsOnline() const {
-  std::lock_guard<std::mutex> lock(status_mutex_);
+  std::lock_guard lock{status_mutex_};
   return status_.online;
 }
 
 bool NetworkManager::WaitForConnectivity(std::chrono::milliseconds timeout) {
-  auto deadline = std::chrono::steady_clock::now() + timeout;
-
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
   log_.info("Waiting for connectivity (timeout {}ms)", timeout.count());
 
   while (std::chrono::steady_clock::now() < deadline) {
@@ -212,7 +198,7 @@ bool NetworkManager::WaitForConnectivity(std::chrono::milliseconds timeout) {
       log_.info("Connectivity confirmed");
       return true;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds{500});
   }
 
   log_.warn("Timed out waiting for connectivity after {}ms", timeout.count());
@@ -227,9 +213,9 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
   config_.ping_target = config.value("ping_target", "8.8.8.8");
   config_.ping_retries = config.value("ping_retries", 3);
   config_.ping_interval =
-      std::chrono::milliseconds(config.value("ping_interval_ms", 10000));
+      std::chrono::milliseconds{config.value("ping_interval_ms", 10000)};
   config_.dhcp_timeout =
-      std::chrono::milliseconds(config.value("dhcp_timeout_ms", 30000));
+      std::chrono::milliseconds{config.value("dhcp_timeout_ms", 30000)};
   config_.dhcp_retries = config.value("dhcp_retries", 3);
 
   if (!config.contains("interfaces") || !config["interfaces"].is_array()) {
@@ -238,11 +224,11 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
   }
 
   for (const auto& entry : config["interfaces"]) {
-    aember::utils::network::InterfaceConfig iface;
+    InterfaceConfig iface;
     iface.name = entry.at("name").get<std::string>();
     iface.required = entry.value("required", false);
 
-    std::string mode_str = entry.value("mode", "dhcp");
+    const auto mode_str = entry.value("mode", "dhcp");
     if (mode_str == "static") {
       iface.mode = aember::utils::network::IpMode::kStatic;
       iface.address = entry.at("address").get<std::string>();
@@ -252,9 +238,10 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
     }
 
     if (entry.contains("dns")) {
-      for (const auto& dns : entry["dns"]) {
-        iface.dns_servers.push_back(dns.get<std::string>());
-      }
+      std::ranges::transform(
+          entry["dns"],
+          std::back_inserter(iface.dns_servers),
+          [](const auto& d) { return d.template get<std::string>(); });
     }
 
     log_.info("Parsed interface: {} mode={} required={}",
@@ -264,10 +251,9 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
     config_.interfaces.push_back(std::move(iface));
   }
 
-  // Parse bridges (optional)
   if (config.contains("bridges") && config["bridges"].is_array()) {
     for (const auto& entry : config["bridges"]) {
-      aember::utils::network::BridgeConfig bridge;
+      BridgeConfig bridge;
       bridge.name = entry.at("name").get<std::string>();
       bridge.address = entry.at("address").get<std::string>();
       log_.info("Parsed bridge: {} address={}", bridge.name, bridge.address);
@@ -283,22 +269,20 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
 void NetworkManager::BringUpInterfaces() {
   log_.info("Bringing up {} interface(s)", config_.interfaces.size());
 
-  for (size_t i = 0; i < config_.interfaces.size(); ++i) {
-    const auto& iface = config_.interfaces[i];
-    iface_states_[i] = aember::utils::network::InterfaceState::kBringingUp;
+  // C++26 std::views::enumerate gives us index + value without a raw counter.
+  for (auto [i, iface] : std::views::enumerate(config_.interfaces)) {
+    iface_states_[i] = InterfaceState::kBringingUp;
 
-    bool ok = BringUpInterface(iface);
-
-    iface_states_[i] = ok ? aember::utils::network::InterfaceState::kUp
-                          : aember::utils::network::InterfaceState::kFailed;
+    const bool ok = BringUpInterface(iface);
+    iface_states_[i] = ok ? InterfaceState::kUp : InterfaceState::kFailed;
 
     if (!ok) {
       if (iface.required) {
-        throw std::runtime_error("NetworkManager: required interface '" +
-                                 iface.name + "' failed to come up");
+        throw std::runtime_error(std::format(
+            "NetworkManager: required interface '{}' failed to come up",
+            iface.name));
       }
-      log_.warn("Interface {} failed to come up (not required, continuing)",
-                iface.name);
+      log_.warn("Interface {} failed (not required, continuing)", iface.name);
     } else {
       log_.info("Interface {} is up", iface.name);
       WriteResolvConf(iface);
@@ -306,12 +290,10 @@ void NetworkManager::BringUpInterfaces() {
   }
 }
 
-bool NetworkManager::BringUpInterface(
-    const aember::utils::network::InterfaceConfig& iface) {
-  log_.info(
-      "Bringing up interface: {} (mode={})",
-      iface.name,
-      iface.mode == aember::utils::network::IpMode::kDhcp ? "dhcp" : "static");
+bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
+  const auto mode_str =
+      iface.mode == aember::utils::network::IpMode::kDhcp ? "dhcp" : "static";
+  log_.info("Bringing up interface: {} (mode={})", iface.name, mode_str);
 
   if (!NetlinkSetInterfaceUp(iface.name)) {
     log_.warn("{}: netlink UP failed, trying fallback", iface.name);
@@ -353,15 +335,15 @@ bool NetworkManager::BringUpInterface(
 // Netlink: set interface UP
 // ---------------------------------------------------------------------------
 
-bool NetworkManager::NetlinkSetInterfaceUp(const std::string& iface_name) {
+bool NetworkManager::NetlinkSetInterfaceUp(std::string_view iface_name) {
   NetlinkSocket nl;
   if (!nl.Valid()) {
     log_.error("Failed to open netlink socket: {}", strerror(errno));
     return false;
   }
 
-  int iface_index = GetInterfaceIndex(iface_name);
-  if (iface_index < 0) {
+  const int idx = GetInterfaceIndex(iface_name);
+  if (idx < 0) {
     log_.error("Interface {} not found", iface_name);
     return false;
   }
@@ -370,27 +352,23 @@ bool NetworkManager::NetlinkSetInterfaceUp(const std::string& iface_name) {
     struct nlmsghdr nlh;
     struct ifinfomsg ifi;
   } req{};
-
   req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg));
   req.nlh.nlmsg_type = RTM_NEWLINK;
   req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
   req.nlh.nlmsg_seq = 1;
   req.ifi.ifi_family = AF_UNSPEC;
-  req.ifi.ifi_index = iface_index;
+  req.ifi.ifi_index = idx;
   req.ifi.ifi_flags = IFF_UP;
   req.ifi.ifi_change = IFF_UP;
 
-  bool ok = nl.SendAndAck(&req.nlh);
-  if (!ok) { log_.debug("NetlinkSetInterfaceUp failed for {}", iface_name); }
-  return ok;
+  return nl.SendAndAck(&req.nlh);
 }
 
 // ---------------------------------------------------------------------------
 // Netlink: assign static address + default route
 // ---------------------------------------------------------------------------
 
-bool NetworkManager::NetlinkSetStaticAddress(
-    const aember::utils::network::InterfaceConfig& iface) {
+bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
   NetlinkSocket nl;
   if (!nl.Valid()) { return false; }
 
@@ -401,8 +379,8 @@ bool NetworkManager::NetlinkSetStaticAddress(
     return false;
   }
 
-  int iface_index = GetInterfaceIndex(iface.name);
-  if (iface_index < 0) { return false; }
+  const int idx = GetInterfaceIndex(iface.name);
+  if (idx < 0) { return false; }
 
   struct {
     struct nlmsghdr nlh;
@@ -417,9 +395,9 @@ bool NetworkManager::NetlinkSetStaticAddress(
   req.nlh.nlmsg_seq = 2;
   req.ifa.ifa_family = AF_INET;
   req.ifa.ifa_prefixlen = static_cast<unsigned char>(prefix_len);
-  req.ifa.ifa_index = iface_index;
+  req.ifa.ifa_index = idx;
 
-  struct rtattr* rta = reinterpret_cast<struct rtattr*>(
+  auto* rta = reinterpret_cast<struct rtattr*>(
       reinterpret_cast<char*>(&req.nlh) + NLMSG_ALIGN(req.nlh.nlmsg_len));
   rta->rta_type = IFA_LOCAL;
   rta->rta_len = RTA_LENGTH(sizeof(in_addr));
@@ -452,8 +430,6 @@ bool NetworkManager::NetlinkSetStaticAddress(
       NLM_F_REQUEST | NLM_F_CREATE | NLM_F_REPLACE | NLM_F_ACK;
   rtreq.nlh.nlmsg_seq = 3;
   rtreq.rtm.rtm_family = AF_INET;
-  rtreq.rtm.rtm_dst_len = 0;
-  rtreq.rtm.rtm_src_len = 0;
   rtreq.rtm.rtm_table = RT_TABLE_MAIN;
   rtreq.rtm.rtm_protocol = RTPROT_STATIC;
   rtreq.rtm.rtm_scope = RT_SCOPE_UNIVERSE;
@@ -470,13 +446,11 @@ bool NetworkManager::NetlinkSetStaticAddress(
                                          NLMSG_ALIGN(rtreq.nlh.nlmsg_len));
   rta->rta_type = RTA_OIF;
   rta->rta_len = RTA_LENGTH(sizeof(int));
-  memcpy(RTA_DATA(rta), &iface_index, sizeof(int));
+  memcpy(RTA_DATA(rta), &idx, sizeof(int));
   rtreq.nlh.nlmsg_len = NLMSG_ALIGN(rtreq.nlh.nlmsg_len) + rta->rta_len;
 
   if (!nl.SendAndAck(&rtreq.nlh)) {
     log_.warn("{}: RTM_NEWROUTE failed, continuing anyway", iface.name);
-  } else {
-    log_.debug("{}: default route via {} set", iface.name, iface.gateway);
   }
 
   return true;
@@ -486,16 +460,15 @@ bool NetworkManager::NetlinkSetStaticAddress(
 // DHCP via udhcpc
 // ---------------------------------------------------------------------------
 
-bool NetworkManager::RunUdhcpc(
-    const aember::utils::network::InterfaceConfig& iface) {
+bool NetworkManager::RunUdhcpc(const InterfaceConfig& iface) {
   for (int attempt = 1; attempt <= config_.dhcp_retries; ++attempt) {
     log_.info(
         "{}: DHCP attempt {}/{}", iface.name, attempt, config_.dhcp_retries);
 
-    int timeout_sec = static_cast<int>(config_.dhcp_timeout.count() / 1000);
-    std::string timeout_str = std::to_string(std::max(1, timeout_sec));
+    const auto timeout_str = std::to_string(
+        std::max(1, static_cast<int>(config_.dhcp_timeout.count() / 1000)));
 
-    int ret = RunCommand({
+    const int ret = RunCommand({
         "udhcpc",
         "-i",
         iface.name,
@@ -516,9 +489,8 @@ bool NetworkManager::RunUdhcpc(
 
     log_.warn(
         "{}: udhcpc attempt {} failed (exit {})", iface.name, attempt, ret);
-
     if (attempt < config_.dhcp_retries) {
-      std::this_thread::sleep_for(std::chrono::seconds(2));
+      std::this_thread::sleep_for(std::chrono::seconds{2});
     }
   }
 
@@ -531,13 +503,15 @@ bool NetworkManager::RunUdhcpc(
 // ---------------------------------------------------------------------------
 
 bool NetworkManager::FallbackIpCommand(const std::vector<std::string>& args) {
-  std::ostringstream oss;
-  for (const auto& a : args) { oss << a << ' '; }
-  log_.debug("Fallback ip command: {}", oss.str());
+  std::string cmd;
+  for (const auto& a : args) {
+    cmd += a;
+    cmd += ' ';
+  }
+  log_.debug("Fallback: {}", cmd);
 
-  int ret = RunCommand(args);
-  if (ret != 0) {
-    log_.warn("ip command failed (exit {}): {}", ret, oss.str());
+  if (const int ret = RunCommand(args); ret != 0) {
+    log_.warn("ip command failed (exit {}): {}", ret, cmd);
     return false;
   }
   return true;
@@ -547,22 +521,19 @@ bool NetworkManager::FallbackIpCommand(const std::vector<std::string>& args) {
 // resolv.conf
 // ---------------------------------------------------------------------------
 
-void NetworkManager::WriteResolvConf(
-    const aember::utils::network::InterfaceConfig& iface) {
-  std::vector<std::string> servers = iface.dns_servers;
-  if (servers.empty()) {
-    servers = {"8.8.8.8", "1.1.1.1"};
-    log_.debug("No DNS configured for {}, using defaults", iface.name);
-  }
+void NetworkManager::WriteResolvConf(const InterfaceConfig& iface) {
+  const auto& servers = !iface.dns_servers.empty()
+                            ? iface.dns_servers
+                            : std::vector<std::string>{"8.8.8.8", "1.1.1.1"};
 
-  std::ofstream f("/etc/resolv.conf", std::ios::trunc);
+  std::ofstream f{"/etc/resolv.conf", std::ios::trunc};
   if (!f.is_open()) {
     log_.warn("Could not write /etc/resolv.conf");
     return;
   }
 
   f << "# Generated by aember NetworkManager\n";
-  for (const auto& ns : servers) { f << "nameserver " << ns << "\n"; }
+  for (const auto& ns : servers) { f << "nameserver " << ns << '\n'; }
 
   log_.info("Wrote /etc/resolv.conf ({} nameserver(s))", servers.size());
 }
@@ -572,62 +543,50 @@ void NetworkManager::WriteResolvConf(
 // ---------------------------------------------------------------------------
 
 void NetworkManager::CreateBridges() {
-  if (config_.bridges.empty()) {
-    log_.debug("No bridges configured, skipping");
-    return;
-  }
+  if (config_.bridges.empty()) { return; }
 
   log_.info("Creating {} bridge(s)", config_.bridges.size());
 
-  for (const auto& bridge : config_.bridges) {
-    if (!CreateBridge(bridge)) {
-      log_.warn("Failed to create bridge '{}', continuing", bridge.name);
+  std::ranges::for_each(config_.bridges, [this](const auto& b) {
+    if (!CreateBridge(b)) {
+      log_.warn("Failed to create bridge '{}', continuing", b.name);
     }
-  }
+  });
 }
 
-bool NetworkManager::CreateBridge(
-    const aember::utils::network::BridgeConfig& bridge) {
+bool NetworkManager::CreateBridge(const BridgeConfig& bridge) {
   log_.info("Creating bridge: {} address={}", bridge.name, bridge.address);
 
-  // Skip if bridge already exists
   if (InterfaceExists(bridge.name)) {
     log_.info("Bridge '{}' already exists, skipping creation", bridge.name);
-    // Still ensure it's up and has correct address
     FallbackIpCommand({"ip", "link", "set", bridge.name, "up"});
     return true;
   }
 
-  // Create the bridge interface
   if (!FallbackIpCommand(
           {"ip", "link", "add", bridge.name, "type", "bridge"})) {
     log_.error("Failed to create bridge '{}'", bridge.name);
     return false;
   }
 
-  // Assign IP address
   if (!bridge.address.empty()) {
     if (!FallbackIpCommand(
             {"ip", "addr", "add", bridge.address, "dev", bridge.name})) {
-      log_.error("Failed to assign address '{}' to bridge '{}'",
-                 bridge.address,
-                 bridge.name);
-      // Don't fail entirely — bridge exists, address assignment failed
+      log_.error(
+          "Failed to assign '{}' to bridge '{}'", bridge.address, bridge.name);
     }
   }
 
-  // Bring it up
   if (!FallbackIpCommand({"ip", "link", "set", bridge.name, "up"})) {
     log_.error("Failed to bring up bridge '{}'", bridge.name);
     return false;
   }
 
-  log_.info(
-      "Bridge '{}' created and up (address={})", bridge.name, bridge.address);
+  log_.info("Bridge '{}' up (address={})", bridge.name, bridge.address);
   return true;
 }
 
-bool NetworkManager::InterfaceExists(const std::string& name) {
+bool NetworkManager::InterfaceExists(std::string_view name) {
   return GetInterfaceIndex(name) >= 0;
 }
 
@@ -635,43 +594,38 @@ bool NetworkManager::InterfaceExists(const std::string& name) {
 // Connectivity monitor
 // ---------------------------------------------------------------------------
 
-void NetworkManager::MonitorLoop() {
+void NetworkManager::MonitorLoop(std::stop_token stop_token) {
   log_.info("Connectivity monitor started (target={}, interval={}ms)",
             config_.ping_target,
             config_.ping_interval.count());
 
-  std::unique_lock<std::mutex> lock(cv_mutex_);
-
-  while (running_) {
-    lock.unlock();
-
-    int rtt = Ping(config_.ping_target);
-    UpdateStatus(rtt >= 0, rtt);
-
-    lock.lock();
-    cv_.wait_for(lock, config_.ping_interval, [this] { return !running_; });
+  while (!stop_token.stop_requested()) {
+    UpdateStatus(Ping(config_.ping_target) >= 0, Ping(config_.ping_target));
+    std::this_thread::sleep_for(config_.ping_interval);
   }
 
   log_.info("Connectivity monitor stopped");
 }
 
 void NetworkManager::UpdateStatus(bool online, int rtt_ms) {
-  aember::utils::network::ConnectivityStatus s;
-  s.online = online;
-  s.rtt_ms = rtt_ms;
-  s.interface = FirstUpInterface();
-  s.timestamp_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::high_resolution_clock::now().time_since_epoch())
-          .count();
+  const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch())
+                          .count();
+
+  ConnectivityStatus s{
+      .online = online,
+      .rtt_ms = rtt_ms,
+      .interface = FirstUpInterface(),
+      .timestamp_ms = now_ms,
+  };
 
   {
-    std::lock_guard<std::mutex> lock(status_mutex_);
-    bool was_online = status_.online;
+    std::lock_guard lock{status_mutex_};
+    const bool was_online = status_.online;
     status_ = s;
 
     if (was_online && !online) {
-      log_.warn("Internet connectivity LOST (last seen via {})", s.interface);
+      log_.warn("Internet connectivity LOST (last via {})", s.interface);
     } else if (!was_online && online) {
       log_.info("Internet connectivity RESTORED via {} (rtt={}ms)",
                 s.interface,
@@ -689,117 +643,102 @@ void NetworkManager::UpdateStatus(bool online, int rtt_ms) {
 }
 
 // ---------------------------------------------------------------------------
-// TCP connectivity probe
+// TCP probe
 // ---------------------------------------------------------------------------
 
-int NetworkManager::Ping(const std::string& target_ip) {
+int NetworkManager::Ping(std::string_view target_ip) {
   for (int i = 0; i < config_.ping_retries; ++i) {
-    int rtt = PingOnce(target_ip);
-    if (rtt >= 0) { return rtt; }
+    if (const int rtt = PingOnce(target_ip); rtt >= 0) { return rtt; }
   }
   return -1;
 }
 
-int NetworkManager::PingOnce(const std::string& target_ip, int timeout_ms) {
-  int sock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-  if (sock < 0) {
-    log_.error("TCP probe: socket() failed: {}", strerror(errno));
-    return -1;
-  }
+int NetworkManager::PingOnce(std::string_view target_ip, int timeout_ms) {
+  const int sock =
+      socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  if (sock < 0) { return -1; }
 
   struct sockaddr_in dest {};
   dest.sin_family = AF_INET;
   dest.sin_port = htons(53);
-  if (inet_pton(AF_INET, target_ip.c_str(), &dest.sin_addr) != 1) {
+  if (inet_pton(AF_INET, std::string{target_ip}.c_str(), &dest.sin_addr) != 1) {
     close(sock);
-    log_.error("TCP probe: invalid target '{}'", target_ip);
     return -1;
   }
 
-  auto t_start = std::chrono::steady_clock::now();
+  const auto t_start = std::chrono::steady_clock::now();
+  const auto elapsed_ms = [&] {
+    return static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t_start)
+            .count());
+  };
 
-  int rc =
+  const int rc =
       connect(sock, reinterpret_cast<struct sockaddr*>(&dest), sizeof(dest));
 
   if (rc < 0 && errno != EINPROGRESS) {
+    const int rtt = elapsed_ms();
+    close(sock);
     if (errno == ECONNREFUSED) {
-      close(sock);
-      int rtt = static_cast<int>(
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now() - t_start)
-              .count());
       log_.debug("TCP probe: {} refused (reachable) rtt={}ms", target_ip, rtt);
       return rtt;
     }
-    close(sock);
-    log_.debug("TCP probe: connect() failed: {}", strerror(errno));
     return -1;
   }
 
   fd_set wfds;
   FD_ZERO(&wfds);
   FD_SET(sock, &wfds);
-  struct timeval tv {};
-  tv.tv_sec = timeout_ms / 1000;
-  tv.tv_usec = (timeout_ms % 1000) * 1000;
+  struct timeval tv {
+    timeout_ms / 1000, (timeout_ms % 1000) * 1000
+  };
 
-  rc = select(sock + 1, nullptr, &wfds, nullptr, &tv);
-
-  int rtt =
-      static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                           std::chrono::steady_clock::now() - t_start)
-                           .count());
-
-  if (rc <= 0) {
+  if (select(sock + 1, nullptr, &wfds, nullptr, &tv) <= 0) {
     close(sock);
-    log_.debug("TCP probe: timeout after {}ms to {}", timeout_ms, target_ip);
     return -1;
   }
 
   int err = 0;
   socklen_t err_len = sizeof(err);
   getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &err_len);
+  const int rtt = elapsed_ms();
   close(sock);
 
-  if (err != 0 && err != ECONNREFUSED) {
-    log_.debug("TCP probe: async connect error: {}", strerror(err));
-    return -1;
-  }
+  if (err != 0 && err != ECONNREFUSED) { return -1; }
 
   log_.debug("TCP probe: {} reachable rtt={}ms", target_ip, rtt);
   return rtt;
 }
 
 // ---------------------------------------------------------------------------
-// Network info
+// GetNetworkInfo
 // ---------------------------------------------------------------------------
 
-aember::utils::network::NetworkInfo NetworkManager::GetNetworkInfo() {
-  aember::utils::network::NetworkInfo info;
+NetworkManager::NetworkInfo NetworkManager::GetNetworkInfo() {
+  NetworkInfo info;
 
-  for (size_t i = 0; i < config_.interfaces.size(); ++i) {
-    if (iface_states_[i] != aember::utils::network::InterfaceState::kUp) {
-      continue;
-    }
+  for (auto [i, iface] : std::views::enumerate(config_.interfaces)) {
+    if (iface_states_[i] != InterfaceState::kUp) { continue; }
 
-    const std::string& name = config_.interfaces[i].name;
-
-    int sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    const int sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (sock < 0) { continue; }
 
     struct ifreq ifr {};
-    strncpy(ifr.ifr_name, name.c_str(), IFNAMSIZ - 1);
+    strncpy(ifr.ifr_name, iface.name.c_str(), IFNAMSIZ - 1);
+
+    char buf[INET_ADDRSTRLEN]{};
 
     if (ioctl(sock, SIOCGIFADDR, &ifr) == 0) {
-      auto* sa = reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_addr);
-      char buf[INET_ADDRSTRLEN]{};
-      inet_ntop(AF_INET, &sa->sin_addr, buf, sizeof(buf));
+      inet_ntop(AF_INET,
+                &reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_addr)->sin_addr,
+                buf,
+                sizeof(buf));
       info.ip_address = buf;
     }
 
     if (ioctl(sock, SIOCGIFNETMASK, &ifr) == 0) {
       auto* sa = reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_netmask);
-      char buf[INET_ADDRSTRLEN]{};
       inet_ntop(AF_INET, &sa->sin_addr, buf, sizeof(buf));
       info.netmask = buf;
 
@@ -813,54 +752,50 @@ aember::utils::network::NetworkInfo NetworkManager::GetNetworkInfo() {
     }
 
     if (ioctl(sock, SIOCGIFBRDADDR, &ifr) == 0) {
-      auto* sa = reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_broadaddr);
-      char buf[INET_ADDRSTRLEN]{};
-      inet_ntop(AF_INET, &sa->sin_addr, buf, sizeof(buf));
+      inet_ntop(
+          AF_INET,
+          &reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_broadaddr)->sin_addr,
+          buf,
+          sizeof(buf));
       info.broadcast = buf;
     }
 
     if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
-      const unsigned char* hw =
+      const auto* hw =
           reinterpret_cast<const unsigned char*>(ifr.ifr_hwaddr.sa_data);
-      char mac[18]{};
-      snprintf(mac,
-               sizeof(mac),
-               "%02x:%02x:%02x:%02x:%02x:%02x",
-               hw[0],
-               hw[1],
-               hw[2],
-               hw[3],
-               hw[4],
-               hw[5]);
-      info.mac_address = mac;
+      info.mac_address =
+          std::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                      hw[0],
+                      hw[1],
+                      hw[2],
+                      hw[3],
+                      hw[4],
+                      hw[5]);
     }
 
     close(sock);
-    info.interface = name;
+    info.interface = iface.name;
 
-    std::ifstream route_file("/proc/net/route");
+    std::ifstream route_file{"/proc/net/route"};
     std::string line;
-    std::getline(route_file, line);
+    std::getline(route_file, line);  // skip header
     while (std::getline(route_file, line)) {
-      std::istringstream ss(line);
+      std::istringstream ss{line};
       std::string iface_col, dest_col, gw_col;
       ss >> iface_col >> dest_col >> gw_col;
 
-      if (iface_col != name) { continue; }
-      if (dest_col != "00000000") { continue; }
+      if (iface_col != iface.name || dest_col != "00000000") { continue; }
 
-      uint32_t gw_hex = static_cast<uint32_t>(std::stoul(gw_col, nullptr, 16));
       struct in_addr gw_addr {};
-      gw_addr.s_addr = gw_hex;
-      char buf[INET_ADDRSTRLEN]{};
+      gw_addr.s_addr = static_cast<uint32_t>(std::stoul(gw_col, nullptr, 16));
       inet_ntop(AF_INET, &gw_addr, buf, sizeof(buf));
       info.gateway = buf;
       break;
     }
 
-    std::ifstream resolv("/etc/resolv.conf");
+    std::ifstream resolv{"/etc/resolv.conf"};
     while (std::getline(resolv, line)) {
-      if (line.rfind("nameserver ", 0) == 0) {
+      if (line.starts_with("nameserver ")) {
         info.dns_servers.push_back(line.substr(11));
       }
     }
@@ -869,16 +804,10 @@ aember::utils::network::NetworkInfo NetworkManager::GetNetworkInfo() {
   }
 
   {
-    std::lock_guard<std::mutex> lock(status_mutex_);
+    std::lock_guard lock{status_mutex_};
     info.online = status_.online;
     info.rtt_ms = status_.rtt_ms;
   }
-
-  log_.debug("NetworkInfo: iface={} ip={} gw={} online={}",
-             info.interface,
-             info.ip_address,
-             info.gateway,
-             info.online);
 
   return info;
 }
@@ -888,27 +817,22 @@ aember::utils::network::NetworkInfo NetworkManager::GetNetworkInfo() {
 // ---------------------------------------------------------------------------
 
 std::string NetworkManager::FirstUpInterface() const {
-  for (size_t i = 0; i < iface_states_.size(); ++i) {
-    if (iface_states_[i] == aember::utils::network::InterfaceState::kUp) {
-      return config_.interfaces[i].name;
-    }
+  for (auto [i, state] : std::views::enumerate(iface_states_)) {
+    if (state == InterfaceState::kUp) { return config_.interfaces[i].name; }
   }
   return "";
 }
 
-int NetworkManager::GetInterfaceIndex(const std::string& iface_name) {
-  int sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+int NetworkManager::GetInterfaceIndex(std::string_view iface_name) {
+  const int sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
   if (sock < 0) { return -1; }
 
   struct ifreq ifr {};
-  strncpy(ifr.ifr_name, iface_name.c_str(), IFNAMSIZ - 1);
+  strncpy(ifr.ifr_name, std::string{iface_name}.c_str(), IFNAMSIZ - 1);
 
-  int ret = ioctl(sock, SIOCGIFINDEX, &ifr);
+  const int ret = ioctl(sock, SIOCGIFINDEX, &ifr);
   close(sock);
-
-  if (ret < 0) { return -1; }
-
-  return ifr.ifr_ifindex;
+  return ret < 0 ? -1 : ifr.ifr_ifindex;
 }
 
 }  // namespace aember::network

@@ -1,9 +1,9 @@
 /**
  * @file container-parser.cpp
  * @author Arian Ajdari
- * @brief Library implementation for restart policy
- * @version 0.1
- * @date 2026-04-11
+ * @brief Library implementation for ContainersConfigParser
+ * @version 0.2
+ * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
@@ -15,9 +15,7 @@ namespace aember::utils::container {
 bool ContainersConfigParser::ParseFile(const std::string& path,
                                        config::ConfigError& error) {
   nlohmann::json json;
-
   if (!LoadJsonFromFile(path, json, error)) { return false; }
-
   containers_.clear();
   return Parse(json, error);
 }
@@ -36,9 +34,7 @@ bool ContainersConfigParser::Parse(const nlohmann::json& json,
 
   for (const auto& item : json["containers"]) {
     ContainerConfig cfg;
-
     if (!ParseContainer(item, cfg, error)) { return false; }
-
     containers_.push_back(std::move(cfg));
   }
 
@@ -55,7 +51,6 @@ bool ContainersConfigParser::ParseContainer(const nlohmann::json& json,
     error = config::ConfigError("Container missing 'name'");
     return false;
   }
-
   cfg.name = json["name"].get<std::string>();
 
   // -------------------------
@@ -68,46 +63,43 @@ bool ContainersConfigParser::ParseContainer(const nlohmann::json& json,
 
   const auto& ctr = json["container"];
 
-  // squashfs
+  // squashfs (required)
   if (!ctr.contains("squashfs") || !ctr["squashfs"].is_string()) {
     error = config::ConfigError("Missing 'container.squashfs'");
     return false;
   }
-
   cfg.squashfs = ctr["squashfs"].get<std::string>();
 
-  // rootfs
+  // rootfs (required)
   if (!ctr.contains("rootfs") || !ctr["rootfs"].is_string()) {
     error = config::ConfigError("Missing 'container.rootfs'");
     return false;
   }
-
   cfg.rootfs = ctr["rootfs"].get<std::string>();
+
+  // config_path (required) — path to lxc.container.conf
+  if (!ctr.contains("config_path") || !ctr["config_path"].is_string()) {
+    error = config::ConfigError(
+        "Missing 'container.config_path' — lxc.container.conf path is "
+        "required");
+    return false;
+  }
+  cfg.config_path = ctr["config_path"].get<std::string>();
 
   // args (optional)
   if (ctr.contains("args")) {
     if (!ctr["args"].is_array()) {
-      error = config::ConfigError("'container.args' must be array");
+      error = config::ConfigError("'container.args' must be an array");
       return false;
     }
-
     for (const auto& arg : ctr["args"]) {
       if (!arg.is_string()) {
         error = config::ConfigError("Container args must be strings");
         return false;
       }
-
       cfg.args.push_back(arg.get<std::string>());
     }
   }
-
-  // -------------------------
-  // IGNORE service-level fields intentionally
-  // -------------------------
-  // restart_policy
-  // dependencies
-  // max_restart_attempts
-  // restart_delay
 
   return true;
 }

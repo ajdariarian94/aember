@@ -6,7 +6,6 @@ add_library(
   ${PROCESS_TARGET}
   STATIC
   src/process-config-parser.cpp
-  src/process-config.cpp
 )
 
 add_library(

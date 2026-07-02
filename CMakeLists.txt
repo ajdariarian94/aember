@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.19.5)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS
+    ON
+)
+
 # ##############################################################################
 #
 # Project definition
@@ -7,7 +11,7 @@ cmake_minimum_required(VERSION 3.19.5)
 # ##############################################################################
 project(
   aember
-  VERSION 0.7.0
+  VERSION 0.8.0
   HOMEPAGE_URL "https://github.com/ajdariarian94/aember.git"
   DESCRIPTION "aember superbuild project"
   LANGUAGES C
@@ -20,10 +24,6 @@ project(
 #
 # ##############################################################################
 include(ExternalProject)
-
-# It is necessary to pass vcpkg variables to subprojects. The following
-# variables are important: VCPKG_HOST_TRIPLET VCPKG_TARGET_TRIPLET
-# VCPKG_INSTALLED_DIR VCPKG_MANIFEST_INSTALL
 
 ExternalProject_Add(
   aember-libs
@@ -41,6 +41,7 @@ ExternalProject_Add(
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
              -DBUILD_TESTS=${BUILD_TESTS}
              -DVERSION=${PROJECT_VERSION}
+             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 )
 
 ExternalProject_Add(
@@ -58,6 +59,7 @@ ExternalProject_Add(
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
              -DVERSION=${PROJECT_VERSION}
+             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 )
 
 ExternalProject_Add(
@@ -75,4 +77,5 @@ ExternalProject_Add(
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
              -DVERSION=${PROJECT_VERSION}
+             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 )

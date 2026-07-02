@@ -2,7 +2,7 @@
  * @file process-manager.h
  * @author Arian Ajdari
  * @brief ProcessManager — spawns and tracks native (non-LXC) processes.
- * @version 0.2
+ * @version 0.3
  * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -19,6 +19,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace aember::process_manager {
@@ -31,14 +32,9 @@ namespace aember::process_manager {
  *
  * Responsibilities:
  *  - fork/exec a process from a ProcessConfig
- *  - maintain the pid → name and name → pid mappings for native PIDs
+ *  - maintain pid → name and name → pid mappings for native PIDs
  *  - notify the caller when a tracked process exits (ExitCallback)
  *  - schedule restarts according to ProcessConfig supervision policy
- *
- * ProcessManager does NOT:
- *  - know about service dependencies
- *  - touch anything LXC-related
- *  - own ContainerManager or ServiceManager concerns
  */
 class ProcessManager {
  public:
@@ -49,13 +45,10 @@ class ProcessManager {
 
   /**
    * Called when a tracked native process exits.
-   *
-   * @param name      Name that owned the process.
-   * @param pid       PID that exited.
-   * @param exit_code Waitpid exit status (use WEXITSTATUS / WIFSIGNALED).
+   * move_only_function — never copied.
    */
-  using ExitCallback = std::function<void(const std::string& /*name*/,
-                                          pid_t /*pid*/, int /*exit_code*/)>;
+  using ExitCallback = std::move_only_function<void(
+      const std::string& /*name*/, pid_t /*pid*/, int /*exit_code*/)>;
 
   explicit ProcessManager(ExitCallback on_exit = nullptr);
   ~ProcessManager();
@@ -67,46 +60,23 @@ class ProcessManager {
   // Registry
   // ---------------------------------------------------------------------------
 
-  /**
-   * Register a process config without starting it.
-   * Returns false if a config with this name already exists.
-   */
   bool AddProcess(const ProcessConfig& config);
-
-  /** Deregister a process. Stops it first if running. */
-  bool RemoveProcess(const std::string& name);
+  bool RemoveProcess(std::string_view name);
 
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
-  /**
-   * Spawn the native process registered under @p name.
-   *
-   * @return The PID of the spawned process, or std::nullopt on failure.
-   *
-   * The PID is immediately tracked; HandleExit cleans it up on exit.
-   */
-  [[nodiscard]] std::optional<pid_t> Start(const std::string& name);
-
-  /**
-   * Send SIGTERM to the process registered under @p name, followed by
-   * SIGKILL after ProcessConfig::stop_timeout if it has not yet exited.
-   *
-   * Returns false if no native process is running under @p name.
-   */
-  bool Stop(const std::string& name);
+  [[nodiscard]] std::optional<pid_t> Start(std::string_view name);
+  bool Stop(std::string_view name);
 
   // ---------------------------------------------------------------------------
   // SIGCHLD integration
   // ---------------------------------------------------------------------------
 
   /**
-   * Called by ServiceManager when ChildSupervisor delivers an exit event.
-   *
-   * Returns true if @p pid was a native process tracked here (entry is
-   * cleaned up and ExitCallback fired). Returns false if the PID is
-   * unknown — the caller should then try ContainerManager::HandleExit.
+   * Returns true if @p pid was tracked here (cleaned up, ExitCallback fired).
+   * Returns false if unknown — caller should try ContainerManager::HandleExit.
    */
   bool HandleExit(pid_t pid, int exit_code);
 
@@ -114,23 +84,17 @@ class ProcessManager {
   // Restart scheduling
   // ---------------------------------------------------------------------------
 
-  /**
-   * Schedule a restart of @p name according to its ProcessConfig restart
-   * policy (restart_on_failure, max_restarts, restart_delay).
-   *
-   * Called internally after HandleExit when the policy allows a restart.
-   * A second call while a restart is already pending is a no-op.
-   */
-  void ScheduleRestart(const std::string& name);
+  /** Called internally after HandleExit when restart policy allows it. */
+  void ScheduleRestart(std::string_view name);
 
   // ---------------------------------------------------------------------------
   // Queries
   // ---------------------------------------------------------------------------
 
-  [[nodiscard]] bool HasProcess(const std::string& name) const;
-  [[nodiscard]] bool IsRunning(const std::string& name) const;
-  [[nodiscard]] ProcessState GetState(const std::string& name) const;
-  [[nodiscard]] std::optional<pid_t> GetPid(const std::string& name) const;
+  [[nodiscard]] bool HasProcess(std::string_view name) const;
+  [[nodiscard]] bool IsRunning(std::string_view name) const;
+  [[nodiscard]] ProcessState GetState(std::string_view name) const;
+  [[nodiscard]] std::optional<pid_t> GetPid(std::string_view name) const;
   [[nodiscard]] std::vector<std::string> GetProcessNames() const;
   [[nodiscard]] std::vector<ProcessConfig> GetConfigs() const;
 
@@ -144,25 +108,16 @@ class ProcessManager {
   // Config loading
   // ---------------------------------------------------------------------------
 
-  /** Parse process configs from a named config source (file, dir, …). */
-  std::vector<ProcessConfig> LoadProcesses(const std::string& source);
+  std::vector<ProcessConfig> LoadProcesses(std::string_view source);
 
  private:
-  // ---------------------------------------------------------------------------
-  // Internal helpers
-  // ---------------------------------------------------------------------------
-
   pid_t SpawnProcess(const ProcessConfig& config);
 
-  // ---------------------------------------------------------------------------
-  // Members
-  // ---------------------------------------------------------------------------
-
-  std::map<std::string, ProcessConfig> configs_;        ///< registered configs
-  std::map<std::string, ProcessState> states_;          ///< per-process state
-  std::map<pid_t, std::string> pid_to_name_;            ///< native PIDs only
-  std::map<std::string, pid_t> name_to_pid_;            ///< reverse index
-  std::map<std::string, unsigned int> restart_counts_;  ///< attempts so far
+  std::map<std::string, ProcessConfig> configs_;
+  std::map<std::string, ProcessState> states_;
+  std::map<pid_t, std::string> pid_to_name_;
+  std::map<std::string, pid_t> name_to_pid_;
+  std::map<std::string, unsigned int> restart_counts_;
 
   mutable std::mutex mutex_;
 

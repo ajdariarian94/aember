@@ -30,6 +30,14 @@ static std::unique_ptr<spdlog::formatter> make_formatter() {
   return std::make_unique<spdlog::pattern_formatter>(LOG_PATTERN);
 }
 
+void logging_level_debug() {
+  spdlog::set_level(spdlog::level::debug);
+}
+
+void logging_level_info() {
+  spdlog::set_level(spdlog::level::info);
+}
+
 void enable_console_silence() {
   std::lock_guard lock(sink_mutex);
 

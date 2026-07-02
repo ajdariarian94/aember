@@ -1,9 +1,9 @@
 /**
  * @file module-loader.h
  * @author Arian Ajdari
- * @brief Library definition for ModuleLoader - loads kernel modules at boot.
- * @version 0.1
- * @date 2026-03-29
+ * @brief ModuleLoader — loads kernel modules at boot.
+ * @version 0.2
+ * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
@@ -15,7 +15,9 @@
 #include <aember-libs/utils/module/module-result.h>
 #include <aember-libs/utils/module/module-status.h>
 
+#include <expected>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace aember::module_loader {
@@ -26,8 +28,16 @@ class ModuleLoader {
   using ModuleConfig = aember::utils::module::ModuleConfig;
   using ModuleStatus = aember::utils::module::ModuleStatus;
   using ModuleErrorCode = aember::utils::module::ModuleErrorCode;
-  using Logger = aember::utils::logging::Logger;
   using ModulesConfigParser = aember::utils::module::ModulesConfigParser;
+  using Logger = aember::utils::logging::Logger;
+
+  struct Error {
+    std::string message;
+    ModuleErrorCode code{ModuleErrorCode::None};
+  };
+
+  template <typename T = void>
+  using Result = std::expected<T, Error>;
 
   ModuleLoader();
   ~ModuleLoader() = default;
@@ -35,34 +45,39 @@ class ModuleLoader {
   ModuleLoader(const ModuleLoader&) = delete;
   ModuleLoader& operator=(const ModuleLoader&) = delete;
 
-  // --------------------------
+  // ---------------------------------------------------------------------------
   // Module loading
-  // --------------------------
+  // ---------------------------------------------------------------------------
 
-  bool Load(const std::string& name);
+  /** Load a single module by name. */
+  Result<> Load(std::string_view name);
+
+  /** Bulk load — returns false if any module failed. */
   bool Load(const std::vector<ModuleConfig>& modules);
 
-  /**
-   * @brief Parse + return module configs (same style as ContainerManager)
-   */
-  std::vector<ModuleConfig> LoadModules(const std::string& path);
+  /** Parse module configs from a JSON file. */
+  std::vector<ModuleConfig> LoadModules(std::string_view path);
 
-  // --------------------------
+  // ---------------------------------------------------------------------------
   // Queries
-  // --------------------------
+  // ---------------------------------------------------------------------------
 
-  bool IsLoaded(const std::string& name) const;
+  [[nodiscard]] bool IsLoaded(std::string_view name) const;
 
-  const std::vector<ModuleResult>& GetResults() const { return results_; }
+  [[nodiscard]] const std::vector<ModuleResult>& GetResults() const {
+    return results_;
+  }
 
  private:
-  int RunModprobe(const std::string& name);
+  /** Fork + exec modprobe. Returns the exit code, or -1 on fork/wait failure.
+   */
+  int RunModprobe(std::string_view name);
 
- private:
   std::vector<ModuleResult> results_;
-  Logger log_{"module-loader"};
 
-  ModulesConfigParser parser_{};  // 👈 same pattern as container manager
+  ModulesConfigParser parser_{};
+
+  mutable Logger log_{"module-loader"};
 };
 
 }  // namespace aember::module_loader

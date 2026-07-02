@@ -10,6 +10,8 @@ SRC_URI[sha256sum] = "1930aa10d892db8531d1353d15f7ebf5913e74a19e134423e4d074c07f
 SRC_URI += " \
     file://base.conf \
     file://x64-linux.conf \
+    file://arm64-linux.conf \
+    file://0001-lxccontainer-prctl-fallback.patch \
 "
 
 inherit meson pkgconfig deploy
@@ -38,7 +40,13 @@ EXTRA_OEMESON = " \
 do_install:append() {
     install -d ${D}${sysconfdir}/lxc
     install -m 0644 ${WORKDIR}/sources/base.conf ${D}${sysconfdir}/lxc/default.conf
-    install -m 0644 ${WORKDIR}/sources/x64-linux.conf ${D}${sysconfdir}/lxc/x64-linux.conf
+
+    # Install architecture-specific LXC config
+    if [ "${TARGET_ARCH}" = "x86_64" ]; then
+        install -m 0644 ${WORKDIR}/sources/x64-linux.conf ${D}${sysconfdir}/lxc/arch.conf
+    elif [ "${TARGET_ARCH}" = "aarch64" ]; then
+        install -m 0644 ${WORKDIR}/sources/arm64-linux.conf ${D}${sysconfdir}/lxc/arch.conf
+    fi
 
     install -d ${D}${localstatedir}/lib/lxc
 }
@@ -77,10 +85,15 @@ RDEPENDS:${PN}-dev = "${PN}"
 # Allow the dev package to be built into the SDK / sysroot
 ALLOW_EMPTY:${PN}-dev = "1"
 
-CUSTOM_OUTDIR = "${TOPDIR}/../build/${MACHINE}/virtualization/"
+# Map Yocto TARGET_SYS → build system directory names
+DEPLOY_ARCH:x86-64  = "x64-poky-linux"
+DEPLOY_ARCH:aarch64 = "aarch64-poky-linux"
+DEPLOY_ARCH:arm     = "arm-poky-linux"
+
+CUSTOM_OUTDIR = "${TOPDIR}/../build/${DEPLOY_ARCH}/virtualization/"
 
 do_deploy() {
-    CUSTOM_OUTDIR=$(realpath -m ${TOPDIR}/../build/${MACHINE}/virtualization)
+    CUSTOM_OUTDIR=$(realpath -m ${TOPDIR}/../build/${DEPLOY_ARCH}/virtualization)
     install -d ${CUSTOM_OUTDIR}
 
     # ── Runtime binaries ──────────────────────────────────────────────────────

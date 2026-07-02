@@ -19,6 +19,7 @@ struct ContainerConfig {
   std::string name;
   std::string squashfs;
   std::string rootfs;
+  std::string config_path;
   std::vector<std::string> args;
 };
 

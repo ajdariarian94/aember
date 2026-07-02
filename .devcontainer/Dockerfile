@@ -147,6 +147,10 @@ RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/nul
     apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" && \
     apt update && apt install -y cmake
 
+RUN wget -O - https://apt.llvm.org/llvm.sh | bash -s -- 18 && \
+    apt install -y clangd-18 && \
+    update-alternatives --install /usr/bin/clangd clangd /usr/bin/clangd-18 100
+
 # Set up locale
 RUN locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8

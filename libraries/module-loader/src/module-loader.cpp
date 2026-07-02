@@ -1,27 +1,29 @@
 /**
  * @file module-loader.cpp
  * @author Arian Ajdari
- * @brief Library implementation for ModuleLoader
- * @version 0.1
- * @date 2026-03-29
+ * @brief ModuleLoader implementation.
+ * @version 0.2
+ * @date 2026-06-12
+ *
+ * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
 
 #include <aember-libs/module-loader/module-loader.h>
 
 #include <fcntl.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
-#include <cstring>
+#include <format>
 #include <fstream>
+#include <ranges>
 #include <sstream>
 
 namespace aember::module_loader {
 
 // ---------------------------------------------------------------------------
-// Constructor
+// Ctor
 // ---------------------------------------------------------------------------
 
 ModuleLoader::ModuleLoader() {
@@ -29,57 +31,47 @@ ModuleLoader::ModuleLoader() {
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Load — single module
 // ---------------------------------------------------------------------------
 
-bool ModuleLoader::Load(const std::string& name) {
+ModuleLoader::Result<> ModuleLoader::Load(std::string_view name) {
   if (name.empty()) {
-    log_.error("Cannot load module with empty name");
-
-    results_.push_back({name,
-                        ModuleStatus::Failed,
-                        ModuleErrorCode::InvalidInput,
-                        "empty module name"});
-
-    return false;
+    const Error err{"empty module name", ModuleErrorCode::InvalidInput};
+    results_.push_back(
+        {std::string{name}, ModuleStatus::Failed, err.code, err.message});
+    return std::unexpected(err);
   }
 
-  // Already loaded
   if (IsLoaded(name)) {
     log_.debug("Module '{}' already loaded, skipping", name);
-
-    results_.push_back(
-        {name, ModuleStatus::AlreadyLoaded, ModuleErrorCode::None, ""});
-
-    return true;
+    results_.push_back({std::string{name},
+                        ModuleStatus::AlreadyLoaded,
+                        ModuleErrorCode::None,
+                        ""});
+    return {};
   }
 
   log_.info("Loading module '{}'", name);
 
-  int ret = RunModprobe(name);
-
-  ModuleResult result;
-  result.name = name;
+  const int ret = RunModprobe(name);
 
   if (ret == 0) {
-    result.status = ModuleStatus::Loaded;
-    result.code = ModuleErrorCode::None;
-
+    results_.push_back(
+        {std::string{name}, ModuleStatus::Loaded, ModuleErrorCode::None, ""});
     log_.info("Module '{}' loaded successfully", name);
-  } else {
-    result.status = ModuleStatus::Failed;
-    result.code = ModuleErrorCode::ModprobeFailed;
-    result.error = "modprobe exited with code " + std::to_string(ret);
-
-    log_.error("Failed to load module '{}': {}", name, result.error);
+    return {};
   }
 
-  results_.push_back(result);
-  return result.status != ModuleStatus::Failed;
+  const Error err{std::format("modprobe exited with code {}", ret),
+                  ModuleErrorCode::ModprobeFailed};
+  results_.push_back(
+      {std::string{name}, ModuleStatus::Failed, err.code, err.message});
+  log_.error("Failed to load module '{}': {}", name, err.message);
+  return std::unexpected(err);
 }
 
 // ---------------------------------------------------------------------------
-// Bulk load
+// Load — bulk
 // ---------------------------------------------------------------------------
 
 bool ModuleLoader::Load(const std::vector<ModuleConfig>& modules) {
@@ -88,16 +80,11 @@ bool ModuleLoader::Load(const std::vector<ModuleConfig>& modules) {
     return true;
   }
 
-  bool all_ok = true;
+  const bool all_ok = std::ranges::all_of(
+      modules, [this](const auto& m) { return Load(m.name).has_value(); });
 
-  for (const auto& m : modules) {
-    if (!Load(m.name)) { all_ok = false; }
-  }
-
-  const auto failed = std::count_if(
-      results_.begin(), results_.end(), [](const ModuleResult& r) {
-        return r.status == ModuleStatus::Failed;
-      });
+  const auto failed = std::ranges::count_if(
+      results_, [](const auto& r) { return r.status == ModuleStatus::Failed; });
 
   log_.info(
       "Module loading complete ({} total, {} failed)", results_.size(), failed);
@@ -106,14 +93,14 @@ bool ModuleLoader::Load(const std::vector<ModuleConfig>& modules) {
 }
 
 // ---------------------------------------------------------------------------
-// Parser bridge (same pattern as ContainerManager)
+// LoadModules
 // ---------------------------------------------------------------------------
 
 std::vector<ModuleLoader::ModuleConfig> ModuleLoader::LoadModules(
-    const std::string& path) {
+    std::string_view path) {
   aember::utils::config::ConfigError error;
 
-  if (!parser_.ParseFile(path, error)) {
+  if (!parser_.ParseFile(std::string{path}, error)) {
     log_.error("Failed to parse module config '{}': {}", path, error.message);
     return {};
   }
@@ -126,50 +113,45 @@ std::vector<ModuleLoader::ModuleConfig> ModuleLoader::LoadModules(
 }
 
 // ---------------------------------------------------------------------------
-// Queries
+// IsLoaded
 // ---------------------------------------------------------------------------
 
-bool ModuleLoader::IsLoaded(const std::string& name) const {
-  std::ifstream proc_modules("/proc/modules");
+bool ModuleLoader::IsLoaded(std::string_view name) const {
+  std::ifstream proc_modules{"/proc/modules"};
   if (!proc_modules.is_open()) { return false; }
 
-  // Normalize: '-' → '_'
-  std::string normalized = name;
-  std::replace(normalized.begin(), normalized.end(), '-', '_');
+  // Normalise: kernel replaces '-' with '_' in module names.
+  std::string normalized{name};
+  std::ranges::replace(normalized, '-', '_');
 
-  std::string line;
-  while (std::getline(proc_modules, line)) {
-    std::istringstream ss(line);
-    std::string mod_name;
-    ss >> mod_name;
-
-    if (mod_name == normalized) { return true; }
-  }
-
-  return false;
+  // Read every first token (module name) per line and compare.
+  return std::ranges::any_of(
+      std::ranges::istream_view<std::string>(proc_modules),
+      [&](const std::string& token) { return token == normalized; });
 }
 
 // ---------------------------------------------------------------------------
-// Private
+// RunModprobe
 // ---------------------------------------------------------------------------
 
-int ModuleLoader::RunModprobe(const std::string& name) {
-  pid_t pid = fork();
+int ModuleLoader::RunModprobe(std::string_view name) {
+  const pid_t pid = fork();
 
   if (pid < 0) {
-    log_.error("fork() failed for modprobe: {}", strerror(errno));
+    log_.error("fork() failed: {}", strerror(errno));
     return -1;
   }
 
   if (pid == 0) {
-    int devnull = open("/dev/null", O_WRONLY);
-    if (devnull >= 0) {
+    // Child: silence stdout/stderr then exec modprobe.
+    if (const int devnull = open("/dev/null", O_WRONLY); devnull >= 0) {
       dup2(devnull, STDOUT_FILENO);
       dup2(devnull, STDERR_FILENO);
       close(devnull);
     }
 
-    execlp("modprobe", "modprobe", name.c_str(), nullptr);
+    // name is valid for the lifetime of this call — safe to c_str().
+    execlp("modprobe", "modprobe", std::string{name}.c_str(), nullptr);
     _exit(127);
   }
 

@@ -3,7 +3,7 @@
  * @author Arian Ajdari
  * @brief DependencyResolver — evaluates service start-order and dependency
  *        satisfaction. Knows nothing about processes, containers, or configs.
- * @version 0.3
+ * @version 0.4
  * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -15,18 +15,14 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace aember::service_manager {
 
 /**
  * DependencyResolver operates purely on names and dependency lists.
- *
- * It has no knowledge of ProcessConfig, ContainerConfig, ProcessState,
- * or any lifecycle manager. The caller provides:
- *
- *  - a dependency graph: name → list of names it depends on
- *  - a StateQuery lambda to check whether a name is currently running
+ * No knowledge of ProcessConfig, ContainerConfig, ProcessState, or managers.
  */
 class DependencyResolver {
  public:
@@ -36,34 +32,23 @@ class DependencyResolver {
   using DependencyGraph = std::map<std::string, std::vector<std::string>>;
 
   /**
-   * Returns true if the given name is currently in the Running state.
-   * Typically a lambda wrapping ServiceManager::GetState.
+   * Returns true if the given name is currently running.
+   * Typically wraps ServiceManager::GetState.
+   * move_only_function — never copied.
    */
-  using StateQuery = std::function<bool(const std::string& /*name*/)>;
+  using StateQuery =
+      std::move_only_function<bool(const std::string& /*name*/) const>;
 
   explicit DependencyResolver(StateQuery is_running);
 
   DependencyResolver(const DependencyResolver&) = delete;
   DependencyResolver& operator=(const DependencyResolver&) = delete;
 
-  // ---------------------------------------------------------------------------
-  // Core API
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Returns true when every dependency of @p name is currently running
-   * according to the injected StateQuery.
-   *
-   * @param name  Service to check.
-   * @param graph Full dependency graph (name → dependencies).
-   */
-  [[nodiscard]] bool CheckDependencies(const std::string& name,
+  [[nodiscard]] bool CheckDependencies(std::string_view name,
                                        const DependencyGraph& graph) const;
 
   /**
-   * Returns the names in @p graph topologically sorted so that each
-   * name appears after all its dependencies.
-   *
+   * Topological sort via Kahn's algorithm.
    * Throws std::runtime_error on a dependency cycle.
    */
   [[nodiscard]] std::vector<std::string> ResolveStartOrder(

@@ -3,10 +3,6 @@
  * @author Arian Ajdari
  * @date 2025-12-22
  * @brief Child process supervision and bookkeeping.
- *
- * The ChildSupervisor tracks child processes spawned by the init system.
- * It provides centralized bookkeeping, logging, and cleanup for child
- * processes, and integrates with SIGCHLD handling.
  */
 
 #pragma once
@@ -14,107 +10,67 @@
 #include <aember-libs/utils/logging/logging.h>
 
 #include <sys/types.h>
+
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace aember::child_supervisor {
 
 /**
- * @class ChildSupervisor
- * @brief Tracks and supervises child processes.
+ * ChildSupervisor tracks child processes spawned by the init system.
  *
- * The ChildSupervisor is responsible for:
- * - Tracking child PIDs and associated metadata
- * - Reaping exited children
- * - Providing diagnostic logging for child lifecycle events
+ * Responsibilities:
+ *  - bookkeeping of pid → name entries
+ *  - reaping exited children via waitpid on SIGCHLD
+ *  - diagnostic logging of child lifecycle events
  *
- * It does not own service restart logic; that responsibility belongs
- * to the ServiceManager. This class focuses purely on process tracking.
+ * It does not own restart logic — that belongs to ProcessManager.
  */
 class ChildSupervisor {
  public:
   using Logger = aember::utils::logging::Logger;
 
-  /**
-   * @brief Construct a new ChildSupervisor.
-   *
-   * Initializes internal data structures and logger.
-   */
   ChildSupervisor();
 
-  /**
-   * @brief Register a newly spawned child process.
-   *
-   * This should be called immediately after a successful fork/exec
-   * to begin tracking the child.
-   *
-   * @param pid  Process ID of the spawned child
-   * @param name Human-readable name of the child (e.g. service name)
-   */
-  void AddChild(pid_t pid, const std::string& name);
+  ChildSupervisor(const ChildSupervisor&) = delete;
+  ChildSupervisor& operator=(const ChildSupervisor&) = delete;
 
-  /**
-   * @brief Remove a child from supervision.
-   *
-   * This can be used to explicitly forget a child process, though in
-   * most cases children are removed automatically when reaped.
-   *
-   * @param pid Process ID of the child to remove
-   */
+  // ---------------------------------------------------------------------------
+  // Child tracking
+  // ---------------------------------------------------------------------------
+
+  /** Register a newly spawned child. Call immediately after fork/exec. */
+  void AddChild(pid_t pid, std::string_view name);
+
+  /** Explicitly deregister a child (most are removed automatically on reap). */
   void RemoveChild(pid_t pid);
 
-  /**
-   * @brief Handle SIGCHLD notifications.
-   *
-   * This function should be called when a SIGCHLD signal is received.
-   * It typically performs non-blocking reap operations and logs
-   * child exit events.
-   */
+  // ---------------------------------------------------------------------------
+  // SIGCHLD integration
+  // ---------------------------------------------------------------------------
+
+  /** Call from the SIGCHLD handler — delegates to ReapChildren(). */
   void HandleSIGCHLD();
 
-  /**
-   * @brief Stop supervising all children.
-   *
-   * Used during shutdown to clean up internal state and ensure that
-   * no stale child entries remain.
-   */
-  void StopAll();
-
-  /**
-   * @brief Reap exited child processes.
-   *
-   * Performs waitpid-based reaping of child processes and removes them
-   * from the internal tracking map.
-   */
+  /** Non-blocking waitpid loop — reaps all exited children. */
   void ReapChildren();
 
+  // ---------------------------------------------------------------------------
+  // Shutdown
+  // ---------------------------------------------------------------------------
+
+  /** Log and clear all tracked children during shutdown. */
+  void StopAll();
+
  private:
-  /**
-   * @struct ChildInfo
-   * @brief Metadata associated with a supervised child process.
-   */
-  struct ChildInfo {
-    /// Human-readable name associated with the child process
-    std::string name;
-  };
+  /// pid → service name. ChildInfo collapsed — the name is all we need.
+  std::unordered_map<pid_t, std::string> children_;
 
-  /**
-   * Map of active child processes indexed by PID.
-   *
-   * Protected by children_mutex_.
-   */
-  std::unordered_map<pid_t, ChildInfo> children_;
-
-  /**
-   * Mutex protecting access to the children_ map.
-   */
   std::mutex children_mutex_;
 
-  /**
-   * Logger instance for child supervision events.
-   */
-  Logger log_;
+  mutable Logger log_{"child-supervisor"};
 };
 
 }  // namespace aember::child_supervisor

@@ -1,0 +1,10 @@
+{
+  "modules": [
+    "llc",
+    "stp",
+    "ipv6",
+    "bridge",
+    "veth",
+    "br_netfilter"
+  ]
+}

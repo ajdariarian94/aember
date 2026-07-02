@@ -1,99 +1,78 @@
 /**
  * @file heartbeat.cpp
  * @author Arian Ajdari
- * @brief Library implementation for Heartbeat service
- * @version 0.1
- * @date 2025-07-18
+ * @brief Heartbeat service implementation.
+ * @version 0.2
+ * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
 
 #include <aember-libs/device-health/heartbeat.h>
 
-#include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 
 namespace aember::device_health {
 
-Heartbeat::Heartbeat(const std::function<void(const nlohmann::json&)>& callback,
-                     const std::chrono::milliseconds& interval)
-    : running_(false),
-      interval_(interval),
-      callback_(callback),
-      log_("heartbeat") {}
+// ---------------------------------------------------------------------------
+// Ctor / Dtor
+// ---------------------------------------------------------------------------
 
-/**
- * @brief Destructor stops the heartbeat thread if still running.
- */
+Heartbeat::Heartbeat(Callback callback, std::chrono::milliseconds interval)
+    : interval_(interval), callback_(std::move(callback)) {}
+
 Heartbeat::~Heartbeat() {
   Stop();
 }
 
-/**
- * @brief Starts the heartbeat background thread.
- * If already running, does nothing.
- */
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
 void Heartbeat::Start() {
-  log_.info("Starting heartbeat");
+  if (thread_.joinable()) return;  // already running
 
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (running_) { return; }
-    running_ = true;
-  }
+  log_.info("Starting heartbeat (interval={}ms)", interval_.count());
 
-  // Launch background thread
-  check_thread_ = std::thread(&Heartbeat::Run, this);
+  // jthread passes a stop_token as the first argument automatically.
+  thread_ = std::jthread{[this](std::stop_token st) { Run(std::move(st)); }};
 }
 
-/**
- * @brief Stops the heartbeat background thread and waits for it to exit.
- */
 void Heartbeat::Stop() {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    running_ = false;
-  }
-
-  cv_.notify_all();
-
-  if (check_thread_.joinable()) { check_thread_.join(); }
+  // request_stop() signals the stop_token; jthread joins in its destructor.
+  thread_.request_stop();
+  if (thread_.joinable()) { thread_.join(); }
 }
 
-/**
- * @brief Internal function run in the background thread.
- * Periodically calls Beep() at the specified interval.
- */
-void Heartbeat::Run() {
-  std::unique_lock<std::mutex> lock(mutex_);
+// ---------------------------------------------------------------------------
+// Internal thread
+// ---------------------------------------------------------------------------
 
-  while (running_) {
+void Heartbeat::Run(std::stop_token stop_token) {
+  while (!stop_token.stop_requested()) {
     Beep();
 
-    // Wait for next interval or stop signal
-    cv_.wait_for(lock, interval_, [this] { return !running_; });
+    // std::this_thread::sleep_until lets the OS wake us precisely;
+    // we check the stop token after each sleep so Stop() is responsive.
+    std::this_thread::sleep_for(interval_);
   }
 }
 
-/**
- * @brief Sends a heartbeat by invoking the callback with JSON payload.
- * The payload contains:
- * - "status": always "online"
- * - "timestamp": milliseconds since epoch
- */
+// ---------------------------------------------------------------------------
+// Beep
+// ---------------------------------------------------------------------------
+
 void Heartbeat::Beep() {
   try {
-    nlohmann::json heartbeat_data;
-    heartbeat_data["status"] = "online";
-    heartbeat_data["timestamp"] =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now().time_since_epoch())
-            .count();
+    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
 
-    callback_(heartbeat_data);
-  } catch (const std::exception& e) {
-    log_.error("Error in Beep: {}", e.what());
-  }
+    callback_(nlohmann::json{
+        {"status", "online"},
+        {"timestamp", now_ms},
+    });
+  } catch (const std::exception& e) { log_.error("Beep failed: {}", e.what()); }
 }
 
 }  // namespace aember::device_health

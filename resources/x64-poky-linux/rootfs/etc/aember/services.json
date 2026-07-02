@@ -1,8 +1,8 @@
 {
   "processes": [
     {
-      "name": "echo-aember",
-      "executable": "/usr/bin/echo-aember",
+      "name": "aember-child-demo",
+      "executable": "/usr/bin/aember-child-demo",
       "args": [],
       "working_directory": "",
       "environment": {},

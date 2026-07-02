@@ -24,7 +24,6 @@ target_include_directories(
 target_link_libraries(
   ${CONFIG_TARGET}
   PUBLIC aember-libs::utils::logging
-         # aember-libs::utils::service
          nlohmann_json::nlohmann_json
 )
 

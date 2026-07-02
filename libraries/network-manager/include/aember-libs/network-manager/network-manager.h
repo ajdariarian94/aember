@@ -1,14 +1,13 @@
 /**
- * @file network_manager.h
+ * @file network-manager.h
  * @author Arian Ajdari
- * @brief Library definition for NetworkManager - brings up network interfaces
- *        and monitors internet connectivity for PID1.
- * @version 0.2
- * @date 2025-07-18
+ * @brief NetworkManager — brings up network interfaces and monitors
+ *        internet connectivity for PID1.
+ * @version 0.3
+ * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
-
 #pragma once
 
 #include <aember-libs/utils/logging/logging.h>
@@ -24,32 +23,23 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <functional>
 #include <mutex>
+#include <stop_token>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 namespace aember::network {
 
-// ---------------------------------------------------------------------------
-// NetworkManager
-// ---------------------------------------------------------------------------
-
 /**
- * @class NetworkManager
- * @brief Brings up configured network interfaces (DHCP or static, via netlink
- *        with udhcpc fallback), creates bridge interfaces for LXC containers,
- *        and periodically monitors internet connectivity via TCP probe.
+ * Brings up configured network interfaces (DHCP or static, via netlink
+ * with udhcpc fallback), creates bridge interfaces for LXC containers,
+ * and periodically monitors internet connectivity via TCP probe.
  *
- * Usage:
- * @code
- *   NetworkManager net(config_json, [](const ConnectivityStatus& s) {
- *     if (!s.online) spdlog::warn("Internet lost!");
- *   });
- *   net.Start();
- * @endcode
+ * Uses std::jthread for the monitor loop — no manual running_ flag or
+ * condition variable needed.
  */
 class NetworkManager {
  public:
@@ -61,105 +51,98 @@ class NetworkManager {
   using InterfaceState = aember::utils::network::InterfaceState;
   using Logger = aember::utils::logging::Logger;
 
-  explicit NetworkManager(
-      const nlohmann::json& config,
-      std::function<void(const ConnectivityStatus&)> on_status = nullptr);
+  /// move_only_function — callback is never copied.
+  using StatusCallback =
+      std::move_only_function<void(const ConnectivityStatus&)>;
 
+  explicit NetworkManager(const nlohmann::json& config,
+                          StatusCallback on_status = nullptr);
   ~NetworkManager();
 
   NetworkManager(const NetworkManager&) = delete;
   NetworkManager& operator=(const NetworkManager&) = delete;
 
-  /**
-   * @brief Brings up interfaces, creates bridges, starts connectivity monitor.
-   * @throws std::runtime_error if a required interface fails to come up.
-   */
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
+
+  /** Brings up interfaces, creates bridges, starts connectivity monitor. */
   void Start();
 
-  /**
-   * @brief Stops the connectivity monitor thread.
-   */
+  /** Stops the connectivity monitor thread. */
   void Stop();
 
-  /**
-   * @brief Returns the last known connectivity status.
-   */
-  ConnectivityStatus GetStatus() const;
+  // ---------------------------------------------------------------------------
+  // Queries
+  // ---------------------------------------------------------------------------
 
-  /**
-   * @brief Returns true if internet is reachable.
-   */
-  bool IsOnline() const;
+  [[nodiscard]] ConnectivityStatus GetStatus() const;
+  [[nodiscard]] bool IsOnline() const;
+  [[nodiscard]] NetworkInfo GetNetworkInfo();
 
-  /**
-   * @brief Returns a full snapshot of the active interface.
-   */
-  NetworkInfo GetNetworkInfo();
-
-  /**
-   * @brief Blocks until internet connectivity is confirmed or timeout expires.
-   */
+  /** Blocks until internet connectivity is confirmed or timeout expires. */
   bool WaitForConnectivity(
       std::chrono::milliseconds timeout = std::chrono::seconds(60));
 
  private:
-  // --- Config parsing -------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Config parsing
+  // ---------------------------------------------------------------------------
+
   void ParseConfig(const nlohmann::json& config);
 
-  // --- Interface bring-up ---------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Interface bring-up
+  // ---------------------------------------------------------------------------
+
   void BringUpInterfaces();
   bool BringUpInterface(const InterfaceConfig& iface);
-  bool NetlinkSetInterfaceUp(const std::string& iface_name);
+  bool NetlinkSetInterfaceUp(std::string_view iface_name);
   bool NetlinkSetStaticAddress(const InterfaceConfig& iface);
   bool RunUdhcpc(const InterfaceConfig& iface);
   bool FallbackIpCommand(const std::vector<std::string>& args);
   void WriteResolvConf(const InterfaceConfig& iface);
 
-  // --- Bridge management ----------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Bridge management
+  // ---------------------------------------------------------------------------
 
-  /**
-   * @brief Creates all bridges configured in the JSON config.
-   */
   void CreateBridges();
-
-  /**
-   * @brief Creates a single bridge and assigns its IP address.
-   *        Uses ip link add type bridge + ip addr add + ip link set up.
-   *        Skips gracefully if bridge already exists.
-   * @return true on success.
-   */
   bool CreateBridge(const BridgeConfig& bridge);
+  bool InterfaceExists(std::string_view name);
 
-  /**
-   * @brief Returns true if the named interface already exists in the kernel.
-   */
-  bool InterfaceExists(const std::string& name);
+  // ---------------------------------------------------------------------------
+  // Connectivity monitor
+  // ---------------------------------------------------------------------------
 
-  // --- Connectivity monitor -------------------------------------------------
-  void MonitorLoop();
-  int PingOnce(const std::string& target_ip, int timeout_ms = 2000);
-  int Ping(const std::string& target_ip);
+  void MonitorLoop(std::stop_token stop_token);
+  int PingOnce(std::string_view target_ip, int timeout_ms = 2000);
+  int Ping(std::string_view target_ip);
 
-  // --- Helpers --------------------------------------------------------------
-  std::string FirstUpInterface() const;
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  [[nodiscard]] std::string FirstUpInterface() const;
   void UpdateStatus(bool online, int rtt_ms);
-  int GetInterfaceIndex(const std::string& iface_name);
+  int GetInterfaceIndex(std::string_view iface_name);
 
-  // --- Members --------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Members
+  // ---------------------------------------------------------------------------
+
   NetworkConfig config_;
   std::vector<InterfaceState> iface_states_;
 
-  std::function<void(const ConnectivityStatus&)> on_status_;
+  StatusCallback on_status_;
 
   ConnectivityStatus status_;
   mutable std::mutex status_mutex_;
 
-  std::atomic_bool running_{false};
-  std::thread monitor_thread_;
-  std::condition_variable cv_;
-  std::mutex cv_mutex_;
+  // jthread carries its own stop_token — no running_ flag or cv needed.
+  std::jthread monitor_thread_;
 
-  Logger log_;
+  mutable Logger log_{"network-manager"};
 };
 
 }  // namespace aember::network

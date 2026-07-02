@@ -3,7 +3,7 @@
  * @author Arian Ajdari
  * @brief ServiceManager — pure coordinator over ProcessManager and
  *        ContainerManager. Owns no configs, no PIDs, no handles.
- * @version 0.3
+ * @version 0.4
  * @date 2026-06-12
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -20,6 +20,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -28,37 +29,25 @@ namespace aember::service_manager {
 /**
  * ServiceManager is a pure coordinator.
  *
- * It owns no process handles, no container handles, no PIDs, and no configs
- * beyond what is needed to route a call to the right sub-manager.
+ * Owns no process handles, no container handles, no PIDs, no configs.
  *
  * Responsibilities:
- *  - maintain a registry of known names and whether each is a process or
- *    container (so calls can be routed correctly)
+ *  - registry of known names and whether each is a process or container
  *  - mirror lifecycle state from sub-manager callbacks
  *  - orchestrate bulk start/stop in dependency order
  *  - dispatch ChildSupervisor PID exit events to the right sub-manager
  *  - notify callers of state changes via StateChangeCallback
- *
- * Everything else lives in ProcessManager, ContainerManager, or
- * DependencyResolver.
  */
 class ServiceManager {
  public:
   using ProcessState = aember::process_manager::ProcessManager::ProcessState;
   using Logger = aember::utils::logging::Logger;
 
-  using StateChangeCallback = std::function<void(const std::string& /*name*/,
-                                                 ProcessState /*old_state*/,
-                                                 ProcessState /*new_state*/)>;
+  /// move_only_function — never copied.
+  using StateChangeCallback = std::move_only_function<void(
+      const std::string& /*name*/, ProcessState /*old_state*/,
+      ProcessState /*new_state*/)>;
 
-  /**
-   * All collaborators are injected; ServiceManager does not construct them.
-   *
-   * @param process_manager     Owns process spawning and PID tracking.
-   * @param container_manager   Owns LXC container lifecycle and init PIDs.
-   * @param dependency_resolver Evaluates start order and dependency checks.
-   * @param supervisor          Delivers SIGCHLD notifications.
-   */
   ServiceManager(aember::process_manager::ProcessManager& process_manager,
                  aember::container_manager::ContainerManager& container_manager,
                  DependencyResolver& dependency_resolver,
@@ -73,51 +62,39 @@ class ServiceManager {
   // Registry
   // ---------------------------------------------------------------------------
 
-  /**
-   * Register a native process by name.
-   * The config must already be registered with ProcessManager::AddProcess
-   * before calling this.
-   */
-  bool AddProcess(const std::string& name);
+  /** Config must already be in ProcessManager before calling this. */
+  bool AddProcess(std::string_view name);
 
-  /**
-   * Register a container by name.
-   * The config must already be registered with ContainerManager::AddContainer
-   * before calling this.
-   */
-  bool AddContainer(const std::string& name);
+  /** Config must already be in ContainerManager before calling this. */
+  bool AddContainer(std::string_view name);
 
-  /** Deregister a process or container. Stops it first if running. */
-  bool Remove(const std::string& name);
+  /** Deregister. Stops first if running. */
+  bool Remove(std::string_view name);
 
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
-  bool Start(const std::string& name);
-  bool Stop(const std::string& name);
-  bool Restart(const std::string& name);
+  bool Start(std::string_view name);
+  bool Stop(std::string_view name);
+  bool Restart(std::string_view name);
 
-  /** Start every registered entry in dependency order. */
   void StartAll();
-
-  /** Stop every running entry in reverse dependency order. */
   void StopAll();
 
   // ---------------------------------------------------------------------------
   // Queries
   // ---------------------------------------------------------------------------
 
-  [[nodiscard]] bool Has(const std::string& name) const;
-  [[nodiscard]] bool IsContainer(const std::string& name) const;
-  [[nodiscard]] ProcessState GetState(const std::string& name) const;
+  [[nodiscard]] bool Has(std::string_view name) const;
+  [[nodiscard]] bool IsContainer(std::string_view name) const;
+  [[nodiscard]] ProcessState GetState(std::string_view name) const;
   [[nodiscard]] std::vector<std::string> GetNames() const;
 
   // ---------------------------------------------------------------------------
   // SIGCHLD integration
   // ---------------------------------------------------------------------------
 
-  /** Called by ChildSupervisor when a tracked PID exits. */
   void HandleExit(pid_t pid, int exit_code);
 
   // ---------------------------------------------------------------------------
@@ -127,28 +104,17 @@ class ServiceManager {
   void SetStateChangeCallback(StateChangeCallback callback);
 
  private:
-  // ---------------------------------------------------------------------------
-  // Internal helpers
-  // ---------------------------------------------------------------------------
-
-  bool StartInternal(const std::string& name, bool is_restart = false);
-  bool StopInternal(const std::string& name);
+  bool StartInternal(std::string_view name, bool is_restart = false);
+  bool StopInternal(std::string_view name);
 
   void MirrorState(const std::string& name, ProcessState new_state);
-
-  // ---------------------------------------------------------------------------
-  // Members
-  // ---------------------------------------------------------------------------
 
   aember::process_manager::ProcessManager& process_manager_;
   aember::container_manager::ContainerManager& container_manager_;
   DependencyResolver& dependency_resolver_;
   aember::child_supervisor::ChildSupervisor& child_supervisor_;
 
-  /// All known names → current mirrored state.
   std::map<std::string, ProcessState> states_;
-
-  /// Names registered as containers (the rest are processes).
   std::unordered_set<std::string> containers_;
 
   mutable std::mutex mutex_;
