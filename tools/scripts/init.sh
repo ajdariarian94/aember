@@ -42,6 +42,16 @@ fi
 
 aember --install-completion > /dev/null 2>&1
 
+# GitHub token for private repo artifact downloads
+# Remove when repo goes public before CppCon
+export GITHUB_TOKEN="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"
+
+# Authenticate gh CLI if token is available
+if [ -n "$GITHUB_TOKEN" ]; then
+    echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null
+fi
+
+
 EOF
 
 # Source helper scripts
