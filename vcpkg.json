@@ -1,6 +1,7 @@
 {
   "name": "aember",
   "version": "1.0.0",
+  "builtin-baseline": "89d66b557ecb7f50c94c480f0649b080015ec1b8",
   "dependencies": [
     "cli11",
     "gtest",

@@ -153,9 +153,10 @@ void AemberMonitor::Log(const nlohmann::json& payload) const {
     const auto& services = payload["services"];
     log_.info("  Services     │ {} service(s)", services.size());
     for (const auto& svc : services) {
-      log_.info("    ├─ {} [{}]",
+      log_.info("    ├─ {} [{}] ({})",
                 svc["name"].get<std::string>(),
-                svc["state"].get<std::string>());
+                svc["state"].get<std::string>(),
+                svc["type"].get<std::string>());
     }
   }
 

@@ -6,6 +6,7 @@
  */
 
 #include <aember-libs/aember-init/aember-init.h>
+#include <aember-libs/device-health/aember-monitor.h>
 
 #include <algorithm>
 #include <format>
@@ -88,8 +89,6 @@ void AemberInit::StartRoot() {
   const bool spawn_debug_shell =
       debug_shell_ && debug_shell_->CheckDebugShell();
 
-  // Each init phase returns Result<>. or_else logs and continues — matching
-  // the original "warn and continue" behaviour for non-fatal failures.
   InitMounts().or_else([this](const Error& e) -> Result<> {
     log_.warn("Mount phase failed: {}", e.message);
     return {};
@@ -100,7 +99,6 @@ void AemberInit::StartRoot() {
     return {};
   });
 
-  // Service stack failure is fatal — no point continuing without it.
   if (auto r = InitServiceStack(); !r) {
     log_.error("Service stack init failed: {}", r.error().message);
     return;
@@ -126,6 +124,9 @@ void AemberInit::StartRoot() {
   });
 
   running_.store(true);
+
+  // Initialize AemberMonitor — reads PID1 stats from /proc.
+  monitor_ = std::make_unique<aember::device_health::AemberMonitor>();
 
   heartbeat_.emplace([this](const nlohmann::json& p) { OnHeartbeat(p); });
   heartbeat_->Start();
@@ -166,6 +167,8 @@ void AemberInit::Stop() {
     network_manager_->Stop();
     network_manager_.reset();
   }
+
+  monitor_.reset();
 
   // Destroy in reverse construction order.
   service_manager_.reset();
@@ -284,8 +287,6 @@ AemberInit::Result<> AemberInit::LoadAndRegisterProcesses(
   auto configs = process_manager_->LoadProcesses(std::string{path});
   log_.info("Loaded {} process config(s) from {}", configs.size(), path);
 
-  // Register each config with ProcessManager then tell ServiceManager the name.
-  // Filter out failed registrations, log them, and continue with the rest.
   const auto registered =
       configs | std::views::filter([&](const auto& cfg) {
         if (!process_manager_->AddProcess(cfg)) {
@@ -352,8 +353,45 @@ void AemberInit::RunLoop() {
 // Callbacks
 // ---------------------------------------------------------------------------
 
-void AemberInit::OnHeartbeat(const nlohmann::json& payload) {
-  log_.info("Heartbeat: {}", payload.dump());
+void AemberInit::OnHeartbeat(const nlohmann::json& base) {
+  if (!monitor_) return;
+
+  // Collect PID1 stats via /proc.
+  auto payload = monitor_->Snapshot();
+
+  // Enrich with network status.
+  if (network_manager_) {
+    const auto status = network_manager_->GetStatus();
+    const auto net_info = network_manager_->GetNetworkInfo();
+    payload["network"] = {
+        {"online", status.online},
+        {"interface", status.interface},
+        {"rtt_ms", status.rtt_ms},
+        {"ip", net_info.ip_address},
+    };
+  }
+
+  // Enrich with service states.
+  if (service_manager_) {
+    auto services = nlohmann::json::array();
+    for (const auto& name : service_manager_->GetNames()) {
+      const auto state = service_manager_->GetState(name);
+      const auto type =
+          service_manager_->IsContainer(name) ? "container" : "process";
+      services.push_back({
+          {"name", name},
+          {"state", aember::utils::process::ToString(state)},
+          {"type", type},
+      });
+    }
+    payload["services"] = services;
+  }
+
+  // Merge heartbeat base fields (timestamp, status).
+  payload.merge_patch(base);
+
+  // Log the enriched dashboard.
+  monitor_->Log(payload);
 }
 
 void AemberInit::OnServiceStateChange(const std::string& name,
@@ -367,12 +405,7 @@ void AemberInit::OnServiceStateChange(const std::string& name,
 
 void AemberInit::OnNetworkStatus(
     const aember::utils::network::ConnectivityStatus& status) {
-  if (status.online) {
-    log_.info(
-        "Network: online via {} rtt={}ms", status.interface, status.rtt_ms);
-  } else {
-    log_.warn("Network: internet connectivity lost");
-  }
+  if (!status.online) { log_.warn("Network: internet connectivity lost"); }
 }
 
 void AemberInit::OnContainerStateChange(const std::string& name,

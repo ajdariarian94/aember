@@ -9,6 +9,7 @@
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/container-manager/container-manager.h>
+#include <aember-libs/device-health/aember-monitor.h>
 #include <aember-libs/device-health/heartbeat.h>
 #include <aember-libs/module-loader/module-loader.h>
 #include <aember-libs/mount-manager/mount-manager.h>
@@ -117,6 +118,7 @@ class AemberInit {
   std::unique_ptr<aember::network::NetworkManager> network_manager_;
   std::unique_ptr<aember::root_manager::RootManager> root_manager_;
 
+  std::unique_ptr<aember::device_health::AemberMonitor> monitor_;
   // ---------------------------------------------------------------------------
   // Service stack — order matters: process_manager_ and dependency_resolver_
   // must outlive service_manager_

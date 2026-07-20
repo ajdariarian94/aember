@@ -706,7 +706,6 @@ int NetworkManager::PingOnce(std::string_view target_ip, int timeout_ms) {
 
   if (err != 0 && err != ECONNREFUSED) { return -1; }
 
-  log_.debug("TCP probe: {} reachable rtt={}ms", target_ip, rtt);
   return rtt;
 }
 
