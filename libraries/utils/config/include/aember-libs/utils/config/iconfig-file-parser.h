@@ -14,10 +14,11 @@
 
 #pragma once
 
-#include <nlohmann/json.hpp>
-#include <string>
-
 #include <aember-libs/utils/config/config-error.h>
+
+#include <nlohmann/json.hpp>
+
+#include <string>
 
 namespace aember::utils::config {
 

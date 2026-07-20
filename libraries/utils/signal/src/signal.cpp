@@ -10,9 +10,9 @@
 
 #include <aember-libs/utils/signal/signal.h>
 
-#include <pthread.h>
 #include <csignal>
-#include <iostream>
+
+#include <pthread.h>
 
 namespace aember::utils::signal {
 

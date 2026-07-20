@@ -1,6 +1,6 @@
-#include <aember-libs-tests/service-manager/service-manager.h>
-
 #include <chrono>
+
+#include <aember-libs-tests/service-manager/service-manager.h>
 
 namespace aember_test::service_manager {
 

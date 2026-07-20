@@ -10,7 +10,6 @@
 
 #include <aember-libs/service-manager/dependency-resolver.h>
 
-#include <ranges>
 #include <stdexcept>
 #include <unordered_map>
 

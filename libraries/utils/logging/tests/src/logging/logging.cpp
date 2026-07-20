@@ -1,9 +1,9 @@
-#include <aember-libs-tests/utils/logging/logging.h>
-
 #include <spdlog/spdlog.h>
 
 #include <filesystem>
 #include <fstream>
+
+#include <aember-libs-tests/utils/logging/logging.h>
 
 namespace fs = std::filesystem;
 

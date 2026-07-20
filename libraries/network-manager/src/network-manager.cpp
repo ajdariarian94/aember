@@ -10,18 +10,6 @@
 
 #include <aember-libs/network-manager/network-manager.h>
 
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <net/if.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-#include <linux/netlink.h>
-#include <linux/rtnetlink.h>
-
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -33,6 +21,17 @@
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace aember::network {
 

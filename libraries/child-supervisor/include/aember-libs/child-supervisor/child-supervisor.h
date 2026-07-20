@@ -9,12 +9,12 @@
 
 #include <aember-libs/utils/logging/logging.h>
 
-#include <sys/types.h>
-
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+
+#include <sys/types.h>
 
 namespace aember::child_supervisor {
 

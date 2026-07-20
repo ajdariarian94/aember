@@ -10,15 +10,14 @@
 
 #include <aember-libs/module-loader/module-loader.h>
 
-#include <fcntl.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <algorithm>
 #include <format>
 #include <fstream>
 #include <ranges>
-#include <sstream>
+
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace aember::module_loader {
 

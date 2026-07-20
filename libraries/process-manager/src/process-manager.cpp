@@ -10,15 +10,15 @@
 
 #include <aember-libs/process-manager/process-manager.h>
 
+#include <ranges>
+#include <thread>
+
 #include <errno.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-#include <ranges>
-#include <thread>
 
 namespace aember::process_manager {
 

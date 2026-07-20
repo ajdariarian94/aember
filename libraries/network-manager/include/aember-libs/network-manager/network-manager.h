@@ -21,7 +21,6 @@
 
 #include <nlohmann/json.hpp>
 
-#include <atomic>
 #include <chrono>
 #include <functional>
 #include <mutex>

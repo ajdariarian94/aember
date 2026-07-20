@@ -10,13 +10,12 @@
 
 #include <aember-libs/device-health/aember-monitor.h>
 
-#include <unistd.h>
-
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <ranges>
 #include <sstream>
+
+#include <unistd.h>
 
 namespace aember::device_health {
 

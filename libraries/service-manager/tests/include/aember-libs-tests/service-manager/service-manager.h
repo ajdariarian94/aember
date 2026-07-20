@@ -3,15 +3,15 @@
 #include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/service-manager/service-manager.h>
 
-#include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
+#include <gtest/gtest.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <atomic>
-#include <chrono>
-#include <thread>
 
 namespace aember_test::service_manager {
 
