@@ -1,9 +1,11 @@
 #pragma once
 
 #include <aember-libs/service-manager/service.h>
-#include <gtest/gtest.h>
+
 #include <chrono>
 #include <thread>
+
+#include <gtest/gtest.h>
 
 namespace aember_test::service_manager {
 

@@ -7,12 +7,12 @@
 
 #include <aember-libs/aember-init/aember-init.h>
 
-#include <sys/wait.h>
-
 #include <algorithm>
 #include <format>
 #include <fstream>
 #include <ranges>
+
+#include <sys/wait.h>
 
 namespace aember::aember_init {
 

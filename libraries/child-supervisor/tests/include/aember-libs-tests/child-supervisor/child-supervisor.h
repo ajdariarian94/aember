@@ -1,14 +1,16 @@
 #pragma once
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
+
+#include <chrono>
+#include <thread>
+#include <vector>
+
 #include <gtest/gtest.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <chrono>
-#include <thread>
-#include <vector>
 
 namespace aember_test::child_supervisor {
 

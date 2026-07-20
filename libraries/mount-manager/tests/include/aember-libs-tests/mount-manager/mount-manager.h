@@ -1,13 +1,15 @@
 #pragma once
 
 #include <aember-libs/mount-manager/mount-manager.h>
+
+#include <fstream>
+#include <memory>
+#include <string>
+
 #include <gtest/gtest.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <fstream>
-#include <memory>
-#include <string>
 
 namespace aember_test::mount_manager {
 

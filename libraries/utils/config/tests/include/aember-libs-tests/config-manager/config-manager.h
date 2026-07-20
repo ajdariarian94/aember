@@ -2,11 +2,11 @@
 
 #include <aember-libs/config-manager/config-manager.h>
 
-#include <gtest/gtest.h>
-
 #include <fstream>
 #include <memory>
 #include <string>
+
+#include <gtest/gtest.h>
 
 namespace aember_test::config_manager {
 

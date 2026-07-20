@@ -10,6 +10,10 @@
 
 #include <aember-libs/root-manager/root-manager.h>
 
+#include <array>
+#include <format>
+#include <fstream>
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -18,10 +22,6 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include <array>
-#include <format>
-#include <fstream>
 
 namespace aember::root_manager {
 

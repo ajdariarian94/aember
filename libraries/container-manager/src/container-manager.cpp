@@ -10,14 +10,13 @@
 
 #include <aember-libs/container-manager/container-manager.h>
 
-#include <lxc/lxccontainer.h>
+#include <format>
+#include <fstream>
 
+#include <lxc/lxccontainer.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include <format>
-#include <fstream>
 
 namespace aember::container_manager {
 

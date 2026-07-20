@@ -56,7 +56,17 @@
                     "--compile-commands-dir=${workspaceFolder}/build/configure/x64-poky-linux/Release",
                     "--clang-tidy",
                     "--header-insertion=never"
-                ]
+                ],
+
+                // Format C/C++ files on save using clangd (.clang-format rules).
+                "[cpp]": {
+                    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
+                    "editor.formatOnSave": true
+                },
+                "[c]": {
+                    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
+                    "editor.formatOnSave": true
+                }
             }
         }
     }

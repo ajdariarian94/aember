@@ -1,10 +1,10 @@
 #pragma once
 
-#include <gtest/gtest.h>
-
 #include <aember-libs/utils/logging/logging.h>
 
 #include <string>
+
+#include <gtest/gtest.h>
 
 namespace aember_test::utils {
 

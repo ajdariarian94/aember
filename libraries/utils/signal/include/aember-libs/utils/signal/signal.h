@@ -10,8 +10,6 @@
 
 #pragma once
 
-#include <signal.h>
-
 #include <atomic>
 #include <functional>
 #include <map>

@@ -1,9 +1,8 @@
 #include <aember-libs/device-health/aember-monitor.h>
 #include <aember-libs/utils/logging/logging.h>
 
-#include <meta>
-
 #include <chrono>
+#include <meta>
 #include <string>
 #include <string_view>
 #include <thread>

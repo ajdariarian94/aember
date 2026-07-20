@@ -10,8 +10,6 @@
 
 #pragma once
 
-#include <string>
-
 namespace aember::utils::module {
 
 enum class ModuleErrorCode {

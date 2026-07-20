@@ -14,11 +14,10 @@
 
 #pragma once
 
-#include <memory>
-#include <optional>
-
 #include <aember-libs/utils/config/config-error.h>
 #include <aember-libs/utils/config/iconfig-file-parser.h>
+
+#include <optional>
 
 namespace aember::utils::config {
 

@@ -1,7 +1,7 @@
-#include <aember-libs-tests/utils/signal/signal.h>
-
 #include <csignal>
 #include <thread>
+
+#include <aember-libs-tests/utils/signal/signal.h>
 
 namespace aember_test::utils {
 
