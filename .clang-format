@@ -20,7 +20,7 @@ IncludeCategories:
   - Regex:    '^<aember-libs/'
     Priority: 1
     SortPriority: 1
-  - Regex:    '^<(nlohmann|spdlog|CLI|meta)/'
+  - Regex:    '^<(nlohmann|spdlog|CLI|meta|gtest)/'
     Priority: 2
     SortPriority: 2
   - Regex:    '^<[a-z_]+>'

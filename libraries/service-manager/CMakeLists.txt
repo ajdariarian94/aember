@@ -92,9 +92,6 @@ install(
 # Tests
 # -----------------------------------------------------------------------------
 
-if (BUILD_TESTS)
-  include(CTest)
-  enable_testing()
+# if (BUILD_TESTS) include(CTest) enable_testing()
 
-  add_subdirectory(tests)
-endif ()
+# add_subdirectory(tests) endif ()

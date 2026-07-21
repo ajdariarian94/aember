@@ -2,6 +2,7 @@
 
 #include <aember-libs/device-health/heartbeat.h>
 
+#include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
 #include <atomic>
@@ -9,8 +10,6 @@
 #include <mutex>
 #include <thread>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 namespace aember_test::device_health {
 

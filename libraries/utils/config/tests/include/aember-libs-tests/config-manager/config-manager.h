@@ -1,19 +1,18 @@
 #pragma once
 
-#include <aember-libs/config-manager/config-manager.h>
-
-#include <fstream>
-#include <memory>
-#include <string>
+#include <aember-libs/utils/config/config-manager.h>
 
 #include <gtest/gtest.h>
+
+#include <fstream>
+#include <string>
 
 namespace aember_test::config_manager {
 
 class ConfigManagerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    manager_ = std::make_unique<aember::config_manager::ConfigManager>();
+    manager_ = std::make_unique<aember::utils::config::ConfigManager>();
 
     // Create a temporary directory for test files
     test_dir_ = "/tmp/config_test_" + std::to_string(getpid());

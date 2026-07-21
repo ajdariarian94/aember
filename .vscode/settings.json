@@ -2,49 +2,49 @@
   "python.terminal.activateEnvironment": false,
   "testMate.cpp.test.advancedExecutables": [
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/child-supervisor-unittest",
+      "pattern": "build/package/x64-poky-linux/Debug/initramfs_root/usr/bin/child-supervisor-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-child-supervisor"]
       }
     },
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/config-manager-unittest",
+      "pattern": "build/package/x64-poky-linux/Debug/initramfs_root/usr/bin/config-manager-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-config-manager"]
       }
     },
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/heartbeat-unittest",
+      "pattern": "build/package/x64-poky-linux/Debug/initramfs_root/usr/bin/heartbeat-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-heartbeat"]
       }
     },
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/logging-unittest",
+      "pattern": "build/package/x64-poky-linux/Debug/initramfs_root/usr/bin/logging-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-logging"]
       }
     },
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/mount-manager-unittest",
+      "pattern": "build/package/x64-poky-linux/Debug/initramfs_root/usr/bin/mount-manager-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-mount-manager"]
       }
     },
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/service-manager-unittest",
+      "pattern": "build/package/x64-poky-linux/Debug/initramfs_root/usr/bin/service-manager-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-service-manager"]
       }
     },
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/service-unittest",
+      "pattern": "build/package/x64-poky-linux/Debug/initramfs_root/usr/bin/service-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-service"]
       }
     },
     {
-      "pattern": "build/package/x64-linux/Debug/initramfs_root/usr/bin/signal-unittest",
+      "pattern": "build/package/x64-poky-linux/Debug/initramfs_root/usr/bin/signal-unittest",
       "runTask": {
         "before": ["run-test-in-chroot-signal"]
       }

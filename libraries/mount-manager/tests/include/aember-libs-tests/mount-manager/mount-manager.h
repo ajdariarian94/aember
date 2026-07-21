@@ -2,11 +2,12 @@
 
 #include <aember-libs/mount-manager/mount-manager.h>
 
+#include <gtest/gtest.h>
+
 #include <fstream>
 #include <memory>
 #include <string>
 
-#include <gtest/gtest.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>

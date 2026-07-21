@@ -3,12 +3,11 @@
 #include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/service-manager/service-manager.h>
 
-#include <atomic>
+#include <gtest/gtest.h>
+
 #include <chrono>
 #include <thread>
 
-#include <gtest/gtest.h>
-#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>

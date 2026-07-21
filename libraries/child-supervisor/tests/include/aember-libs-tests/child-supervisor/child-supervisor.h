@@ -2,11 +2,12 @@
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
 
+#include <gtest/gtest.h>
+
 #include <chrono>
 #include <thread>
 #include <vector>
 
-#include <gtest/gtest.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>

@@ -18,7 +18,7 @@ target_include_directories(
 
 target_link_libraries(
   config-manager-unittest
-  PRIVATE aember-libs::config-manager
+  PRIVATE aember-libs::utils::config
           GTest::gtest_main
 )
 

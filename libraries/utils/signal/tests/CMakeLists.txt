@@ -8,7 +8,7 @@ find_package(
 
 add_executable(
   signal-unittest
-  src/signal/signal.cpp
+  src/signal.cpp
 )
 
 target_include_directories(

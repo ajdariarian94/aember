@@ -2,9 +2,9 @@
 
 #include <aember-libs/utils/logging/logging.h>
 
-#include <string>
-
 #include <gtest/gtest.h>
+
+#include <string>
 
 namespace aember_test::utils {
 

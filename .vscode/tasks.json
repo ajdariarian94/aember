@@ -7,7 +7,7 @@
       "command": "sudo",
       "args": [
         "chroot",
-        "${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root",
+        "${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root",
         "/usr/bin/child-supervisor-unittest"
       ],
       "problemMatcher": []
@@ -18,7 +18,7 @@
       "command": "sudo",
       "args": [
         "chroot",
-        "${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root",
+        "${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root",
         "/usr/bin/config-manager-unittest"
       ],
       "problemMatcher": []
@@ -29,7 +29,7 @@
       "command": "sudo",
       "args": [
         "chroot",
-        "${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root",
+        "${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root",
         "/usr/bin/heartbeat-unittest"
       ],
       "problemMatcher": []
@@ -40,7 +40,7 @@
       "command": "sudo",
       "args": [
         "chroot",
-        "${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root",
+        "${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root",
         "/usr/bin/logging-unittest"
       ],
       "problemMatcher": []
@@ -52,7 +52,7 @@
       "args": [
         "sh",
         "-c",
-        "mount -t proc proc ${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root/proc 2>/dev/null || true && chroot ${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root /usr/bin/mount-manager-unittest; RESULT=$?; umount ${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root/proc 2>/dev/null || true; exit $RESULT"
+        "mount -t proc proc ${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root/proc 2>/dev/null || true && chroot ${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root /usr/bin/mount-manager-unittest; RESULT=$?; umount ${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root/proc 2>/dev/null || true; exit $RESULT"
       ],
       "problemMatcher": []
     },
@@ -62,7 +62,7 @@
       "command": "sudo",
       "args": [
         "chroot",
-        "${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root",
+        "${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root",
         "/usr/bin/service-manager-unittest"
       ],
       "problemMatcher": []
@@ -73,7 +73,7 @@
       "command": "sudo",
       "args": [
         "chroot",
-        "${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root",
+        "${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root",
         "/usr/bin/service-unittest"
       ],
       "problemMatcher": []
@@ -84,7 +84,7 @@
       "command": "sudo",
       "args": [
         "chroot",
-        "${workspaceFolder}/build/package/x64-linux/Debug/initramfs_root",
+        "${workspaceFolder}/build/package/x64-poky-linux/Debug/initramfs_root",
         "/usr/bin/signal-unittest"
       ],
       "problemMatcher": []

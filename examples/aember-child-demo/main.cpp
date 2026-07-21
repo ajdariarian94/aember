@@ -1,12 +1,9 @@
 #include <aember-libs/device-health/aember-monitor.h>
 #include <aember-libs/utils/logging/logging.h>
 
-#include <chrono>
 #include <meta>
-#include <string>
 #include <string_view>
 #include <thread>
-#include <vector>
 
 using SelfStats = aember::device_health::AemberMonitorClient::SelfStats;
 

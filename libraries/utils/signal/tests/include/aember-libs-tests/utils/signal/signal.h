@@ -2,11 +2,8 @@
 
 #include <aember-libs/utils/signal/signal.h>
 
-#include <atomic>
-#include <memory>
-#include <thread>
-
 #include <gtest/gtest.h>
+
 #include <signal.h>
 
 namespace aember_test::utils {
