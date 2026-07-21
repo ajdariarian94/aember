@@ -54,6 +54,7 @@ RUN apt update && apt install -y    \
     doxygen                         \
     gawk                            \
     gdb                             \
+    gdb-multiarch                   \
     genext2fs                       \
     graphviz                        \
     gcc-aarch64-linux-gnu           \         
