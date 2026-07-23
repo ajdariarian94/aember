@@ -24,6 +24,8 @@ keypairs
 **/conf/local.conf
 **/conf/templateconf.cfg
 
+*.env
+
 *.log
 *.lock
 *.sock

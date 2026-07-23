@@ -42,9 +42,15 @@ fi
 
 aember --install-completion > /dev/null 2>&1
 
+# Load secrets from .env if present (not committed to repo)
+ENV_FILE="$WORKSPACE_DIR/tools/scripts/.env"
+if [ -f "$ENV_FILE" ]; then
+    source "$ENV_FILE"
+fi
+
 # GitHub token for private repo artifact downloads
 # Remove when repo goes public before CppCon
-export GITHUB_TOKEN="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"
+export GITHUB_TOKEN="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"
 
 # Authenticate gh CLI if token is available
 if [ -n "$GITHUB_TOKEN" ]; then

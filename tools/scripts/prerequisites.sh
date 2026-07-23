@@ -54,3 +54,27 @@ if [ -f ".gitmodules" ]; then
 else
     echo "No git submodules found."
 fi
+
+###############################################################################
+# .env secrets file
+###############################################################################
+
+ENV_FILE="$(dirname "$0")/../scripts/.env"
+ENV_EXAMPLE="$(dirname "$0")/../scripts/.env.example"
+
+if [ ! -f "$ENV_FILE" ]; then
+    if [ -f "$ENV_EXAMPLE" ]; then
+        cp "$ENV_EXAMPLE" "$ENV_FILE"
+        echo "Created .env from .env.example — fill in your GITHUB_TOKEN"
+    else
+        cat > "$ENV_FILE" << 'ENVEOF'
+# Aember secrets — never commit this file
+# Fill in your values and restart the dev container
+
+export GITHUB_TOKEN=""
+ENVEOF
+        echo "Created empty .env — fill in your GITHUB_TOKEN"
+    fi
+else
+    echo ".env already exists — skipping"
+fi

@@ -1,12 +1,22 @@
 {
     "name": "aember-dev",
-    "build": {
-        "dockerfile": "Dockerfile",
-        "context": "..",
-        "args": {
-            "DOCKER_GID": "${localEnv:DOCKER_GID}"
-        }
-    },
+
+    // ---------------------------------------------------------------------------
+    // Image source — toggle between prebuilt and local build:
+    //
+    // OPTION A: Pull prebuilt image from GitHub Container Registry
+    "image": "ghcr.io/ajdariarian94/aember-dev:latest",
+    //
+    // OPTION B: Build from Dockerfile (when updating tools/dependencies)
+    //"build": {
+    //    "dockerfile": "Dockerfile",
+    //    "context": "..",
+    //    "args": {
+    //        "DOCKER_GID": "${localEnv:DOCKER_GID}"
+    //    }
+    //},
+    // ---------------------------------------------------------------------------
+
     "runArgs": [
         "--net=host",
         "--privileged",
