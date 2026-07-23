@@ -9,4 +9,4 @@
 [submodule "yocto/poky"]
 	path = yocto/poky
 	url = git@github.com:ajdariarian94/poky.git
-	branch = kirkstone
+	branch = master
