@@ -1,0 +1,10 @@
+# .clangd
+CompileFlags:
+  CompilationDatabase: build/configure/x64-poky-linux/Release
+
+Diagnostics:
+  UnusedIncludes: None          # disable IncludeCleaner warnings
+  MissingIncludes: None         # don't warn about missing includes
+
+Index:
+  Background: Build
