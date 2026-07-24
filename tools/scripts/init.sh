@@ -40,8 +40,6 @@ if [ -f /etc/bash_completion ]; then
     . /etc/bash_completion
 fi
 
-aember --install-completion > /dev/null 2>&1
-
 # Load secrets from .env if present (not committed to repo)
 ENV_FILE="$WORKSPACE_DIR/tools/scripts/.env"
 if [ -f "$ENV_FILE" ]; then
@@ -57,6 +55,7 @@ if [ -n "$GITHUB_TOKEN" ]; then
     echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null
 fi
 
+aember --install-completion > /dev/null 2>&1
 
 EOF
 
