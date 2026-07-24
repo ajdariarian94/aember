@@ -51,27 +51,6 @@ TEST_F(ChildSupervisorTest, RemoveNonExistentChild) {
   supervisor_->RemoveChild(99999);
 }
 
-/**TEST_F(ChildSupervisorTest, HandleSIGCHLDWithExitedChild) {
-  pid_t pid = SpawnQuickExitChild(0);
-
-  supervisor_->AddChild(pid, "quick-exit-child");
-
-  // Wait for child to become a zombie
-  ASSERT_TRUE(WaitForZombie(pid, std::chrono::seconds(2)));
-
-  // Verify it's a zombie before reaping
-  EXPECT_TRUE(IsZombie(pid));
-
-  // Handle SIGCHLD (which should reap the child)
-  supervisor_->HandleSIGCHLD();
-
-  // Give it a moment to process
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  // Verify the process has been reaped
-  EXPECT_FALSE(IsZombie(pid));
-}**/
-
 TEST_F(ChildSupervisorTest, HandleSIGCHLDWithMultipleExitedChildren) {
   pid_t pid1 = SpawnQuickExitChild(0);
   pid_t pid2 = SpawnQuickExitChild(0);
