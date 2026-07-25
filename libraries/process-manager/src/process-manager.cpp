@@ -337,6 +337,12 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
   }
 
   if (pid == 0) {
+    // Unblock all signals in child — PID1 blocks them for signalfd
+    // but child processes must receive signals normally
+    sigset_t all_signals;
+    sigfillset(&all_signals);
+    sigprocmask(SIG_UNBLOCK, &all_signals, nullptr);
+
     if (!config.working_directory.empty()) {
       chdir(config.working_directory.c_str());
     }
