@@ -355,6 +355,7 @@ void AemberInit::StartReaperThread() {
   reaper_thread_ = std::jthread{[this](std::stop_token st) {
     while (!st.stop_requested()) {
       std::this_thread::sleep_for(std::chrono::seconds(1));
+      log_.info("Observing for zombie processes...");
       int status = 0;
       pid_t pid;
       while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
