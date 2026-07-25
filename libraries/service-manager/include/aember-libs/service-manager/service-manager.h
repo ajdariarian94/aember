@@ -103,11 +103,11 @@ class ServiceManager {
 
   void SetStateChangeCallback(StateChangeCallback callback);
 
+  void MirrorState(const std::string& name, ProcessState new_state);
+
  private:
   bool StartInternal(std::string_view name, bool is_restart = false);
   bool StopInternal(std::string_view name);
-
-  void MirrorState(const std::string& name, ProcessState new_state);
 
   aember::process_manager::ProcessManager& process_manager_;
   aember::container_manager::ContainerManager& container_manager_;

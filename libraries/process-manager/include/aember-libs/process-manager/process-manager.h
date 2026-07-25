@@ -50,6 +50,8 @@ class ProcessManager {
   using ExitCallback = std::move_only_function<void(
       const std::string& /*name*/, pid_t /*pid*/, int /*exit_code*/)>;
 
+  using RestartCallback = std::move_only_function<void(const std::string&)>;
+
   explicit ProcessManager(ExitCallback on_exit = nullptr);
   ~ProcessManager();
 
@@ -104,6 +106,8 @@ class ProcessManager {
 
   void SetExitCallback(ExitCallback callback);
 
+  void SetRestartCallback(RestartCallback callback);
+
   // ---------------------------------------------------------------------------
   // Config loading
   // ---------------------------------------------------------------------------
@@ -122,6 +126,8 @@ class ProcessManager {
   mutable std::mutex mutex_;
 
   ExitCallback on_exit_;
+
+  RestartCallback on_restart_;
 
   ProcessConfigParser parser_{};
 

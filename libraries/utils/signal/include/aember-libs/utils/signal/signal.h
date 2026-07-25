@@ -1,80 +1,80 @@
 /**
  * @file signal.h
  * @author Arian Ajdari
- * @brief Library definition for signal handling in Aember
- * @version 0.1
- * @date 2025-12-22
+ * @brief Robust POSIX signal handler using signalfd + epoll.
+ *
+ *        Uses Linux signalfd(2) to convert signals into file descriptor
+ *        read events — eliminating signal coalescing issues that affect
+ *        sigwait-based handlers, especially for SIGCHLD in a PID1 context.
+ *
+ *        C++26: std::move_only_function, std::jthread, std::stop_token.
+ *
+ * @version 0.2
+ * @date 2026-07-25
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
 
 #pragma once
 
+#include <aember-libs/utils/logging/logging.h>
+
 #include <atomic>
 #include <functional>
 #include <map>
 #include <thread>
 
+#include <signal.h>
+
 namespace aember::utils::signal {
 
 /**
- * @brief Lightweight signal handler for registering and handling POSIX signals.
+ * @brief Signal handler backed by signalfd + epoll.
  *
- * Provides a dedicated thread to wait for signals and invoke registered
- * callbacks.
+ * All registered signals are blocked in every thread via pthread_sigmask,
+ * then read as structured events from a signalfd file descriptor.
+ * This guarantees every signal delivery is visible — no coalescing,
+ * no lost SIGCHLD.
  */
 class SignalHandler {
  public:
-  using Callback = std::function<void(int)>;
+  using Callback = std::move_only_function<void(int)>;
 
-  /**
-   * @brief Constructs a SignalHandler object.
-   *
-   * Initializes internal data structures for signal handling.
-   */
   SignalHandler();
-
-  /**
-   * @brief Destructor stops signal handling and joins the thread.
-   */
   ~SignalHandler();
 
-  // Non-copyable
   SignalHandler(const SignalHandler&) = delete;
   SignalHandler& operator=(const SignalHandler&) = delete;
 
   /**
-   * @brief Register a callback for a specific signal.
-   *
-   * @param signal Signal number (e.g., SIGINT, SIGTERM)
-   * @param cb Function to call when the signal is received
+   * @brief Register a callback for a signal.
+   *        Must be called before Start().
    */
   void Register(int signal, Callback cb);
 
   /**
-   * @brief Start the signal handling loop in a separate thread.
-   *
-   * Must be called once after registering callbacks.
+   * @brief Block all registered signals and start the signalfd loop.
    */
   void Start();
 
   /**
-   * @brief Stop signal handling and join the internal thread.
-   *
-   * Safe to call multiple times.
+   * @brief Stop the loop and join the thread.
    */
   void Stop();
 
  private:
-  /**
-   * @brief Internal loop that waits for signals and dispatches callbacks.
-   */
-  void SignalLoop();
+  void SignalLoop(std::stop_token stop);
 
-  sigset_t signal_set_;                ///< Mask of signals to handle
-  std::map<int, Callback> callbacks_;  ///< Registered callbacks for signals
-  std::atomic<bool> running_{false};   ///< Thread running state
-  std::thread signal_thread_;          ///< Thread for handling signals
+  sigset_t signal_set_{};
+  std::map<int, Callback> callbacks_;
+  std::atomic<bool> running_{false};
+  int signal_fd_{-1};
+  int epoll_fd_{-1};
+  int wake_pipe_[2]{-1, -1};  ///< used to unblock epoll on Stop()
+  std::jthread signal_thread_;
+
+  using Logger = aember::utils::logging::Logger;
+  mutable Logger log_{"signal-handler"};
 };
 
 }  // namespace aember::utils::signal

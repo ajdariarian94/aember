@@ -237,7 +237,11 @@ void ProcessManager::ScheduleRestart(std::string_view name) {
   std::jthread{[this, key, delay](std::stop_token) {
     std::this_thread::sleep_for(delay);
     log_.info("Restarting '{}'", key);
-    Start(key);
+    if (on_restart_) {
+      on_restart_(key);
+    } else {
+      std::ignore = Start(key);
+    }
   }}.detach();
 }
 
@@ -297,6 +301,10 @@ std::vector<ProcessManager::ProcessConfig> ProcessManager::GetConfigs() const {
 void ProcessManager::SetExitCallback(ExitCallback callback) {
   std::lock_guard lock{mutex_};
   on_exit_ = std::move(callback);
+}
+
+void ProcessManager::SetRestartCallback(RestartCallback callback) {
+  on_restart_ = std::move(callback);
 }
 
 // ---------------------------------------------------------------------------

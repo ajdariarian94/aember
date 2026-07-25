@@ -239,8 +239,12 @@ AemberInit::Result<> AemberInit::InitServiceStack() {
             OnContainerStateChange(name, old_state, new_state);
           });
 
-  process_manager_ =
-      std::make_unique<aember::process_manager::ProcessManager>();
+  process_manager_ = std::make_unique<aember::process_manager::ProcessManager>(
+      [this](const std::string& name, int pid, int exit_code) {
+        log_.info(
+            "Process '{}' (pid={}) exited (code={})", name, pid, exit_code);
+        service_manager_->MirrorState(name, ProcessState::Failed);
+      });
 
   dependency_resolver_ =
       std::make_unique<aember::service_manager::DependencyResolver>(
@@ -254,6 +258,13 @@ AemberInit::Result<> AemberInit::InitServiceStack() {
       *container_manager_,
       *dependency_resolver_,
       child_supervisor_);
+
+  // Wire restart callback — ProcessManager calls this after restart delay
+  // which triggers ServiceManager to re-launch the process.
+  process_manager_->SetRestartCallback([this](const std::string& name) {
+    log_.info("Restarting process '{}'", name);
+    service_manager_->Start(name);
+  });
 
   service_manager_->SetStateChangeCallback([this](const std::string& name,
                                                   ProcessState old_state,
@@ -270,12 +281,14 @@ AemberInit::Result<> AemberInit::InitSignals() {
   signal_handler_.Register(SIGHUP, [this](int) { /* reload config */ });
 
   signal_handler_.Register(SIGCHLD, [this](int) {
+    log_.info("SIGCHLD received");  // ← add this
     int status = 0;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-      service_manager_->HandleExit(pid, WEXITSTATUS(status));
+      log_.info("Reaped pid={} status={}", pid, status);
+      service_manager_->HandleExit(pid, status);
+      child_supervisor_.RemoveChild(pid);
     }
-    child_supervisor_.HandleSIGCHLD();
   });
 
   signal_handler_.Start();
