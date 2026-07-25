@@ -27,6 +27,7 @@
         // Optional but recommended
         "-e", "DOCKER_HOST=unix:///var/run/docker.sock",
         "-e", "HOST_ROOT_PATH=${localWorkspaceFolder}",
+        "-e", "DOCKER_GID=${localEnv:DOCKER_GID}",
 
         "-e", "DISPLAY",
         "-v", "/lib/modules:/lib/modules:ro",
@@ -51,7 +52,8 @@
                 "github.vscode-pull-request-github",
                 "github.copilot",
                 "vector-of-bool.cmake-tools",
-                "llvm-vs-code-extensions.vscode-clangd"
+                "llvm-vs-code-extensions.vscode-clangd",
+                "pkief.material-icon-theme"
             ],
             "settings": {
                 "terminal.integrated.defaultProfile.linux": "bash",
@@ -76,7 +78,8 @@
                 "[c]": {
                     "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
                     "editor.formatOnSave": true
-                }
+                },
+                "workbench.iconTheme": "material-icon-theme"
             }
         }
     }
