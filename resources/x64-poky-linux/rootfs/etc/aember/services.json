@@ -7,8 +7,8 @@
       "working_directory": "",
       "environment": {},
       "restart_on_failure": true,
-      "max_restarts": 5,
-      "restart_delay_ms": 5000
+      "max_restarts": 2,
+      "restart_delay_ms": 3000
     }
   ]
 }

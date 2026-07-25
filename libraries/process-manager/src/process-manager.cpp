@@ -193,7 +193,7 @@ bool ProcessManager::HandleExit(pid_t pid, int exit_code) {
 
   if (on_exit_) { on_exit_(name, pid, exit_code); }
 
-  if (!was_stopping && !clean_exit) { ScheduleRestart(name); }
+  if (!was_stopping) { ScheduleRestart(name); }
 
   return true;
 }
