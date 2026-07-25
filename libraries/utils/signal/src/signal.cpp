@@ -1,84 +1,165 @@
 /**
  * @file signal.cpp
  * @author Arian Ajdari
- * @brief Library implementation for signal handling in Aember
- * @version 0.1
- * @date 2025-12-22
+ * @brief Robust signal handler using signalfd + epoll.
+ *
+ *        signalfd converts each signal delivery into a read event on a
+ *        file descriptor. epoll_wait monitors both the signalfd and a
+ *        wake pipe so Stop() is instant without sending a dummy signal.
+ *
+ * @version 0.2
+ * @date 2026-07-25
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
 
 #include <aember-libs/utils/signal/signal.h>
 
-#include <csignal>
+#include <format>
+#include <stdexcept>
 
+#include <errno.h>
 #include <pthread.h>
+#include <sys/epoll.h>
+#include <sys/signalfd.h>
+#include <unistd.h>
 
 namespace aember::utils::signal {
 
+// ---------------------------------------------------------------------------
+// Ctor / Dtor
+// ---------------------------------------------------------------------------
+
 SignalHandler::SignalHandler() {
-  // Initialize empty signal set
   sigemptyset(&signal_set_);
+
+  // Create wake pipe — written to by Stop() to unblock epoll_wait
+  if (::pipe(wake_pipe_) != 0) {
+    throw std::runtime_error(
+        std::format("SignalHandler: pipe() failed: errno={}", errno));
+  }
 }
 
 SignalHandler::~SignalHandler() {
-  // Ensure the signal handling thread is stopped before destruction
   Stop();
+
+  if (epoll_fd_ >= 0) { ::close(epoll_fd_); }
+  if (signal_fd_ >= 0) { ::close(signal_fd_); }
+  if (wake_pipe_[0] >= 0) { ::close(wake_pipe_[0]); }
+  if (wake_pipe_[1] >= 0) { ::close(wake_pipe_[1]); }
 }
 
-void SignalHandler::Register(int signal, Callback cb) {
-  // Register a callback for the given signal
-  callbacks_[signal] = std::move(cb);
+// ---------------------------------------------------------------------------
+// Register
+// ---------------------------------------------------------------------------
 
-  // Add signal to the internal mask
-  sigaddset(&signal_set_, signal);
+void SignalHandler::Register(int sig, Callback cb) {
+  callbacks_[sig] = std::move(cb);
+  sigaddset(&signal_set_, sig);
 }
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
 
 void SignalHandler::Start() {
-  // Start signal handling thread if not already running
-  if (running_.exchange(true, std::memory_order_acquire)) return;
+  if (running_.exchange(true)) return;
 
-  // Block signals in the current thread; new thread inherits this mask
+  // Block all registered signals in every thread — signalfd reads them instead
   pthread_sigmask(SIG_BLOCK, &signal_set_, nullptr);
 
-  // Launch thread to handle signals
-  signal_thread_ = std::thread([this] { SignalLoop(); });
-}
-
-void SignalHandler::Stop() {
-  // Stop signal handling thread
-  if (!running_.exchange(false, std::memory_order_release)) return;
-
-  // Wake up the sigwait() by sending a registered signal
-  if (!callbacks_.empty() && signal_thread_.joinable()) {
-    int sig = callbacks_.begin()->first;
-    pthread_kill(signal_thread_.native_handle(), sig);
+  // Create signalfd — delivers blocked signals as readable events
+  signal_fd_ = ::signalfd(-1, &signal_set_, SFD_NONBLOCK | SFD_CLOEXEC);
+  if (signal_fd_ < 0) {
+    throw std::runtime_error(
+        std::format("SignalHandler: signalfd() failed: errno={}", errno));
   }
 
-  // Wait for the thread to finish
-  if (signal_thread_.joinable()) { signal_thread_.join(); }
+  // Create epoll instance
+  epoll_fd_ = ::epoll_create1(EPOLL_CLOEXEC);
+  if (epoll_fd_ < 0) {
+    throw std::runtime_error(
+        std::format("SignalHandler: epoll_create1() failed: errno={}", errno));
+  }
 
-  // Unblock signals in the current thread after stopping
-  pthread_sigmask(SIG_UNBLOCK, &signal_set_, nullptr);
+  // Watch signalfd
+  epoll_event ev{};
+  ev.events = EPOLLIN;
+  ev.data.fd = signal_fd_;
+  ::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, signal_fd_, &ev);
+
+  // Watch wake pipe read end
+  ev.data.fd = wake_pipe_[0];
+  ::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, wake_pipe_[0], &ev);
+
+  log_.info(
+      "SignalHandler started (signalfd={} epoll={})", signal_fd_, epoll_fd_);
+
+  // Launch jthread — stop_token requested by Stop() via request_stop()
+  signal_thread_ =
+      std::jthread{[this](std::stop_token st) { SignalLoop(std::move(st)); }};
 }
 
-void SignalHandler::SignalLoop() {
-  while (running_.load(std::memory_order_relaxed)) {
-    int sig = 0;
+// ---------------------------------------------------------------------------
+// Stop
+// ---------------------------------------------------------------------------
 
-    // Wait for a signal in the signal set
-    int result = sigwait(&signal_set_, &sig);
+void SignalHandler::Stop() {
+  if (!running_.exchange(false)) return;
 
-    if (result != 0) {
-      continue;  // sigwait error, retry
+  signal_thread_.request_stop();
+
+  // Write to wake pipe to unblock epoll_wait immediately
+  char byte = 0;
+  ::write(wake_pipe_[1], &byte, 1);
+
+  if (signal_thread_.joinable()) { signal_thread_.join(); }
+
+  pthread_sigmask(SIG_UNBLOCK, &signal_set_, nullptr);
+
+  log_.info("SignalHandler stopped");
+}
+
+// ---------------------------------------------------------------------------
+// SignalLoop
+// ---------------------------------------------------------------------------
+
+void SignalHandler::SignalLoop(std::stop_token stop) {
+  constexpr int kMaxEvents = 8;
+  epoll_event events[kMaxEvents];
+
+  while (!stop.stop_requested()) {
+    const int n = ::epoll_wait(epoll_fd_, events, kMaxEvents, -1);
+
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      log_.error("epoll_wait failed: errno={}", errno);
+      break;
     }
 
-    // Exit loop if handler stopped
-    if (!running_.load(std::memory_order_relaxed)) { break; }
+    for (int i = 0; i < n; ++i) {
+      const int fd = events[i].data.fd;
 
-    // Call registered callback if available
-    auto it = callbacks_.find(sig);
-    if (it != callbacks_.end()) { it->second(sig); }
+      if (fd == wake_pipe_[0]) {
+        // Stop() woke us up — drain the pipe and exit
+        char buf[64];
+        ::read(wake_pipe_[0], buf, sizeof(buf));
+        return;
+      }
+
+      if (fd == signal_fd_) {
+        // Drain all pending signals from signalfd
+        signalfd_siginfo info{};
+        while (::read(signal_fd_, &info, sizeof(info)) == sizeof(info)) {
+          const int sig = static_cast<int>(info.ssi_signo);
+          log_.debug("Signal {} received (pid={})", sig, info.ssi_pid);
+
+          if (auto it = callbacks_.find(sig); it != callbacks_.end()) {
+            it->second(sig);
+          }
+        }
+      }
+    }
   }
 }
 

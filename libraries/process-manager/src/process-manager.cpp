@@ -193,7 +193,7 @@ bool ProcessManager::HandleExit(pid_t pid, int exit_code) {
 
   if (on_exit_) { on_exit_(name, pid, exit_code); }
 
-  if (!was_stopping && !clean_exit) { ScheduleRestart(name); }
+  if (!was_stopping) { ScheduleRestart(name); }
 
   return true;
 }
@@ -237,7 +237,11 @@ void ProcessManager::ScheduleRestart(std::string_view name) {
   std::jthread{[this, key, delay](std::stop_token) {
     std::this_thread::sleep_for(delay);
     log_.info("Restarting '{}'", key);
-    Start(key);
+    if (on_restart_) {
+      on_restart_(key);
+    } else {
+      std::ignore = Start(key);
+    }
   }}.detach();
 }
 
@@ -299,6 +303,10 @@ void ProcessManager::SetExitCallback(ExitCallback callback) {
   on_exit_ = std::move(callback);
 }
 
+void ProcessManager::SetRestartCallback(RestartCallback callback) {
+  on_restart_ = std::move(callback);
+}
+
 // ---------------------------------------------------------------------------
 // Config loading
 // ---------------------------------------------------------------------------
@@ -329,6 +337,12 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
   }
 
   if (pid == 0) {
+    // Unblock all signals in child — PID1 blocks them for signalfd
+    // but child processes must receive signals normally
+    sigset_t all_signals;
+    sigfillset(&all_signals);
+    sigprocmask(SIG_UNBLOCK, &all_signals, nullptr);
+
     if (!config.working_directory.empty()) {
       chdir(config.working_directory.c_str());
     }

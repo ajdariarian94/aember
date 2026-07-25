@@ -20,6 +20,11 @@ target_include_directories(
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+target_link_libraries(
+  ${SIGNAL_TARGET}
+  PUBLIC aember-libs::utils::logging
+)
+
 set_target_properties(
   ${SIGNAL_TARGET}
   PROPERTIES EXPORT_NAME

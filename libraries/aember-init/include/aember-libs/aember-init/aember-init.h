@@ -71,6 +71,8 @@ class AemberInit {
   Result<> LoadAndRegisterProcesses(std::string_view path);
   Result<> LoadAndRegisterContainers(std::string_view path);
 
+  void StartReaperThread();
+
   // ---------------------------------------------------------------------------
   // Run loop
   // ---------------------------------------------------------------------------
@@ -128,6 +130,8 @@ class AemberInit {
   std::unique_ptr<aember::service_manager::DependencyResolver>
       dependency_resolver_;
   std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
+
+  std::jthread reaper_thread_;
 
   Logger log_;
 };

@@ -1,9 +1,12 @@
 #include <aember-libs/device-health/aember-monitor.h>
 #include <aember-libs/utils/logging/logging.h>
 
+#include <atomic>
+#include <condition_variable>
+#include <csignal>
 #include <meta>
+#include <mutex>
 #include <string_view>
-#include <thread>
 
 using SelfStats = aember::device_health::AemberMonitorClient::SelfStats;
 
@@ -56,7 +59,25 @@ consteval std::meta::info get_field_names_info() {
 // Splice the generated struct — each field holds its own name as const char*.
 constexpr auto SelfStatsFields = [:get_field_names_info():];
 
+// ---------------------------------------------------------------------------
+// Graceful shutdown via SIGTERM / SIGINT
+// ---------------------------------------------------------------------------
+
+static std::mutex g_mtx;
+static std::condition_variable g_cv;
+static std::atomic<bool> g_running{true};
+
+static void handle_signal(int) {
+  g_running = false;
+  g_cv.notify_all();
+}
+
 int main() {
+  // Install signal handlers — process exits cleanly on SIGTERM/SIGINT
+  // so PID1 receives SIGCHLD immediately and can restart us.
+  std::signal(SIGTERM, handle_signal);
+  std::signal(SIGINT, handle_signal);
+
   aember::utils::logging::Logger log_{"aember-child-demo"};
 
   aember::utils::logging::enable_console_silence();
@@ -69,7 +90,6 @@ int main() {
             AemberMonitorClientName);
 
   // C++26 P2996: field names generated from SelfStats at compile time.
-  // SelfStatsFields is a generated struct — each member holds its own name.
   log_.info("Monitored fields (reflected at compile time):");
   log_.info("  ├─ {}", SelfStatsFields.pid);
   log_.info("  ├─ {}", SelfStatsFields.ppid);
@@ -79,10 +99,12 @@ int main() {
 
   monitor.Report();
 
-  while (true) {
-    std::this_thread::sleep_for(std::chrono::minutes(1));
-    monitor.Report();
+  while (g_running) {
+    std::unique_lock lock{g_mtx};
+    g_cv.wait_for(lock, std::chrono::seconds(1));
+    if (g_running) { monitor.Report(); }
   }
 
+  log_.info("aember-child-demo shutting down gracefully");
   return 0;
 }
