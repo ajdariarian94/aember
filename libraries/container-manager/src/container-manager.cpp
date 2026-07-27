@@ -1,8 +1,8 @@
 /**
  * @file container-manager.cpp
  * @author Arian Ajdari
- * @brief ContainerManager implementation using LXC.
- * @version 0.4
+ * @brief ContainerManager implementation using LXC with OverlayFS support.
+ * @version 0.5
  * @date 2026-06-28
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -10,10 +10,12 @@
 
 #include <aember-libs/container-manager/container-manager.h>
 
+#include <filesystem>
 #include <format>
 #include <fstream>
 
 #include <lxc/lxccontainer.h>
+#include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -129,11 +131,6 @@ bool ContainerManager::StartContainer(std::string_view name) {
       log_.warn("Container '{}' started but init_pid() returned {}", name, pid);
     }
 
-    // On aarch64, LXC does not call prctl(PR_SET_NAME) on the monitor process
-    // so it shows as "/usr/bin/aember --root" in top instead of the expected
-    // "{aember} [lxc monitor] /tmp <name>". We rename it by writing to
-    // /proc/<monitor_pid>/comm — allowed from a privileged parent on
-    // Linux 3.8+.
     RenameMonitorProcess(*e, name);
   }
 
@@ -268,18 +265,91 @@ bool ContainerManager::Create(ContainerEntry& e) {
              e.config.squashfs,
              e.config.rootfs);
 
-  e.lxc = lxc_container_new(e.config.name.c_str(), "/tmp");
+  // 1. Prepare and Mount OverlayFS over SquashFS
+  if (!e.config.squashfs.empty()) {
+    const std::string lower_dir = std::format("{}-lower", e.config.rootfs);
+    const std::string overlay_base =
+        std::format("/tmp/aember-overlay/{}", e.config.name);
+    const std::string upper_dir = overlay_base + "/upper";
+    const std::string work_dir = overlay_base + "/work/work";
+
+    std::error_code ec;
+    std::filesystem::create_directories(lower_dir, ec);
+    std::filesystem::create_directories(upper_dir, ec);
+    std::filesystem::create_directories(work_dir, ec);
+    std::filesystem::create_directories(e.config.rootfs, ec);
+
+    // Mount SquashFS to lowerdir
+    if (!mount_manager_->MountSquashFS(e.config.squashfs, lower_dir)) {
+      log_.error("Failed to mount squashfs '{}' at '{}'",
+                 e.config.squashfs,
+                 lower_dir);
+      return false;
+    }
+
+    // Mount OverlayFS onto container rootfs
+    const std::string overlay_opts = std::format(
+        "lowerdir={},upperdir={},workdir={}", lower_dir, upper_dir, work_dir);
+
+    if (mount("overlay",
+              e.config.rootfs.c_str(),
+              "overlay",
+              0,
+              overlay_opts.c_str()) != 0) {
+      log_.error("Failed to mount OverlayFS at '{}': errno={} ({})",
+                 e.config.rootfs,
+                 errno,
+                 strerror(errno));
+      mount_manager_->Unmount(lower_dir);
+      return false;
+    }
+
+    log_.info("Mounted OverlayFS over read-only SquashFS at '{}'",
+              e.config.rootfs);
+
+    // -------------------------------------------------------------------
+    // Direct C++ Bind Mount: Guarantee host /var/log is attached inside
+    // container rootfs BEFORE LXC starts up!
+    // -------------------------------------------------------------------
+
+    // 1. Ensure host /var/log exists before mounting
+    std::filesystem::create_directories("/var/log", ec);
+
+    // 2. Pre-create /host-logs inside container's merged rootfs
+    const std::string container_host_logs = e.config.rootfs + "/host-logs";
+    std::filesystem::create_directories(container_host_logs, ec);
+
+    // 3. Perform raw Linux MS_BIND mount (host /var/log -> container
+    // /host-logs)
+    if (mount("/var/log",
+              container_host_logs.c_str(),
+              nullptr,
+              MS_BIND,
+              nullptr) != 0) {
+      log_.error("Failed to bind mount /var/log onto '{}': errno={} ({})",
+                 container_host_logs,
+                 errno,
+                 strerror(errno));
+    } else {
+      log_.info("Successfully bind-mounted host /var/log to '{}'",
+                container_host_logs);
+    }
+  }
+
+  // 2. Instantiate LXC handle AFTER OverlayFS and bind mounts are complete
+  e.lxc =
+      lxc_container_new(e.config.name.c_str(), "/var/lib/aember/containers");
   if (!e.lxc) {
     log_.error("lxc_container_new failed for '{}'", e.config.name);
     return false;
   }
 
   if (e.config.config_path.empty()) {
-    log_.error("No config_path specified for container '{}' — cannot start",
-               e.config.name);
+    log_.error("No config_path specified for container '{}'", e.config.name);
     return false;
   }
 
+  // Load LXC config
   if (!e.lxc->load_config(e.lxc, e.config.config_path.c_str())) {
     log_.error("Failed to load config '{}' for '{}'",
                e.config.config_path,
@@ -288,19 +358,6 @@ bool ContainerManager::Create(ContainerEntry& e) {
   }
 
   log_.info("Loaded container config from '{}'", e.config.config_path);
-
-  if (!e.config.squashfs.empty()) {
-    if (!mount_manager_->MountSquashFS(e.config.squashfs, e.config.rootfs)) {
-      log_.error("Failed to mount squashfs '{}' at '{}'",
-                 e.config.squashfs,
-                 e.config.rootfs);
-      return false;
-    }
-    log_.info(
-        "Mounted squashfs '{}' at '{}'", e.config.squashfs, e.config.rootfs);
-  }
-
-  log_.info("Container '{}' configured", e.config.name);
   return true;
 }
 
@@ -309,6 +366,10 @@ bool ContainerManager::Start(ContainerEntry& e) {
     log_.error("Start: no LXC handle for '{}'", e.config.name);
     return false;
   }
+
+  // Ensure host /var/log exists before starting LXC bind mounts
+  std::error_code ec;
+  std::filesystem::create_directories("/var/log", ec);
 
   log_.debug("Starting LXC container '{}'", e.config.name);
 
@@ -333,14 +394,30 @@ bool ContainerManager::Start(ContainerEntry& e) {
 }
 
 bool ContainerManager::Stop(ContainerEntry& e) {
-  if (!e.lxc || !e.lxc->is_running(e.lxc)) return true;
+  if (e.lxc && e.lxc->is_running(e.lxc)) {
+    log_.debug("Stopping LXC container '{}'", e.config.name);
 
-  log_.debug("Stopping LXC container '{}'", e.config.name);
+    if (!e.lxc->shutdown(e.lxc, 5)) {
+      log_.warn("Graceful shutdown failed for '{}' — forcing stop",
+                e.config.name);
+      e.lxc->stop(e.lxc);
+    }
+  }
 
-  if (!e.lxc->shutdown(e.lxc, 5)) {
-    log_.warn("Graceful shutdown failed for '{}' — forcing stop",
-              e.config.name);
-    return e.lxc->stop(e.lxc);
+  // Unmount OverlayFS first, then clean up SquashFS lowerdir
+  if (!e.config.squashfs.empty()) {
+    const std::string lower_dir = std::format("{}-lower", e.config.rootfs);
+
+    // Unmount OverlayFS from rootfs
+    umount2(e.config.rootfs.c_str(), MNT_DETACH);
+
+    // Unmount SquashFS from lowerdir
+    mount_manager_->Unmount(lower_dir);
+
+    // Clean up temporary overlay work/upper directories
+    std::error_code ec;
+    std::filesystem::remove_all(
+        std::format("/tmp/aember-overlay/{}", e.config.name), ec);
   }
 
   return true;
@@ -355,24 +432,12 @@ void ContainerManager::Release(ContainerEntry& e) {
 
 // ---------------------------------------------------------------------------
 // Monitor process renaming
-//
-// On aarch64, LXC does not call prctl(PR_SET_NAME) on the monitor process
-// so it shows as "/usr/bin/aember --root" in top instead of the expected
-// "{aember} [lxc monitor] /tmp <name>".
-//
-// Strategy:
-// 1. Try lxc.monitor.pid config item (available in some LXC versions).
-// 2. Fall back to scanning /proc for a child of getpid() whose cmdline
-//    matches our process and whose VSZ is much smaller than ours.
-// 3. Write the display name to /proc/<pid>/comm — allowed from a privileged
-//    parent on Linux 3.8+.
 // ---------------------------------------------------------------------------
 
 void ContainerManager::RenameMonitorProcess(ContainerEntry& e,
                                             std::string_view name) {
   pid_t monitor_pid = -1;
 
-  // Strategy 1 — ask LXC directly.
   char buf[32]{};
   if (e.lxc &&
       e.lxc->get_config_item(e.lxc, "lxc.monitor.pid", buf, sizeof(buf)) > 0) {
@@ -381,9 +446,6 @@ void ContainerManager::RenameMonitorProcess(ContainerEntry& e,
     } catch (...) {}
   }
 
-  // Strategy 2 — find the monitor by scanning /proc for our direct children.
-  // The monitor is a fork() of aember with a much smaller VSZ (~20MB vs
-  // ~100MB).
   if (monitor_pid <= 0) { monitor_pid = FindMonitorPid(e); }
 
   if (monitor_pid <= 0) {
@@ -391,9 +453,6 @@ void ContainerManager::RenameMonitorProcess(ContainerEntry& e,
     return;
   }
 
-  // Write to /proc/<pid>/comm — kernel truncates to 15 chars + NUL.
-  // Use the same format LXC uses on x86: "{aember} [lxc monitor] /tmp <name>"
-  // but truncated to fit: "lxc monitor"
   const auto display_name =
       std::format("{{aember}} [lxc monitor] /tmp {}", name);
   const auto comm_path = std::format("/proc/{}/comm", monitor_pid);
@@ -410,10 +469,6 @@ void ContainerManager::RenameMonitorProcess(ContainerEntry& e,
 }
 
 pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
-  // The monitor is a direct child of aember (our PID) created by lxc->start().
-  // It has the same exe (/usr/bin/aember) but much smaller VmRSS.
-  // We scan /proc looking for children of getpid() with a small VmRSS.
-
   const pid_t our_pid = getpid();
   const pid_t init_pid = e.lxc ? e.lxc->init_pid(e.lxc) : -1;
 
@@ -422,7 +477,6 @@ pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
            std::filesystem::directory_options::skip_permission_denied}) {
     if (!entry.is_directory()) continue;
 
-    // Only numeric directories.
     const auto name = entry.path().filename().string();
     if (!std::ranges::all_of(name, ::isdigit)) continue;
 
@@ -431,10 +485,8 @@ pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
       pid = std::stoi(name);
     } catch (...) { continue; }
 
-    // Skip ourselves, kernel threads, and the container init.
     if (pid == our_pid || pid == init_pid || pid <= 1) continue;
 
-    // Check PPid is ours.
     std::ifstream status{std::format("/proc/{}/status", pid)};
     if (!status.is_open()) continue;
 
@@ -456,7 +508,6 @@ pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
 
     if (ppid != our_pid) continue;
 
-    // The monitor has a small RSS (< 30MB) compared to aember (~100MB).
     if (vm_rss > 0 && vm_rss < 30000) {
       log_.debug(
           "Found monitor PID {} (PPid={} VmRSS={}kB)", pid, ppid, vm_rss);

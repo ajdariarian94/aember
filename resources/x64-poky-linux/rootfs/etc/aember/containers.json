@@ -1,13 +1,13 @@
 {
   "containers": [
     {
-      "name": "alpine-echo",
+      "name": "aember-monitor",
       "type": "container",
       "container": {
-        "squashfs": "/var/lib/aember/alpine/alpine.squashfs",
-        "rootfs": "/var/lib/aember/containers/alpine",
-        "config_path": "/var/lib/aember/alpine/lxc.container.conf",
-        "args": ["/bin/sh", "/echo-alpine.sh"]
+        "squashfs": "/var/lib/aember/aember-monitor/aember-monitor.squashfs",
+        "rootfs": "/var/lib/aember/containers/aember-monitor",
+        "config_path": "/var/lib/aember/aember-monitor/lxc.container.conf",
+        "args": ["/usr/bin/aember-monitor", "-platform", "linuxfb"]
       },
       "restart_policy": "always",
       "dependencies": [],

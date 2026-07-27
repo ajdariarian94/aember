@@ -73,6 +73,8 @@ class AemberMonitor {
 
   /// Log a pre-built payload — call after enriching with network/services.
   void Log(const nlohmann::json& payload) const;
+  void LogToFile(const nlohmann::json& payload,
+                 std::string_view path = "/var/log/aember-monitor.json") const;
 
   /// Read raw stats struct.
   [[nodiscard]] static Pid1Stats ReadPid1Stats();

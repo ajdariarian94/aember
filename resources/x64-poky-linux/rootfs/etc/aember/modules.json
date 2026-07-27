@@ -9,6 +9,7 @@
     "ttm",
     "drm_ttm_helper",
     "virtio_dma_buf",
-    "virtio-gpu"
+    "virtio-gpu",
+    "overlay"
   ]
 }

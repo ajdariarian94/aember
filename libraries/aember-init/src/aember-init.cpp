@@ -85,6 +85,12 @@ void AemberInit::StartRoot() {
   aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
   log_.info("Starting Aember in root mode");
 
+  // Create heartbeat JSON file early — needed for aember-monitor container
+  // mount
+  std::ofstream file{"/var/log/aember-monitor.json"};
+  file << "{}";
+  file.flush();
+
   debug_shell_.emplace();
   const bool spawn_debug_shell =
       debug_shell_ && debug_shell_->CheckDebugShell();
@@ -424,6 +430,7 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
 
   // Log the enriched dashboard.
   monitor_->Log(payload);
+  monitor_->LogToFile(payload, "/var/log/aember-monitor.json");
 }
 
 void AemberInit::OnServiceStateChange(const std::string& name,

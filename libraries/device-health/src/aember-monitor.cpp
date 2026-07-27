@@ -163,6 +163,30 @@ void AemberMonitor::Log(const nlohmann::json& payload) const {
   log_.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 }
 
+void AemberMonitor::LogToFile(const nlohmann::json& payload,
+                              std::string_view path) const {
+  try {
+    const std::string path_str{path};
+    const std::string data = payload.dump();
+
+    // std::ios::in | std::ios::out updates the EXISTING file in-place
+    // without deleting/recreating the inode that LXC bound to the container!
+    std::fstream f{path_str, std::ios::in | std::ios::out};
+    if (!f.is_open()) { f.open(path_str, std::ios::out); }
+
+    if (f.is_open()) {
+      f.seekp(0);
+      f << data;
+      f.flush();
+      f.close();
+
+      std::error_code ec;
+      std::filesystem::resize_file(path_str, data.size(), ec);
+    }
+  } catch (const std::exception& e) {
+    log_.error("LogToFile failed: {}", e.what());
+  }
+}
 // ---------------------------------------------------------------------------
 // AemberMonitorClient
 // ---------------------------------------------------------------------------
