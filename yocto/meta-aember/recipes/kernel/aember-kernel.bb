@@ -27,6 +27,9 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/linux-aember:"
 KBUILD_DEFCONFIG:x86-64  = "x86_64_defconfig"
 KBUILD_DEFCONFIG:aarch64 = "defconfig"
 
+# Include modern kbuild module metadata (such as modules.builtin.ranges)
+FILES:${KERNEL_PACKAGE_NAME}-modules += "${nonarch_base_libdir}/modules/${KERNEL_VERSION}/modules.builtin*"
+
 # ---------------------------------------------------------------------------
 # Map Yocto MACHINE → build system directory names
 # ---------------------------------------------------------------------------
@@ -36,9 +39,26 @@ DEPLOY_ARCH:aarch64 = "aarch64-poky-linux"
 CUSTOM_OUTDIR = "${TOPDIR}/../build/${DEPLOY_ARCH}/kernel/"
 
 # ---------------------------------------------------------------------------
-# Force disable certificates (all architectures)
+# Force disable certificates & enforce DRM/VirtIO config
 # ---------------------------------------------------------------------------
 do_configure:append() {
+    cat >> ${B}/.config << 'EOF'
+CONFIG_VIRTIO_MENU=y
+CONFIG_VIRTIO=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_VIRTIO_MMIO=y
+CONFIG_DRM=y
+CONFIG_DRM_KMS_HELPER=y
+CONFIG_DRM_GEM_SHMEM_HELPER=y
+CONFIG_DRM_TTM=y
+CONFIG_DRM_TTM_HELPER=y
+CONFIG_DRM_VIRTIO_GPU=m
+CONFIG_DRM_VIRTIO_GPU_KMS=y
+CONFIG_VIRTIO_INPUT=m
+EOF
+
+    oe_runmake -C ${S} O=${B} olddefconfig
+
     sed -i 's/CONFIG_SYSTEM_TRUSTED_KEYS=.*/CONFIG_SYSTEM_TRUSTED_KEYS=""/' ${B}/.config
     sed -i 's/CONFIG_SYSTEM_REVOCATION_KEYS=.*/CONFIG_SYSTEM_REVOCATION_KEYS=""/' ${B}/.config
 
@@ -49,7 +69,7 @@ Version: ${PV}
 Architecture: ${TARGET_ARCH}
 Machine: ${MACHINE}
 Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-Compiler: $(${KERNEL_CC} --version 2>/dev/null | head -n1 || echo "Unknown")
+Compiler: $(${KERNEL_CC} --version 2>/devnull | head -n1 || echo "Unknown")
 Defconfig: ${KBUILD_DEFCONFIG}
 Kernel Image Type: ${KERNEL_IMAGETYPE}
 MANIFEST
@@ -82,8 +102,6 @@ do_deploy:append() {
     fi
 }
 
-INSANE_SKIP:${PN}          += "buildpaths"
-INSANE_SKIP:${PN}-src      += "buildpaths"
-INSANE_SKIP:kernel-vmlinux += "buildpaths"
+INSANE_SKIP += "buildpaths"
 
 COMPATIBLE_MACHINE = "x64-linux|arm64-linux"

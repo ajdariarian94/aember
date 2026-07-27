@@ -5,6 +5,16 @@
     "ipv6",
     "bridge",
     "veth",
-    "br_netfilter"
+    "br_netfilter",
+    "backlight",
+    "virtio_dma_buf",
+    "drm_exec",
+    "drm_kms_helper",
+    "drm_shmem_helper",
+    "ttm",
+    "drm_ttm_helper",
+    "drm_client_lib",
+    "virtio-gpu",
+    "virtio_input"
   ]
 }
