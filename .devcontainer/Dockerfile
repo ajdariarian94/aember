@@ -157,6 +157,20 @@ RUN locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 
+# ---- Downgrade GNU tar to 1.34 for Yocto/Bitbake compatibility ----
+# GNU tar 1.35 uses openat2/relative syscalls that cause Bitbake's pseudo wrapper to lose track of fds.
+# ---- Downgrade GNU tar to 1.34 for Yocto/Bitbake compatibility ----
+# GNU tar 1.35 uses openat2/relative syscalls that cause Bitbake's pseudo wrapper to lose track of fds.
+RUN cd /tmp && \
+    wget https://ftp.gnu.org/gnu/tar/tar-1.34.tar.gz && \
+    tar -xzf tar-1.34.tar.gz && \
+    cd tar-1.34 && \
+    FORCE_UNSAFE_CONFIGURE=1 ./configure --prefix=/usr && \
+    make -j$(nproc) && \
+    make install && \
+    cd /tmp && \
+    rm -rf tar-1.34 tar-1.34.tar.gz
+
 # ---- Setup virtual environment ----
 RUN python3 -m venv /venv
 RUN /venv/bin/pip install --upgrade pip
