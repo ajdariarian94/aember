@@ -250,7 +250,10 @@ std::vector<ContainerManager::ContainerConfig> ContainerManager::LoadContainers(
   }
 
   log_.info("Loaded container configs from '{}'", source);
-  return parser_.GetContainers();
+  const auto& containers = parser_.GetContainers();
+  log_.info("Parser returned {} containers:", containers.size());
+  for (const auto& c : containers) { log_.info("  - {}", c.name); }
+  return containers;
 }
 
 // ---------------------------------------------------------------------------
