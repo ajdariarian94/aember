@@ -85,6 +85,12 @@ void AemberInit::StartRoot() {
   aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
   log_.info("Starting Aember in root mode");
 
+  // Create heartbeat JSON file early — needed for aember-monitor container
+  // mount
+  std::ofstream file{"/var/log/aember-monitor.json"};
+  file << "{}";
+  file.flush();
+
   debug_shell_.emplace();
   const bool spawn_debug_shell =
       debug_shell_ && debug_shell_->CheckDebugShell();
@@ -329,24 +335,25 @@ AemberInit::Result<> AemberInit::LoadAndRegisterContainers(
   auto configs = container_manager_->LoadContainers(std::string{path});
   log_.info("Loaded {} container config(s) from {}", configs.size(), path);
 
-  const auto registered =
-      configs | std::views::filter([&](const auto& cfg) {
-        if (!container_manager_->AddContainer(cfg)) {
-          log_.error("Failed to register container '{}'", cfg.name);
-          return false;
-        }
-        return true;
-      }) |
-      std::views::transform([&](const auto& cfg) { return cfg.name; }) |
-      std::ranges::to<std::vector>();
+  std::vector<std::string> registered;
+  for (const auto& cfg : configs) {
+    // Only call AddContainer if LoadContainers didn't already register it
+    if (!container_manager_->HasContainer(cfg.name)) {
+      if (!container_manager_->AddContainer(cfg)) {
+        log_.error("Failed to register container '{}'", cfg.name);
+        continue;
+      }
+    }
+    registered.push_back(cfg.name);
+  }
 
-  std::ranges::for_each(registered, [&](const auto& name) {
+  for (const auto& name : registered) {
     if (!service_manager_->AddContainer(name)) {
       log_.error("Failed to add container '{}' to service manager", name);
     } else {
       log_.info("Registered container '{}'", name);
     }
-  });
+  }
 
   return {};
 }
@@ -424,6 +431,7 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
 
   // Log the enriched dashboard.
   monitor_->Log(payload);
+  monitor_->LogToFile(payload, "/var/log/aember-monitor.json");
 }
 
 void AemberInit::OnServiceStateChange(const std::string& name,

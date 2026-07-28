@@ -36,3 +36,5 @@ keypairs
 *.cpio.gz
 
 doc/generated
+
+**/resources

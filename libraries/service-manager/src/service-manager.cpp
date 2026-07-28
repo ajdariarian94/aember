@@ -93,6 +93,15 @@ bool ServiceManager::AddContainer(std::string_view name) {
 
   std::lock_guard lock{mutex_};
   const std::string key{name};
+
+  // Guard against duplicate addition inside ServiceManager
+  if (containers_.contains(key)) {
+    log_.warn(
+        "AddContainer: Container '{}' already registered in ServiceManager",
+        name);
+    return false;
+  }
+
   states_[key] = ProcessState::Stopped;
   containers_.insert(key);
   log_.info("Registered container '{}'", name);
