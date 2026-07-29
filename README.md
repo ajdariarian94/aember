@@ -1,6 +1,8 @@
 # AEMBER 🚀🔥
 
-AEMBER is a modular, efficient, and production‑ready system designed to running cutting edge container applications in constrained enviroments
+AEMBER is a modular, efficient, and production‑ready system designed to running cutting edge container applications in constrained enviroments.
+
+Building embedded systems wastes time on infrastructure instead of features. Before running application logic, developers lose hours bootstrapping init systems, wiring services, debugging startup failures, and fighting tooling never designed for constrained or early-boot environments. AEMBER is a developer-first PID1 (init system) that eliminates this overhead by providing a modern C++ runtime for process supervision, container orchestration, and service management - letting you focus on your application, not your plumbing.
 
 ## 📦 Pre‑requisites
 
@@ -10,56 +12,43 @@ Before building or running AEMBER, ensure you have:
 - 🐳 **Docker**
 - 🖥️ **Visual Studio Code** with the **Dev Containers** extension installed
 
-Run the following:
+Run the following and follow the instructions:
 
 ```sh
 ./tools/scripts/prerequisites.sh 
 ```
 
-## 🏗️ Running AEMBER
+## Inside DevContainer
 
-AEMBER ships with a ready‑made Docker environment containing everything.
+You can use Visual Studio Code bash terminal to execute commands.
 
-Press **F1** (or **Ctrl+Shift+P**) and type:
+All commands start with aember and auto completion should work out of box.
 
-<i>**Dev Containers: Open Folder in Container**</i>
-
-This drops you into a fully configured environment.
-
-## 🛠️ Configuring
-
-Before building, configure the environment:
+If not, type the following:
 
 ```sh
-aember configure
+aember --install-completion
 ```
 
-## 🔨 Building
+After this step, restart bash and it should work.
 
-To build, run the following:
+### 🔨 Building
+
+To build, run the following (Artifacts and resources will be downloaded, takes around 5min for first time):
 
 ```sh
-aember build
+aember qemu build
 ```
 
-
-## 📦 Packing
-
-To pack, run the following:
-
-```sh
-aember pack
-```
-
-## ▶️ Executing
+### ▶️ Launching
 
 To execute, run the following
 
 ```sh
-aember execute
+aember qemu launch
 ```
 
-## 🧹 Linting & Cleaning
+### 🧹 Linting & Cleaning
 
 Check code style and lint issues:
 
@@ -73,7 +62,7 @@ Clean build artifacts:
 aember clean
 ```
 
-## 📚 Documentation
+### 📚 Documentation
 
 Generate and view Documentation
 
