@@ -54,61 +54,6 @@ echo "  ✅ Git found ($(git --version | cut -d' ' -f3))"
 echo ""
 
 ###############################################################################
-# .env secrets file — must be first so token is available for login
-###############################################################################
-
-echo "🔐 Setting up secrets file..."
-
-ENV_FILE="$(dirname "$0")/../scripts/.env"
-ENV_EXAMPLE="$(dirname "$0")/../scripts/.env.example"
-
-if [ ! -f "$ENV_FILE" ]; then
-    if [ -f "$ENV_EXAMPLE" ]; then
-        cp "$ENV_EXAMPLE" "$ENV_FILE"
-    else
-        cat > "$ENV_FILE" << 'ENVEOF'
-# Aember secrets — never commit this file
-# Fill in your values and press ENTER to continue
-
-export GITHUB_TOKEN=""
-ENVEOF
-    fi
-
-    echo "  ✅ Created tools/scripts/.env"
-    echo ""
-    echo "  ⚠️  Please fill in your GITHUB_TOKEN:"
-    echo "     nano tools/scripts/.env"
-    echo ""
-    echo "  💡 Token needs: read:packages scope"
-    echo "     Generate at: https://github.com/settings/tokens"
-    echo ""
-    read -p "  Press ENTER when done to continue setup..."
-    echo ""
-fi
-
-# Load secrets
-source "$ENV_FILE"
-echo "  ✅ Secrets loaded"
-echo ""
-
-###############################################################################
-# GitHub Container Registry login
-###############################################################################
-
-echo "🐳 Setting up GitHub Container Registry access..."
-
-if [ -n "$GITHUB_TOKEN" ]; then
-    echo "  🔑 Logging into ghcr.io with GITHUB_TOKEN..."
-    echo "$GITHUB_TOKEN" | docker login ghcr.io -u ajdariarian94 --password-stdin
-    echo "  ✅ Logged into ghcr.io successfully"
-else
-    echo "  ⚠️  GITHUB_TOKEN is empty in .env — skipping ghcr.io login"
-    echo "     Fill in tools/scripts/.env and re-run this script"
-    echo "     The repo goes public before CppCon — no token needed after that"
-fi
-echo ""
-
-###############################################################################
 # AppArmor — required for Yocto inside Docker
 ###############################################################################
 
@@ -141,19 +86,35 @@ fi
 echo ""
 
 ###############################################################################
-# Docker GID — ensures dev user can access Docker socket inside container
+# .env file — DOCKER_GID so the dev-container user can access the Docker
+# socket on the host
 ###############################################################################
 
 echo "🐋 Configuring Docker group access..."
 
+ENV_FILE="$(dirname "$0")/../scripts/.env"
+ENV_EXAMPLE="$(dirname "$0")/../scripts/.env.example"
+
 if getent group docker >/dev/null 2>&1; then
     DOCKER_GID=$(getent group docker | cut -d: -f3)
 
-    if ! grep -Fxq "export DOCKER_GID=${DOCKER_GID}" ~/.bashrc; then
-        echo "export DOCKER_GID=${DOCKER_GID}" >> ~/.bashrc
-        echo "  ✅ DOCKER_GID=${DOCKER_GID} added to ~/.bashrc"
+    if [ ! -f "$ENV_FILE" ]; then
+        if [ -f "$ENV_EXAMPLE" ]; then
+            cp "$ENV_EXAMPLE" "$ENV_FILE"
+        else
+            touch "$ENV_FILE"
+            echo "# Aember environment — never commit this file" > "$ENV_FILE"
+        fi
+        echo "  ✅ Created tools/scripts/.env"
+    fi
+
+    if grep -q "^export DOCKER_GID=" "$ENV_FILE" 2>/dev/null; then
+        # Update existing entry in place
+        sed -i "s/^export DOCKER_GID=.*/export DOCKER_GID=${DOCKER_GID}/" "$ENV_FILE"
+        echo "  ✅ DOCKER_GID updated in tools/scripts/.env (${DOCKER_GID})"
     else
-        echo "  ✅ DOCKER_GID already configured (${DOCKER_GID})"
+        echo "export DOCKER_GID=${DOCKER_GID}" >> "$ENV_FILE"
+        echo "  ✅ DOCKER_GID=${DOCKER_GID} added to tools/scripts/.env"
     fi
 else
     echo "  ⚠️  docker group not found — is Docker installed and running?"

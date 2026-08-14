@@ -8,12 +8,9 @@
     "image": "ghcr.io/ajdariarian94/aember-dev:latest",
     //
     // OPTION B: Build from Dockerfile (when updating tools/dependencies)
-    //"build": {
+    // "build": {
     //    "dockerfile": "Dockerfile",
-    //    "context": "..",
-    //    "args": {
-    //        "DOCKER_GID": "${localEnv:DOCKER_GID}"
-    //    }
+    //    "context": ".."
     //},
     // ---------------------------------------------------------------------------
 
@@ -30,8 +27,6 @@
         "-e", "DOCKER_GID=${localEnv:DOCKER_GID}",
 
         "-e", "DISPLAY",
-        "-v", "/lib/modules:/lib/modules:ro",
-        "-v", "/boot:/boot:ro",
         "-v", "/tmp/.X11-unix:/tmp/.X11-unix",
         "-v", "${env:HOME}/.ssh:/home/dev/.ssh:ro"
     ],

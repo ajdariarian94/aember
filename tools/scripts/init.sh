@@ -2,31 +2,66 @@
 # Fully reset .bashrc and setup workspace environment for aember
 
 # Prevent double execution — VS Code runs postStartCommand twice simultaneously.
-# Use uptime-based stamp: if second run starts within 5s of first, skip it.
-UPTIME=$(awk '{print int($1)}' /proc/uptime)
-STAMP_FILE="/home/dev/.aember-init-stamp"
+# Use a lock file under /run (tmpfs) rather than /home/dev: /run is guaranteed
+# to be cleared on every container restart, so a stale lock can never survive
+# across restarts and skip re-initialization (which previously caused the
+# Docker GID fix to be silently skipped after a container restart, since
+# /proc/uptime resets but a stamp file under /home/dev does not).
+LOCK_FILE="/run/aember-init.lock"
 
-if [ -f "$STAMP_FILE" ]; then
-    LAST=$(cat "$STAMP_FILE")
-    if [ "$((UPTIME - LAST))" -lt 5 ]; then
-        figlet -f big "hacking..." | lolcat
-        exit 0
-    fi
+if [ -e "$LOCK_FILE" ]; then
+    figlet -f big "hacking..." | lolcat
+    exit 0
 fi
 
-echo "$UPTIME" > "$STAMP_FILE"
+touch "$LOCK_FILE"
 
 # Resolve script and workspace directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)/aember_ws/aember"
 
-# Fix Docker GID mismatch — host GID may differ from image GID
+# -----------------------------
+# Fix Docker GID mismatch and verify socket access
+# -----------------------------
+# The image's built-in "docker" group GID may not match the host's docker
+# group GID (the socket is bind-mounted in with the HOST's GID as owner).
+# Rather than renumbering the existing "docker" group — which can fail if
+# that GID collides with an unrelated group, or break anything else already
+# tied to the old GID — create a dedicated group at the host's GID and add
+# "dev" to it. Group membership on the socket only cares about GID, not name,
+# so "dev" being in either group is sufficient.
 HOST_DOCKER_GID="${DOCKER_GID:-}"
-if [ -S /var/run/docker.sock ] && [ -n "$HOST_DOCKER_GID" ]; then
-    CURRENT_DOCKER_GID=$(getent group docker | cut -d: -f3 2>/dev/null || echo "")
-    if [ -n "$CURRENT_DOCKER_GID" ] && [ "$HOST_DOCKER_GID" != "$CURRENT_DOCKER_GID" ]; then
-        sudo groupmod -g "$HOST_DOCKER_GID" docker 2>/dev/null || true
+
+if [ -S /var/run/docker.sock ]; then
+    # Prefer the actual socket owner GID if DOCKER_GID wasn't passed through
+    if [ -z "$HOST_DOCKER_GID" ]; then
+        HOST_DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo "")
     fi
+
+    if [ -n "$HOST_DOCKER_GID" ]; then
+        # Does a group with this GID already exist (could be "docker" itself,
+        # or a "docker-host" group from a previous run)?
+        EXISTING_GROUP=$(getent group "$HOST_DOCKER_GID" | cut -d: -f1 || echo "")
+
+        if [ -z "$EXISTING_GROUP" ]; then
+            sudo groupadd -g "$HOST_DOCKER_GID" docker-host 2>/dev/null || true
+            EXISTING_GROUP="docker-host"
+        fi
+
+        if ! id -nG dev 2>/dev/null | grep -qw "$EXISTING_GROUP"; then
+            sudo usermod -aG "$EXISTING_GROUP" dev 2>/dev/null || true
+        fi
+    fi
+
+    # Verify the socket is actually reachable as dev; note this only reflects
+    # a *freshly spawned* dev process — an already-running shell won't see
+    # updated group membership until it's restarted
+    if ! sudo -u dev docker info >/dev/null 2>&1; then
+        echo "⚠️  dev user still cannot reach /var/run/docker.sock — Docker-in-Docker builds will fail" >&2
+        echo "    (open a fresh shell if this was just fixed — group membership needs a new session)" >&2
+    fi
+else
+    echo "⚠️  /var/run/docker.sock not found — is the socket mounted into this container?" >&2
 fi
 
 # Install aember completion first so we can source it in .bashrc
@@ -69,21 +104,6 @@ fi
 # Aember CLI completion
 if [ -f ~/.bash_completions/aember.sh ]; then
     source ~/.bash_completions/aember.sh
-fi
-
-# Load secrets from .env if present (not committed to repo)
-EOF
-
-# Append WORKSPACE_DIR dynamically (can't use single-quote heredoc for variables)
-cat >> "$HOME/.bashrc" << EOF
-ENV_FILE="$WORKSPACE_DIR/tools/scripts/.env"
-if [ -f "\$ENV_FILE" ]; then
-    source "\$ENV_FILE"
-fi
-
-# Authenticate gh CLI if token is available
-if [ -n "\$GITHUB_TOKEN" ]; then
-    echo "\$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null
 fi
 EOF
 
