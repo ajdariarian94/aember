@@ -5,16 +5,13 @@
     // Image source — toggle between prebuilt and local build:
     //
     // OPTION A: Pull prebuilt image from GitHub Container Registry
-    "image": "ghcr.io/ajdariarian94/aember-dev:latest",
+    // "image": "ghcr.io/ajdariarian94/aember-dev:latest",
     //
     // OPTION B: Build from Dockerfile (when updating tools/dependencies)
-    //"build": {
-    //    "dockerfile": "Dockerfile",
-    //    "context": "..",
-    //    "args": {
-    //        "DOCKER_GID": "${localEnv:DOCKER_GID}"
-    //    }
-    //},
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    },
     // ---------------------------------------------------------------------------
 
     "runArgs": [
@@ -30,8 +27,6 @@
         "-e", "DOCKER_GID=${localEnv:DOCKER_GID}",
 
         "-e", "DISPLAY",
-        "-v", "/lib/modules:/lib/modules:ro",
-        "-v", "/boot:/boot:ro",
         "-v", "/tmp/.X11-unix:/tmp/.X11-unix",
         "-v", "${env:HOME}/.ssh:/home/dev/.ssh:ro"
     ],

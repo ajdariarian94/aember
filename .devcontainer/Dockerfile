@@ -25,9 +25,6 @@ RUN \
         useradd -m -u "${UID}" -g "${GID}" "${USERNAME}"; \
     fi
 
-RUN groupadd -g ${DOCKER_GID} docker || true \
-    && usermod -aG ${DOCKER_GID} dev
-
 # ---- Add Ubuntu Toolchain PPA for GCC 14 ----
 RUN apt update && apt install -y \
     software-properties-common \
@@ -192,8 +189,12 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     apt-get install -y --no-install-recommends gh && \
     rm -rf /var/lib/apt/lists/*
 
-# Clean up APT cache
-RUN rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        linux-image-generic \
+        libguestfs-tools \
+        supermin \
+    && rm -rf /var/lib/apt/lists/*
 
 # Allow dev user to sudo
 RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
