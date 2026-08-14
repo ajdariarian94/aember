@@ -54,24 +54,6 @@ echo "  ✅ Git found ($(git --version | cut -d' ' -f3))"
 echo ""
 
 ###############################################################################
-# AppArmor — required for Yocto inside Docker
-###############################################################################
-
-echo "🔒 Configuring AppArmor for Yocto builds inside Docker..."
-
-SYSCTL_CONF="/etc/sysctl.d/99-yocto-docker-userns.conf"
-SYSCTL_LINE="kernel.apparmor_restrict_unprivileged_userns = 0"
-
-if ! sudo grep -Fxq "$SYSCTL_LINE" "$SYSCTL_CONF" 2>/dev/null; then
-    echo "  Configuring AppArmor unprivileged user namespaces..."
-    echo "$SYSCTL_LINE" | sudo tee "$SYSCTL_CONF" >/dev/null
-fi
-
-sudo sysctl -p "$SYSCTL_CONF" >/dev/null
-echo "  ✅ AppArmor configured for Yocto"
-echo ""
-
-###############################################################################
 # X11 access for QEMU display
 ###############################################################################
 
