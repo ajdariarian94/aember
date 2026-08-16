@@ -4,6 +4,8 @@ AEMBER is a modular, efficient, and production‑ready system designed to runnin
 
 Building embedded systems wastes time on infrastructure instead of features. Before running application logic, developers lose hours bootstrapping init systems, wiring services, debugging startup failures, and fighting tooling never designed for constrained or early-boot environments. AEMBER is a developer-first PID1 (init system) that eliminates this overhead by providing a modern C++ runtime for process supervision, container orchestration, and service management - letting you focus on your application, not your plumbing.
 
+# Quick Start
+
 ## 📦 Pre‑requisites
 
 Before building or running AEMBER, ensure you have:
@@ -18,7 +20,7 @@ Run the following and follow the instructions:
 ./tools/scripts/prerequisites.sh 
 ```
 
-## Inside DevContainer
+## 🐳 Inside DevContainer
 
 You can use Visual Studio Code bash terminal to execute commands.
 
@@ -46,20 +48,6 @@ To execute, run the following
 
 ```sh
 aember qemu launch
-```
-
-### 🧹 Linting & Cleaning
-
-Check code style and lint issues:
-
-```sh
-aember lint
-```
-
-Clean build artifacts:
-
-```sh
-aember clean
 ```
 
 ### 📚 Documentation
