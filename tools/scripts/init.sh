@@ -53,9 +53,18 @@ if [ -S /var/run/docker.sock ]; then
         fi
     fi
 
-    # Verify the socket is actually reachable as dev; note this only reflects
-    # a *freshly spawned* dev process — an already-running shell won't see
-    # updated group membership until it's restarted
+    # 🎩 Cheat code: grant dev a direct ACL on the socket itself. This
+    # bypasses the group-membership/login-session timing problem entirely —
+    # usermod only takes effect in a *new* login session, but setfacl takes
+    # effect immediately, even for shells that are already open. Requires
+    # the `acl` package (setfacl) to be present in the image.
+    if command -v setfacl >/dev/null 2>&1; then
+        sudo setfacl -m u:dev:rw /var/run/docker.sock 2>/dev/null || true
+    else
+        echo "⚠️  setfacl not found (install 'acl' package) — falling back to group membership only" >&2
+    fi
+
+    # Verify the socket is actually reachable as dev
     if ! sudo -u dev docker info >/dev/null 2>&1; then
         echo "⚠️  dev user still cannot reach /var/run/docker.sock — Docker-in-Docker builds will fail" >&2
         echo "    (open a fresh shell if this was just fixed — group membership needs a new session)" >&2
