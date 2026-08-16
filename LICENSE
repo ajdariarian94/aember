@@ -1,11 +1,53 @@
-Copyright (c) 2025 Aember GmbH. All rights reserved.
+# Aember License
 
-This software and its source code are the proprietary property of Aember GmbH,
-a company registered in Germany.
+Copyright (c) 2025 Arian Ajdari
 
-Unauthorized copying, distribution, modification, reverse engineering, or use
-of this software, in whole or in part, is strictly prohibited without the
-prior written consent of Aember GmbH.
+## License Grant
 
-This software is licensed, not sold. Any use must comply with the applicable
-license terms provided by Aember GmbH.
+Licensor hereby grants you the right to copy, modify, create derivative
+works, and redistribute the Software, in source or binary form, for any
+Permitted Purpose, subject to the limitations below.
+
+## Permitted Purpose
+
+You may use the Software free of charge for:
+- Personal, educational, or academic use
+- Open-source contributions to this project
+- Evaluation, testing, and non-production research/experimentation
+
+Any other use — including any use by, for, or on behalf of a company,
+or any use in a commercial product, service, or revenue-generating
+activity, regardless of amount — is NOT a Permitted Purpose and requires
+a separate commercial license from Licensor, obtained in advance.
+
+## Commercial Use
+
+If you intend to use the Software for any commercial purpose, you must
+contact Licensor and obtain a license in advance. No revenue or usage
+threshold applies — any commercial use requires a license, regardless of
+scale.
+
+Contact: ajdari.arian94@gmail.com
+
+## Contributions
+
+By submitting a contribution to this repository, you agree it may be
+licensed under these same terms, and you grant Licensor the right to
+relicense your contribution as part of the Software, including under
+commercial license terms offered to paying customers.
+
+## Change Date
+
+On August 16, 2030 (five years from the initial publication of this
+license), the license for each version of the Software automatically
+converts to the Apache License, Version 2.0, and the restrictions above
+no longer apply to that version. Versions released after that date remain
+governed by this license until their own five-year Change Date passes.
+
+## No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL
+LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING
+FROM THE USE OF THE SOFTWARE.
