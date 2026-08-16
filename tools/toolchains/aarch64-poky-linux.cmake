@@ -4,7 +4,7 @@ set(CMAKE_SYSTEM_PROCESSOR aarch64)
 # ---------------------------------------------------------------------------
 # Poky Paths — aarch64 (Raspberry Pi 4)
 # ---------------------------------------------------------------------------
-set(POKY_SYSROOT  "/aember_ws/aember/yocto/build/aarch64-poky-linux/sdk/sysroots/cortexa72-poky-linux")
+set(POKY_SYSROOT  "/aember_ws/aember/yocto/build/aarch64-poky-linux/sdk/sysroots/cortexa57-poky-linux")
 set(POKY_SDK_ROOT "/aember_ws/aember/yocto/build/aarch64-poky-linux/sdk/sysroots/x86_64-pokysdk-linux")
 set(CMAKE_SYSROOT ${POKY_SYSROOT})
 
