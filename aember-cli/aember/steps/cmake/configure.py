@@ -70,8 +70,19 @@ class ConfigureStep(Step):
 
     # ---- Execution ----------------------------------------------------
 
+    def ensure_vcpkg(self, ctx: Context) -> None:
+        """Check out the vcpkg submodule if a plain `git clone` left it empty."""
+        toolchain = ctx.root / "vcpkg" / "scripts" / "buildsystems" / "vcpkg.cmake"
+        if toolchain.exists():
+            return
+        log.info("vcpkg submodule missing — running git submodule update")
+        CommandRunner.run(
+            ["git", "-C", str(ctx.root), "submodule", "update", "--init", "vcpkg"]
+        )
+
     def run(self, ctx: Context) -> None:
         log.info("Configuring project")
+        self.ensure_vcpkg(ctx)
         log.debug("Architecture: %s", ctx.architecture)
         log.debug("Build type:   %s", ctx.build_type)
 

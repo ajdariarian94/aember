@@ -1,75 +1,75 @@
-import logging
-import os
-from pathlib import Path
+"""
+The resources/ rootfs overlay.
 
-from .fetch_artifact import fetch_artifact, get_version
+resources/<arch>/rootfs/ is copied over the root filesystem by the pack step.
+Its small text files (etc/aember/*.json, lxc.container.conf, udhcpc script)
+are tracked in git. The container images (*.squashfs, e.g. the Qt-based
+aember-monitor) are too large for git: they come from aember's own GitHub
+release v<VERSION> as aember-resources-v<VERSION>.tar.gz (packed by
+`aember release`).
+
+check_resources() downloads that tarball when an image is missing and
+extracts only files that don't exist yet, so the git-tracked configs always
+win over the (possibly older) copies in the tarball.
+"""
+
+import logging
+from pathlib import Path
+import shutil
+import tarfile
+import urllib.request
+
+from .fetch_artifact import _get_repo, get_version
 
 log = logging.getLogger("aember.check_resources")
 
-ENV_FILE = Path("tools/scripts/.env")
+IMAGE_GLOB = "*.squashfs"
 
 
-def _load_github_token(root: Path) -> None:
-    """
-    Ensure GITHUB_TOKEN is set in the environment so `gh` is authenticated,
-    without requiring an interactive `gh auth login`.
-    Reads tools/scripts/.env (export GITHUB_TOKEN="...") if the token isn't
-    already present in the environment.
-    """
-    if os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"):
-        return
-
-    env_path = root / ENV_FILE
-    if not env_path.exists():
-        log.warning(
-            "No GITHUB_TOKEN in env and %s not found — gh may fail to auth", env_path
-        )
-        return
-
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        line = line.removeprefix("export ").strip()
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key == "GITHUB_TOKEN" and value:
-            os.environ["GITHUB_TOKEN"] = value
-            log.info("Loaded GITHUB_TOKEN from %s", env_path)
-            return
-
-    log.warning("GITHUB_TOKEN not found in %s", env_path)
+def _download(url: str, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    log.info("Downloading %s", url)
+    with urllib.request.urlopen(url) as resp, tmp.open("wb") as out:
+        shutil.copyfileobj(resp, out, 1 << 20)
+    tmp.replace(dest)
 
 
-def _resources_present(resources_dir: Path) -> bool:
-    return resources_dir.exists() and any(resources_dir.iterdir())
+def _extract_missing(tar_path: Path, root: Path) -> int:
+    """Extract members of tar_path under root that don't exist yet."""
+    count = 0
+    with tarfile.open(tar_path, "r:gz") as tar:
+        for member in tar.getmembers():
+            if not member.name.startswith("resources/"):
+                continue
+            if member.isfile() and (root / member.name).exists():
+                log.debug("Keeping existing %s", member.name)
+                continue
+            tar.extract(member, root, filter="tar")
+            count += member.isfile()
+    return count
 
 
-def check_resources(root: Path) -> bool:
-    """
-    Ensure resources/ is present locally.
-    If missing/empty, downloads and extracts the aember-resources artifact
-    from GitHub Releases (produced by ReleaseStep._pack_resources). If
-    already present, skips.
-    Returns True if resources are present/fetched successfully, False otherwise.
-    """
-    _load_github_token(root)
-
+def check_resources(root: Path) -> None:
+    """Make sure resources/ has its container images; raise if that fails."""
     resources_dir = root / "resources"
-    log.info("Checking resources_dir=%s (root=%s)", resources_dir, root)
-
-    if _resources_present(resources_dir):
-        log.info("Resources already present — skipping")
-        return True
-
-    log.info("Resources missing — fetching from release")
-
     version = get_version(root)
-    artifact_name = f"aember-resources-v{version}.tar.gz"
+    name = f"aember-resources-v{version}.tar.gz"
+    tar_path = root / "build" / "downloads" / name
 
-    # The tarball's top-level entry is "resources", so extract into root
-    # itself rather than into resources_dir.
-    return fetch_artifact(root, artifact_name, root)
+    if any(resources_dir.rglob(IMAGE_GLOB)):
+        log.info("Resource images present — skipping")
+        return
+
+    url = f"https://github.com/{_get_repo(root)}/releases/download/v{version}/{name}"
+    log.info("Resource images missing — fetching %s", name)
+    try:
+        _download(url, tar_path)
+        count = _extract_missing(tar_path, root)
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not fetch resource images from {url}: {e}. "
+            f"They are needed for the container images in resources/."
+        ) from e
+    tar_path.unlink(missing_ok=True)
+    log.info("Extracted %d file(s) from %s into resources/", count, name)

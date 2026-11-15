@@ -1,0 +1,33 @@
+{
+  "containers": [
+    
+    {
+      "name": "aember-echo",
+      "type": "container",
+      "container": {
+        "squashfs": "/var/lib/aember/aember-echo/aember-echo.squashfs",
+        "rootfs": "/var/lib/aember/containers/aember-echo",
+        "config_path": "/var/lib/aember/aember-echo/lxc.container.conf",
+        "args": ["/bin/sh", "/echo-alpine.sh"]
+      },
+      "restart_policy": "always",
+      "dependencies": [],
+      "max_restart_attempts": 5,
+      "restart_delay": 5
+    },
+    {
+      "name": "aember-monitor",
+      "type": "container",
+      "container": {
+        "squashfs": "/var/lib/aember/aember-monitor/aember-monitor.squashfs",
+        "rootfs": "/var/lib/aember/containers/aember-monitor",
+        "config_path": "/var/lib/aember/aember-monitor/lxc.container.conf",
+        "args": ["/usr/bin/aember-monitor", "-platform", "linuxfb"]
+      },
+      "restart_policy": "always",
+      "dependencies": [],
+      "max_restart_attempts": 5,
+      "restart_delay": 5
+    }
+  ]
+}

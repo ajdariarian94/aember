@@ -84,7 +84,7 @@ CMakeLists.txt          Superbuild: ExternalProject libraries → executables, e
 libraries/              aember-libs: one static lib per dir, + utils/<x>
 executables/aember/     main.cpp → the `aember` binary (PID 1)
 examples/               demo binaries packed into the initramfs
-resources/<arch>/rootfs git-ignored rootfs overlay (configs, container images)
+resources/<arch>/rootfs rootfs overlay: configs tracked, *.squashfs images from the release
 tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (SDK compilers, sysroot, flags)
 tools/scripts/          init.sh (postStart), prerequisites.sh, bashrc.d/
 vcpkg/                  SUBMODULE (fork) incl. x64/aarch64-poky-linux triplets
@@ -124,11 +124,34 @@ Runtime config lives in the overlay at
 `resources/<arch>/rootfs/etc/aember/{services,containers,modules,network}.json`;
 container images under `rootfs/var/lib/aember/<name>/`.
 
+The overlay's text files (the JSON configs, `lxc.container.conf`, the udhcpc
+script) are **tracked in git**; edit them here and commit. The container
+images (`*.squashfs`, e.g. the Qt-based `aember-monitor`) are git-ignored and
+come from aember's own release `v<project VERSION>` as
+`aember-resources-v<V>.tar.gz` (public, plain HTTPS). `CheckResources`
+(`utils/check_resources.py`) downloads it when no image is present and
+extracts only files that don't exist yet, so tracked configs always win.
+`aember release` packs the whole overlay into that tarball.
+
+## From a fresh clone (x64)
+
+```bash
+git clone https://github.com/ajdariarian94/aember.git   # inside the dev container
+aember app build      # images, aember-resources (kernel/BusyBox/LXC/SDK), vcpkg, configure, build
+aember app pack       # initramfs + rootfs image in build/package/x64-poky-linux/Release/
+aember app launch     # QEMU in xterm; --headless --timeout 30 for a terminal-only check
+```
+
+`aember app build` = `CheckResources` → `FetchResources` → `ConfigureStep`
+(initialises the `vcpkg` submodule if a plain clone left it empty) →
+`BuildStep`. Every step skips work that's already done, so it's also the
+everyday build command.
+
 ## Build pipeline (`aember qemu build`)
 
 `aember-cli/aember/cli/qemu/build.py` runs, in order:
 
-1. `CleanStep`, `CheckResources`: fetch the `resources/` overlay
+1. `CleanStep`, `CheckResources`: fetch the overlay images (above)
    (`aember-resources-v<V>.tar.gz` from *aember's own* release; unrelated
    to the aember-resources repo despite the name)
 2. `FetchResources`: kernel, BusyBox, LXC, SDK from aember-resources (above)
@@ -226,9 +249,9 @@ directly.
   `-e PYTHONPATH=/aember_ws/aember/aember-cli` and put `/venv/bin` on `PATH`.
 - `devcontainer.json` uses the prebuilt image; switch to the `build:` block
   to test Dockerfile changes.
-- `gh` is only needed for aember's own releases (`CheckResources`);
-  `GITHUB_TOKEN` can come from `tools/scripts/.env` (git-ignored, **never
-  commit or print it**).
+- Downloads (overlay images, aember-resources) use plain HTTPS; `gh` and a
+  token are not needed to build. For other `gh` use, `GITHUB_TOKEN` can come
+  from `tools/scripts/.env` (git-ignored, **never commit or print it**).
 - `aember-cli/aember/config/host_path.py` reads `HOST_ROOT_PATH` at import.
 
 ## Known issues (don't fix unless asked)

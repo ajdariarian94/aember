@@ -6,6 +6,9 @@ from aember.config.build_type import BuildType
 from aember.core.context import Context
 from aember.core.pipeline import Pipeline
 from aember.steps.cmake.build import BuildStep
+from aember.steps.cmake.configure import ConfigureStep
+from aember.steps.resources.check_resources import CheckResources
+from aember.steps.resources.fetch_resources import FetchResources
 
 
 def build(
@@ -25,6 +28,14 @@ def build(
     build_type=build_type.value
     )
 
-    Pipeline([
-        BuildStep(),
-    ]).run(ctx)
+    # Everything a fresh clone needs: overlay images, kernel/BusyBox/LXC/SDK
+    # from aember-resources, CMake configure (vcpkg deps), then the build.
+    # Each step skips work that is already done.
+    Pipeline(
+        [
+            CheckResources(),
+            FetchResources(),
+            ConfigureStep(),
+            BuildStep(),
+        ]
+    ).run(ctx)
