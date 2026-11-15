@@ -39,8 +39,8 @@ aember-resources (`../aember-resources`,
 <https://github.com/ajdariarian94/aember-resources>) builds the low-level
 pieces with kas/Yocto and publishes them as assets of the GitHub release
 `v<version>`. The version aember uses is pinned in
-`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.1`;
-x64 only so far).
+`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.2`;
+x64 and aarch64).
 
 `aember fetch-resources` (also the first step of `aember qemu build`,
 `steps/resources/fetch_resources.py`):
@@ -282,9 +282,9 @@ CLI's history up to `af5bc15`). It's regular files here: edit it directly.
 
 - `cli/qemu/build.py`: `if build_tests or BuildType.debug:` is always true,
   so every `aember qemu build` starts with `CleanStep`.
-- aarch64: aember-resources has no aarch64 assets yet, so
-  `aember qemu build --architecture aarch64-poky-linux` stops at
-  `FetchResources`. The QEMU profile still uses `-cpu cortex-a57`.
+- `aember app build` runs `cmake --build --parallel` with no job count; on
+  WSL pass `CMAKE_BUILD_PARALLEL_LEVEL=8` (and `VCPKG_MAX_CONCURRENCY=8`),
+  using every core crashes it.
 - The dev Dockerfile still has Yocto-era leftovers (GNU tar 1.34
   downgrade, gcc-12/14 PPA). Harmless, but can go on the next image rebuild.
 

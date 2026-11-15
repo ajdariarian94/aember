@@ -70,8 +70,10 @@ BusyBox init / s6 / runit / dinit.
 - [ ] **OTA updates with rollback** (A/B rootfs). Most important for fleets.
 - [ ] Signed images; seccomp/AppArmor profiles for containers; dropping
   privileges where possible.
-- [ ] **aarch64 / Raspberry Pi** end to end: in progress on branch
-  `feature/aarch64` (QEMU first, then real hardware).
+- [ ] **aarch64 / Raspberry Pi** on real hardware. Builds, packs and boots in
+  QEMU (`virt`, Cortex-A72) since 0.10.0 with aember-resources v0.1.2.
+- [ ] `BuildStep` (`steps/cmake/build.py`): give `--parallel` a job count
+  (WSL crashes when the build uses every core).
 - [ ] **arm32 (ARMv7, `arm-poky-linux`)** after aarch64 works: common on
   embedded boards (i.MX6, STM32MP1, older Pis). Needs a machine/kas file,
   kernel and BusyBox fragments, LXC conf and assets in aember-resources, plus
