@@ -287,6 +287,9 @@ directly.
 
 ## Working agreements for agents
 
+- `TODO.md` (repo root) lists collected ideas and known gaps. Read it for
+  context, but implement an item only when the user asks for it; update it
+  when an item is done or a new one comes up.
 - Branch off `main` (`fix/<x>`, `enhancement/<x>`, `docs/<x>`, …) and merge
   through a PR. Commit only when asked.
 - Don't commit unrelated working-tree changes the user has in progress.
