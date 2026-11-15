@@ -76,7 +76,7 @@ int AemberMonitor::CountChildren(pid_t pid) {
     std::string content;
     std::getline(f, content);
     if (content.empty()) return 0;
-    return static_cast<int>(std::ranges::count(content, ' ') + 1);
+    return static_cast<int>(std::ranges::count(content, ' '));
   }
 
   int count = 0;
