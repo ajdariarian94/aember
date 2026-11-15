@@ -2,11 +2,3 @@
 	path = vcpkg
 	url = https://github.com/ajdariarian94/vcpkg.git
 
-[submodule "aember-cli"]
-	path = aember-cli
-	url = https://github.com/ajdariarian94/aember-cli.git
-
-[submodule "yocto/poky"]
-	path = yocto/poky
-	url = https://github.com/ajdariarian94/poky.git
-	branch = master

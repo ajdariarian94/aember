@@ -1,0 +1,17 @@
+.cache
+.ruff_cache
+.venv
+.vscode
+build
+
+keypairs
+
+.ruff_cache
+
+
+# Ignore Python bytecode
+**/__pycache__/
+*.py[cod]
+
+aember_cli.egg-info
+

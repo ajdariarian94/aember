@@ -11,18 +11,6 @@ keypairs
 **/__pycache__/
 *.py[cod]
 
-#Ignore yocto resources
-# Build directory
-**/yocto/resources/**
-**/yocto/build/**
-
-**/aember-image/recipes-core/aember/files/aember
-
-**/conf/bblayers.conf
-**/conf/conf-notes.txt
-**/conf/conf-summary.txt
-**/conf/local.conf
-**/conf/templateconf.cfg
 
 *.env
 
@@ -37,4 +25,4 @@ keypairs
 
 doc/generated
 
-**/resources
+/resources/

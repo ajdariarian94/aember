@@ -21,11 +21,19 @@ find_package(
   REQUIRED
 )
 
+# LXC from aember-resources; VIRT_ROOT is set by the toolchain file
+# (build/aember-resources/<arch>/virtualization).
+if (NOT
+    VIRT_ROOT
+)
+  message(FATAL_ERROR "VIRT_ROOT not set — use tools/toolchains/<arch>.cmake")
+endif ()
+
 set(LXC_INCLUDE_DIR
-    "/aember_ws/aember/yocto/build/${ARCHITECTURE}/virtualization/include"
+    "${VIRT_ROOT}/include"
 )
 set(LXC_LIBRARY
-    "/aember_ws/aember/yocto/build/${ARCHITECTURE}/virtualization/libs/liblxc.so"
+    "${VIRT_ROOT}/libs/liblxc.so"
 )
 
 if (NOT

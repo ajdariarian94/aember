@@ -107,7 +107,7 @@ echo ""
 # Git submodules
 ###############################################################################
 
-echo "📦 Initializing git submodules (vcpkg, aember-cli, yocto/poky)..."
+echo "📦 Initializing git submodules (vcpkg)..."
 
 if [ -f ".gitmodules" ]; then
     git submodule init

@@ -4,8 +4,8 @@ include(CMakeFindDependencyMacro)
 find_dependency(aember-libs REQUIRED COMPONENTS mount-manager utils)
 
 # Reconstruct LXC imported target for consumers
-set(LXC_INCLUDE_DIR "/aember_ws/aember/yocto/build/@ARCHITECTURE@/virtualization/include")
-set(LXC_LIBRARY "/aember_ws/aember/yocto/build/@ARCHITECTURE@/virtualization/libs/liblxc.so")
+set(LXC_INCLUDE_DIR "@VIRT_ROOT@/include")
+set(LXC_LIBRARY "@VIRT_ROOT@/libs/liblxc.so")
 
 if(NOT TARGET LXC::LXC)
     add_library(LXC::LXC SHARED IMPORTED)

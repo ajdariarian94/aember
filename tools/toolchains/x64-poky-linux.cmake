@@ -2,22 +2,25 @@ set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
 
 # ---------------------------------------------------------------------------
-# Poky Paths
+# Poky Paths — SDK and LXC from aember-resources, fetched by
+# `aember fetch-resources` into build/aember-resources/<arch>/
 # ---------------------------------------------------------------------------
-set(POKY_SYSROOT  "/aember_ws/aember/yocto/build/x64-poky-linux/sdk/sysroots/core2-64-poky-linux")
-set(POKY_SDK_ROOT "/aember_ws/aember/yocto/build/x64-poky-linux/sdk/sysroots/x86_64-pokysdk-linux")
+get_filename_component(AEMBER_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+set(AEMBER_RESOURCES_DIR "${AEMBER_ROOT}/build/aember-resources/x64-poky-linux")
+set(POKY_SYSROOT  "${AEMBER_RESOURCES_DIR}/sdk/sysroots/core2-64-poky-linux")
+set(POKY_SDK_ROOT "${AEMBER_RESOURCES_DIR}/sdk/sysroots/x86_64-pokysdk-linux")
 set(CMAKE_SYSROOT ${POKY_SYSROOT})
 
 # ---------------------------------------------------------------------------
 # Compilers
 # ---------------------------------------------------------------------------
 set(CMAKE_C_COMPILER   "${POKY_SDK_ROOT}/usr/bin/x86_64-poky-linux/x86_64-poky-linux-gcc")
-set(CMAKE_CXX_COMPILER "/aember_ws/aember/yocto/build/x64-poky-linux/gcc-reflection/install/bin/g++")
+set(CMAKE_CXX_COMPILER "${POKY_SDK_ROOT}/usr/bin/x86_64-poky-linux/x86_64-poky-linux-g++")
 
 # ---------------------------------------------------------------------------
-# C++ Standard — C++26 with P2996 reflection
+# C++ Standard — C++23 (Poky SDK GCC 15)
 # ---------------------------------------------------------------------------
-set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -27,7 +30,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(POKY_FLAGS
   "-m64 -march=core2 -mtune=core2 -msse3 -mfpmath=sse -fstack-protector-strong"
 )
-set(REFLECTION_FLAGS "-freflection")
 
 # ---------------------------------------------------------------------------
 # Release optimizations
@@ -66,7 +68,7 @@ set(RELEASE_LINK_FLAGS
 )
 
 set(CMAKE_C_FLAGS_INIT          "${POKY_FLAGS}")
-set(CMAKE_CXX_FLAGS_INIT        "${POKY_FLAGS} ${REFLECTION_FLAGS}")
+set(CMAKE_CXX_FLAGS_INIT        "${POKY_FLAGS}")
 set(CMAKE_CXX_FLAGS_RELEASE     "${RELEASE_FLAGS}")
 set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${RELEASE_LINK_FLAGS}")
 
@@ -77,8 +79,11 @@ set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${RELEASE_LINK_FLAGS}")
 # -DCMAKE_BUILD_TYPE=Release.
 # ---------------------------------------------------------------------------
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  find_program(STRIP_TOOL NAMES strip
+  # The SDK's cross strip. NO_CMAKE_FIND_ROOT_PATH: don't pick the target
+  # sysroot's /usr/bin/strip, which is a dangling link there.
+  find_program(STRIP_TOOL NAMES x86_64-poky-linux-strip
     HINTS "${POKY_SDK_ROOT}/usr/bin/x86_64-poky-linux"
+    NO_CMAKE_FIND_ROOT_PATH
   )
 
   if(STRIP_TOOL)
@@ -113,7 +118,7 @@ endif()
 # ---------------------------------------------------------------------------
 # pkg-config search paths
 # ---------------------------------------------------------------------------
-set(VIRT_ROOT           "/aember_ws/aember/yocto/build/x64-poky-linux/virtualization")
+set(VIRT_ROOT           "${AEMBER_RESOURCES_DIR}/virtualization")
 set(VIRT_PKG_CONFIG_PATH "${VIRT_ROOT}/pkgconfig")
 set(SYSROOT_PKG_CONFIG   "${POKY_SYSROOT}/usr/lib/pkgconfig")
 

@@ -1,63 +1,23 @@
 #include <aember-libs/device-health/aember-monitor.h>
 #include <aember-libs/utils/logging/logging.h>
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <csignal>
-#include <meta>
 #include <mutex>
 #include <string_view>
 
-using SelfStats = aember::device_health::AemberMonitorClient::SelfStats;
-
 // ---------------------------------------------------------------------------
-// C++26 P2996 reflection
-//
-// Mirror of the json_to_object pattern from the working example:
-//   - consteval function uses std::vector<std::meta::info> locally
-//   - generates a struct type via substitute + Cls
-//   - each field holds its own name as const char*
-//   - splice at global scope produces a constexpr struct instance
-//
-// Result: kFields.pid == "pid", kFields.ppid == "ppid", etc.
-// Field names come from SelfStats definition — add a field there and
-// it appears here automatically at compile time.
+// Monitored fields of AemberMonitorClient::SelfStats, logged at startup.
+// Keep in sync with the SelfStats definition in aember-monitor.h.
 // ---------------------------------------------------------------------------
 
-template <std::meta::info... Ms>
-struct Outer {
-  struct Inner;
-  consteval { define_aggregate(^^Inner, {Ms...}); }
-};
+constexpr std::string_view kMonitorClientName = "AemberMonitorClient";
 
-template <std::meta::info... Ms>
-using Cls = Outer<Ms...>::Inner;
-
-template <typename T, auto... Vs>
-constexpr T construct_from{Vs...};
-
-constexpr std::string_view AemberMonitorClientName =
-    std::meta::identifier_of(^^aember::device_health::AemberMonitorClient);
-
-consteval std::meta::info get_field_names_info() {
-  std::vector<std::meta::info> ms;
-  std::vector<std::meta::info> vs = {^^void};
-
-  for (auto m : std::meta::nonstatic_data_members_of(
-           ^^SelfStats, std::meta::access_context::current())) {
-    auto dms = data_member_spec(
-        ^^char const*, {.name = std::string(std::meta::identifier_of(m))});
-    ms.push_back(std::meta::reflect_constant(dms));
-    vs.push_back(
-        std::meta::reflect_constant_string(std::meta::identifier_of(m)));
-  }
-
-  vs[0] = std::meta::substitute(^^Cls, ms);
-  return std::meta::substitute(^^construct_from, vs);
-}
-
-// Splice the generated struct — each field holds its own name as const char*.
-constexpr auto SelfStatsFields = [:get_field_names_info():];
+constexpr std::array<std::string_view, 5> kSelfStatsFields{
+    "pid", "ppid", "vm_rss_kb", "uptime_s", "pid1_rss_kb"};
 
 // ---------------------------------------------------------------------------
 // Graceful shutdown via SIGTERM / SIGINT
@@ -85,17 +45,14 @@ int main() {
 
   aember::device_health::AemberMonitorClient monitor{"aember-child-demo"};
 
-  // C++26 P2996: type name reflected at compile time.
-  log_.info("Monitor type: {} (C++26 P2996 reflection)",
-            AemberMonitorClientName);
+  log_.info("Monitor type: {}", kMonitorClientName);
 
-  // C++26 P2996: field names generated from SelfStats at compile time.
-  log_.info("Monitored fields (reflected at compile time):");
-  log_.info("  ├─ {}", SelfStatsFields.pid);
-  log_.info("  ├─ {}", SelfStatsFields.ppid);
-  log_.info("  ├─ {}", SelfStatsFields.vm_rss_kb);
-  log_.info("  ├─ {}", SelfStatsFields.uptime_s);
-  log_.info("  └─ {}", SelfStatsFields.pid1_rss_kb);
+  log_.info("Monitored fields:");
+  for (std::size_t i = 0; i < kSelfStatsFields.size(); ++i) {
+    log_.info("  {} {}",
+              i + 1 < kSelfStatsFields.size() ? "├─" : "└─",
+              kSelfStatsFields[i]);
+  }
 
   monitor.Report();
 

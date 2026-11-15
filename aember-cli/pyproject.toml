@@ -1,0 +1,18 @@
+[project]
+name = "aember-cli"
+version = "0.1.0"
+dependencies = ["typer"]
+
+[project.scripts]
+aember = "aember-cli.run:app"
+
+[tool.ruff]
+line-length = 88
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+line_length = 88
+profile = "black"
+force_sort_within_sections = true

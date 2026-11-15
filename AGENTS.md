@@ -6,19 +6,20 @@ Guidance for AI coding agents (Claude Code, Copilot, Codex, …) working in
 ## What this repo is
 
 **Aember** is a PID 1 (init system) for constrained embedded Linux, written in
-modern C++. It supervises processes, runs LXC containers, loads kernel
-modules, brings up the network and pivots from the initramfs to the real root
-filesystem. This repo holds:
+modern C++ (**C++23**). It supervises processes, runs LXC containers, loads
+kernel modules, brings up the network and pivots from the initramfs to the
+real root filesystem. This repo holds:
 
 - the C++ code: `libraries/` (the init system as static libs), `executables/`
   (the `aember` binary), `examples/`
-- the `aember` CLI (`aember-cli/`, a **git submodule**), which configures,
-  builds, packs, launches in QEMU and releases the system
+- the `aember` CLI (`aember-cli/`, plain files in this repo), which fetches
+  the prebuilt resources, configures, builds, packs, launches in QEMU and
+  releases the system
 - the dev container, toolchain files, vcpkg setup and the rootfs overlay
   (`resources/`)
 
-The low-level pieces (kernel, BusyBox, LXC, Poky SDK) come from the sibling
-repo **aember-resources** (`../aember-resources`), see below.
+Kernel, BusyBox, LXC and the Poky SDK are **not built here**. They come
+prebuilt from the sibling repo **aember-resources**, see below.
 
 ### Boot flow
 
@@ -32,63 +33,73 @@ kernel ─► initramfs /init ─► usr/bin/aember            AemberInit::Start
 
 `executables/aember/main.cpp` picks the mode with CLI11 (`--root`).
 
-## Relationship to aember-resources (read this first)
+## aember-resources (kernel, BusyBox, LXC, SDK)
 
-aember-resources builds kernel, BusyBox, LXC and the Poky SDK with kas and
-publishes them as GitHub release assets
-(<https://github.com/ajdariarian94/aember-resources/releases>, v0.1.0, x64
-only for now):
+aember-resources (`../aember-resources`,
+<https://github.com/ajdariarian94/aember-resources>) builds the low-level
+pieces with kas/Yocto and publishes them as assets of the GitHub release
+`v<version>`. The version aember uses is pinned in
+`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.1`;
+x64 only so far).
 
-| Asset                                        | Content                                         |
-|----------------------------------------------|-------------------------------------------------|
-| `aember-kernel-<arch>-v<V>.zip`              | `bzImage`/`Image`, `System.map`, `lib/modules/` |
-| `aember-busybox-<arch>-v<V>.zip`             | static `busybox`                                |
-| `aember-lxc-<arch>-v<V>.zip`                 | `libs/liblxc.so*`, headers, `pkgconfig/lxc.pc`, `.conf` files |
-| `aember-sdk-<arch>-v<V>.sh`                  | Poky SDK installer (GCC 15, C++23): `sh <it> -d <dir> -y` |
-| `manifest.json`, `SHA256SUMS`                | version, kas hash + sha256 per asset            |
+`aember fetch-resources` (also the first step of `aember qemu build`,
+`steps/resources/fetch_resources.py`):
 
-**This repo has not been migrated to those assets yet.** It still carries
-the old in-repo setup, which aember-resources replaced:
+1. downloads the release's `manifest.json` over plain HTTPS (the repo is
+   public: no `gh`, no token),
+2. for each asset of the architecture, skips it if
+   `build/aember-resources/<arch>/<dir>/.asset-sha256` already holds the
+   manifest's sha256, otherwise downloads it, verifies the sha256 and
+   installs it: zips are extracted (Unix modes restored), the SDK installer
+   runs with `-d`.
 
-| Here (legacy, still wired up)                                   | aember-resources (current)                       |
-|-----------------------------------------------------------------|--------------------------------------------------|
-| `yocto/meta-aember`, `yocto/poky` submodule, `yocto/hashes/`    | kas + `meta-aember` + `hashes/` there            |
-| `aember kernel/busybox/lxc/sdk build`: bitbake in the dev container, recipe-file hashes | `aember build <component>` in a pinned kas container, CAS keys |
-| tar.gz assets on *aember's* releases (`aember-kernel-…tar.gz`, `aember-modules-…`, `aember-sdk-…tar.gz`, `aember-gcc-reflection-…`) | zip / installer assets on aember-resources' releases |
-| C++: **gcc-reflection** (P2996), `-std=c++26 -freflection` (`tools/toolchains/*.cmake`, `config/libs.py`) | Poky SDK GCC 15 only, **C++23**, no gcc-reflection |
-| aarch64 tune `cortexa57`                                         | `cortexa72` (Raspberry Pi 4)                     |
+| Component | Asset                                  | Installed into `build/aember-resources/<arch>/` |
+|-----------|----------------------------------------|-------------------------------------------------|
+| kernel    | `aember-kernel-<arch>-v<V>.zip`        | `kernel/` (`bzImage`/`Image`, `lib/modules/<kver>/`) |
+| busybox   | `aember-busybox-<arch>-v<V>.zip`       | `busybox/busybox` (static)                      |
+| lxc       | `aember-lxc-<arch>-v<V>.zip`           | `virtualization/` (`libs/liblxc.so*`, `include/`, `pkgconfig/lxc.pc`) |
+| sdk       | `aember-sdk-<arch>-v<V>.sh` (installer) | `sdk/` (GCC 15, sysroots, `environment-setup-*`) |
 
-The plan is for aember to pull the aember-resources assets and use them to
-compile and pack the app. **Don't start that migration, and don't "fix" the
-legacy pieces one by one, unless asked.** When you do migrate:
-
-- Only `examples/aember-child-demo/main.cpp` uses reflection (`<meta>`,
-  `^^`, `define_aggregate`). The libraries use C++23 features
-  (`std::expected`, `std::move_only_function`, `std::format`, ranges) and
-  should build with `-std=c++23`.
+- **The SDK bakes its install path in.** It's installed at
+  `/aember_ws/aember/build/aember-resources/<arch>/sdk` inside the dev
+  container. Moving it means deleting `sdk/` and fetching again.
+- To use a newer aember-resources release, bump `RESOURCES_VERSION`; the
+  sha256 markers make the next fetch replace what changed.
+- To test an aember-resources release **before it's published**, copy its
+  `build/release/v<V>/` files (without `.meta/`) somewhere under this repo
+  and set `AEMBER_RESOURCES_URL=file:///aember_ws/aember/<that dir>`; the
+  fetcher then reads `manifest.json` and the assets from there.
+- Asset names and `manifest.json` are an interface owned by aember-resources
+  (see its AGENTS.md). Don't edit `../aember-resources` from here.
 - The SDK has no `pkg-config`; Poky expects the host's (`pkgconf` is in the
-  dev container). `lxc.pc` is relocatable (`${pcfiledir}`).
-- Don't edit `../aember-resources` from here; it has its own AGENTS.md.
+  dev image). `lxc.pc` is relocatable (`${pcfiledir}`).
 
 ## Repository layout
 
 ```
 .devcontainer/          Ubuntu 24.04 dev image (prebuilt ghcr.io/ajdariarian94/aember-dev)
-aember-cli/             SUBMODULE (ajdariarian94/aember-cli): the `aember` CLI
+aember-cli/             the `aember` CLI (Python, Typer): cli/, steps/, config/, utils/
 CMakeLists.txt          Superbuild: ExternalProject libraries → executables, examples
                         project VERSION here is the app version (CLI reads it)
 libraries/              aember-libs: one static lib per dir, + utils/<x>
 executables/aember/     main.cpp → the `aember` binary (PID 1)
 examples/               demo binaries packed into the initramfs
 resources/<arch>/rootfs git-ignored rootfs overlay (configs, container images)
-tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (compilers, sysroot, flags)
+tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (SDK compilers, sysroot, flags)
 tools/scripts/          init.sh (postStart), prerequisites.sh, bashrc.d/
 vcpkg/                  SUBMODULE (fork) incl. x64/aarch64-poky-linux triplets
 vcpkg.json              cli11, gtest, nlohmann-json, spdlog
-yocto/                  legacy: meta-aember, poky submodule, hashes/ (see above)
 doc/                    Doxyfile, changelog/ (written by `aember changelog`)
-build/                  git-ignored: configure/, install/, package/, downloads/
+build/                  git-ignored: aember-resources/, configure/, install/,
+                        package/, downloads/, logging/, release/
 ```
+
+Checkouts from before the move to aember-resources may still have:
+- a `yocto/` dir (old in-repo Yocto output, several GB): unused, delete it;
+- a `build/configure/<arch>/<type>/` with the gcc-reflection compiler cached
+  in its sub-project `CMakeCache.txt` files (symptom: "LTO version 15.1
+  instead of the expected 16.0" at link time): delete that whole dir (not
+  just the caches, or ExternalProject skips its configure) and build again.
 
 ## C++ libraries
 
@@ -103,7 +114,7 @@ under `include/aember-libs/<lib>/`, CMake target `aember-libs::<lib>`.
 | `module-loader`     | Loads kernel modules from `modules.json` |
 | `network-manager`   | Interfaces, bridge, connectivity monitoring (`network.json`) |
 | `process-manager`   | Spawns and tracks native processes |
-| `container-manager` | LXC container lifecycle (liblxc) |
+| `container-manager` | LXC container lifecycle (liblxc from `VIRT_ROOT`, set by the toolchain file) |
 | `child-supervisor`  | Reaps children, dispatches PID exit events |
 | `service-manager`   | Coordinator over process/container managers, dependency order |
 | `device-health`     | Heartbeat + `AemberMonitor` runtime stats |
@@ -117,37 +128,64 @@ container images under `rootfs/var/lib/aember/<name>/`.
 
 `aember-cli/aember/cli/qemu/build.py` runs, in order:
 
-1. `CleanStep`, `CheckResources`: fetch `resources/` (`aember-resources-v<V>.tar.gz`
-   from *aember's* release; unrelated to the aember-resources repo despite the
-   name)
-2. `BuildKernel`, `BuildBusybox`, `BuildLxc`, `BuildSdk` (legacy Yocto steps,
-   which download from releases when hashes match)
+1. `CleanStep`, `CheckResources`: fetch the `resources/` overlay
+   (`aember-resources-v<V>.tar.gz` from *aember's own* release; unrelated
+   to the aember-resources repo despite the name)
+2. `FetchResources`: kernel, BusyBox, LXC, SDK from aember-resources (above)
 3. `ConfigureStep`: sources the SDK `environment-setup-*`, unsets CC/CXX,
    runs CMake with the vcpkg toolchain chain-loading `tools/toolchains/<arch>.cmake`
    into `build/configure/<arch>/<BuildType>/`
 4. `BuildStep`: `cmake --build`, then merges `compile_commands.json` for clangd
 5. `PackStep` (`steps/packaging/`): initramfs tree + BusyBox (installed with
    `qemu-<arch>-static` when cross) + `aember` + examples/tests + `/init`
-   symlink; runtime libs resolved with `objdump -p` (NEEDED) from the
-   toolchain, LXC and sysroot dirs; kernel modules from `modules.json` +
-   `depmod`; `aember-initramfs.cpio.gz`; `aember-rootfs.img` built with guestfish in a
-   `docker run` of the current dev image (bind mount via `HOST_ROOT_PATH`)
+   symlink; runtime libs resolved with `objdump -p` (NEEDED) from the LXC
+   libs and the SDK target sysroot; kernel modules from `modules.json` +
+   `depmod`; `aember-initramfs.cpio.gz`; `aember-rootfs.img` built with
+   guestfish in a `docker run` of the current dev image (bind mount via
+   `HOST_ROOT_PATH`)
+
+Every name in `resources/<arch>/rootfs/etc/aember/modules.json` must exist in
+the aember-resources kernel, as a `.ko` or listed in `modules.builtin`
+(bridge, veth, br_netfilter, overlay, llc, stp, ttm are built in). The
+packer fails on anything missing, packs each listed `.ko` **plus its
+dependencies** (from `modules.dep`, generated with `depmod -n` because the
+kernel asset doesn't ship one; e.g. virtio-gpu needs drm_shmem_helper), and
+copies `modules.builtin*`/`modules.order` into the rootfs. BusyBox `modprobe`
+does **not** read `modules.builtin`, so the C++ `ModuleLoader` checks
+`/lib/modules/<release>/modules.builtin` itself and skips built-in modules.
 
 `aember qemu launch` boots `build/package/<arch>/<BuildType>/` in
-`qemu-system-x86_64` / `qemu-system-aarch64 -machine virt`.
+`qemu-system-x86_64` / `qemu-system-aarch64 -machine virt`, in xterm windows
+(Debug also starts GDB). **`aember qemu launch --headless --timeout 30`**
+runs QEMU in the current terminal with the serial console on stdout, for
+checks without a display. aember is PID 1 and never exits, so the timeout is
+what ends the run; the boot itself takes ~10 s. Headless keeps the virtual
+GPU (`-display none`, not `-vga none`): the `aember-monitor` container binds
+`/dev/dri` and `/dev/fb0` and fails without them. Serial logs go to
+`build/logging/<arch>/`.
 
-Other commands: `aember app configure|build|pack|launch`, `aember lint`,
-`aember changelog` (bumps `project(VERSION)` in `CMakeLists.txt` and writes
-`doc/changelog/`), `aember release` (all arch × build types → tar.gz in
-aember's release dir), `aember generate-docs|view-docs` (Doxygen).
+Debugging a container that fails `lxc start`: its LXC log is in the VM's
+`/tmp` (tmpfs, gone after the run). Point `lxc.log.file` at `/var/log/` in the
+**built** `aember-rootfs.img` (guestfish `download`/`upload` via a `docker
+run` of the dev image), boot, then read the log back with guestfish. The next
+pack regenerates the image.
 
-Builds need the SDK (and today gcc-reflection) under
-`yocto/build/<arch>/`. Don't start Yocto or full builds without the user
-asking: they're long and disk-heavy.
+Other commands: `aember fetch-resources`, `aember app configure|build|pack|launch`,
+`aember lint`, `aember changelog` (bumps `project(VERSION)` in
+`CMakeLists.txt` and writes `doc/changelog/`), `aember release` (overlay,
+app package and binary as tar.gz into `build/release/<arch>/<type>/`),
+`aember generate-docs|view-docs` (Doxygen).
+
+The toolchain files find everything relative to the repo
+(`AEMBER_ROOT`, `AEMBER_RESOURCES_DIR`, `POKY_SYSROOT`, `POKY_SDK_ROOT`,
+`VIRT_ROOT`). Both C and C++ use the SDK's `<triplet>-gcc`/`-g++`.
 
 ## Coding conventions
 
 C++:
+- **C++23** (`CMAKE_CXX_STANDARD 23` in the toolchain files, Poky SDK GCC
+  15). No C++26 or P2996 reflection: there is no reflection compiler any
+  more.
 - clang-format: Google base, 80 columns, `PointerAlignment: Left`, short
   blocks/ifs/loops on one line allowed. Include order (enforced): 1.
   `<aember-libs/...>`, 2. third party (`nlohmann`, `spdlog`, `CLI`, `gtest`),
@@ -171,40 +209,46 @@ Python (aember-cli): Typer commands in `cli/`, `Step` subclasses in
 
 ## Submodules
 
-`.gitmodules`: `aember-cli` (ajdariarian94/aember-cli), `vcpkg` (fork),
-`yocto/poky` (fork, branch `master.cache`).
-
-- **CLI changes are commits in `aember-cli/`'s own repo.** Commit and push
-  them there first, then commit the updated submodule pointer here.
-- Don't bump the `vcpkg` or `yocto/poky` pointers without being asked.
+Only `vcpkg` (fork, with the poky triplets) is a submodule. Don't bump its
+pointer without being asked. `aember-cli/` used to be a submodule
+(ajdariarian94/aember-cli); it's now regular files here, so edit it
+directly.
 
 ## Environment
 
 - Work inside the dev container: the repo is at `/aember_ws/aember`, venv
   `/venv`, privileged, `--net=host`, Docker via the host socket,
   `HOST_ROOT_PATH` = host path of the repo (needed by the guestfish `docker
-  run`). `tools/scripts/init.sh` fixes the Docker GID on start.
+  run`). `tools/scripts/init.sh` fixes the Docker GID and sets up the shell
+  on start.
+- `/venv/bin/aember` imports from `aember-cli/` through `PYTHONPATH`, set by
+  the container's shell setup. In a non-interactive `docker exec`, pass
+  `-e PYTHONPATH=/aember_ws/aember/aember-cli` and put `/venv/bin` on `PATH`.
 - `devcontainer.json` uses the prebuilt image; switch to the `build:` block
   to test Dockerfile changes.
-- `gh` downloads release assets; `GITHUB_TOKEN` can come from
-  `tools/scripts/.env` (git-ignored, **never commit or print it**).
-- Hard-coded `/aember_ws/aember/...` paths exist in `tools/toolchains/*.cmake`
-  and `aember-cli/aember/config/libs.py`.
+- `gh` is only needed for aember's own releases (`CheckResources`);
+  `GITHUB_TOKEN` can come from `tools/scripts/.env` (git-ignored, **never
+  commit or print it**).
+- `aember-cli/aember/config/host_path.py` reads `HOST_ROOT_PATH` at import.
 
 ## Known issues (don't fix unless asked)
 
 - `cli/qemu/build.py`: `if build_tests or BuildType.debug:` is always true,
   so every `aember qemu build` starts with `CleanStep`.
-- aarch64 uses `cortexa57` (SDK, sysroot, QEMU CPU) while the target and
-  aember-resources use `cortexa72`.
+- aarch64: aember-resources has no aarch64 assets yet, so
+  `aember qemu build --architecture aarch64-poky-linux` stops at
+  `FetchResources`. The QEMU profile still uses `-cpu cortex-a57`.
+- The dev Dockerfile still has Yocto-era leftovers (GNU tar 1.34
+  downgrade, gcc-12/14 PPA). Harmless, but can go on the next image rebuild.
 
 ## Working agreements for agents
 
 - Branch off `main` (`fix/<x>`, `enhancement/<x>`, `docs/<x>`, …) and merge
   through a PR. Commit only when asked.
 - Don't commit unrelated working-tree changes the user has in progress.
-- Confirm before deleting or overwriting `resources/`, `build/`,
-  `yocto/build/` or `yocto/hashes/`: they're expensive to regenerate.
+- Confirm before deleting or overwriting `resources/` or `build/`
+  (especially `build/aember-resources/`): they're expensive to regenerate.
 - Don't publish GitHub releases or upload assets unless explicitly asked.
+- Don't start long builds without the user asking.
 - Keep this file current. Update it in the same change when something here
-  goes stale (for example, once the aember-resources migration lands).
+  goes stale.

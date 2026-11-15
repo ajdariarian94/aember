@@ -16,10 +16,22 @@
 #include <ranges>
 
 #include <fcntl.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 namespace aember::module_loader {
+
+namespace {
+
+// Kernel module names use '_' where file names may use '-'.
+std::string Normalize(std::string_view name) {
+  std::string normalized{name};
+  std::ranges::replace(normalized, '-', '_');
+  return normalized;
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Ctor
@@ -39,6 +51,17 @@ ModuleLoader::Result<> ModuleLoader::Load(std::string_view name) {
     results_.push_back(
         {std::string{name}, ModuleStatus::Failed, err.code, err.message});
     return std::unexpected(err);
+  }
+
+  // BusyBox modprobe does not read modules.builtin, so it fails for
+  // built-in modules; they need no loading.
+  if (IsBuiltin(name)) {
+    log_.info("Module '{}' is built into the kernel", name);
+    results_.push_back({std::string{name},
+                        ModuleStatus::AlreadyLoaded,
+                        ModuleErrorCode::None,
+                        ""});
+    return {};
   }
 
   if (IsLoaded(name)) {
@@ -79,8 +102,11 @@ bool ModuleLoader::Load(const std::vector<ModuleConfig>& modules) {
     return true;
   }
 
-  const bool all_ok = std::ranges::all_of(
-      modules, [this](const auto& m) { return Load(m.name).has_value(); });
+  // Attempt every module, even after a failure.
+  bool all_ok = true;
+  for (const auto& m : modules) {
+    if (!Load(m.name).has_value()) { all_ok = false; }
+  }
 
   const auto failed = std::ranges::count_if(
       results_, [](const auto& r) { return r.status == ModuleStatus::Failed; });
@@ -119,14 +145,37 @@ bool ModuleLoader::IsLoaded(std::string_view name) const {
   std::ifstream proc_modules{"/proc/modules"};
   if (!proc_modules.is_open()) { return false; }
 
-  // Normalise: kernel replaces '-' with '_' in module names.
-  std::string normalized{name};
-  std::ranges::replace(normalized, '-', '_');
+  const std::string normalized = Normalize(name);
 
   // Read every first token (module name) per line and compare.
   return std::ranges::any_of(
       std::ranges::istream_view<std::string>(proc_modules),
       [&](const std::string& token) { return token == normalized; });
+}
+
+// ---------------------------------------------------------------------------
+// IsBuiltin
+// ---------------------------------------------------------------------------
+
+bool ModuleLoader::IsBuiltin(std::string_view name) const {
+  utsname uts{};
+  if (uname(&uts) != 0) { return false; }
+
+  std::ifstream builtin{
+      std::format("/lib/modules/{}/modules.builtin", uts.release)};
+  if (!builtin.is_open()) { return false; }
+
+  // Lines look like "kernel/net/llc/llc.ko".
+  const std::string wanted = Normalize(name) + ".ko";
+  std::string line;
+  while (std::getline(builtin, line)) {
+    const auto slash = line.rfind('/');
+    const std::string_view file =
+        slash == std::string::npos ? std::string_view{line}
+                                   : std::string_view{line}.substr(slash + 1);
+    if (Normalize(file) == wanted) { return true; }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

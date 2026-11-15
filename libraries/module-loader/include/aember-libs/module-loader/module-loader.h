@@ -64,6 +64,10 @@ class ModuleLoader {
 
   [[nodiscard]] bool IsLoaded(std::string_view name) const;
 
+  /** True if the module is built into the running kernel
+   *  (listed in /lib/modules/<release>/modules.builtin). */
+  [[nodiscard]] bool IsBuiltin(std::string_view name) const;
+
   [[nodiscard]] const std::vector<ModuleResult>& GetResults() const {
     return results_;
   }
