@@ -74,6 +74,9 @@ BusyBox init / s6 / runit / dinit.
   QEMU (`virt`, Cortex-A72) since 0.10.0 with aember-resources v0.1.2.
 - [ ] `BuildStep` (`steps/cmake/build.py`): give `--parallel` a job count
   (WSL crashes when the build uses every core).
+- [ ] `aember release` (`cli/base/release.py`) still defaults to x64 only, with
+  a stale "aarch64 has no aember-resources assets yet" comment. Default to
+  both architectures now that v0.1.2 has them (`-a` twice works meanwhile).
 - [ ] **arm32 (ARMv7, `arm-poky-linux`)** after aarch64 works: common on
   embedded boards (i.MX6, STM32MP1, older Pis). Needs a machine/kas file,
   kernel and BusyBox fragments, LXC conf and assets in aember-resources, plus
