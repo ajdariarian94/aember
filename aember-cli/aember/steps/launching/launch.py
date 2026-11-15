@@ -69,7 +69,7 @@ QEMU_PROFILES: dict[str, QemuProfile] = {
     "aarch64-poky-linux": QemuProfile(
         binary="qemu-system-aarch64",
         machine="virt",
-        cpu="cortex-a57",
+        cpu="cortex-a72",  # Raspberry Pi 4; the SDK targets it
         drive="if=virtio,format=raw",
         console="console=tty0 console=ttyAMA0,115200",
         root="root=/dev/vda1",

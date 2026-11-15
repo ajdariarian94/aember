@@ -17,17 +17,20 @@ log = logging.getLogger("aember.pack.libs")
 
 
 def get_dynamic_dependencies(binary_path: Path) -> list[str]:
-    """Finds 'NEEDED' libraries in an ELF file using objdump."""
-    try:
-        result = subprocess.run(
-            ["objdump", "-p", str(binary_path)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return re.compile(r"NEEDED\s+(.+)").findall(result.stdout)
-    except subprocess.CalledProcessError:
-        return []
+    """
+    'NEEDED' libraries of an ELF file.
+
+    Uses readelf, which reads ELF files of every architecture; the host's
+    objdump only understands x86 and would silently find nothing for aarch64.
+    """
+    result = subprocess.run(
+        ["readelf", "-d", str(binary_path)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"readelf -d {binary_path} failed: {result.stderr}")
+    return re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", result.stdout)
 
 
 def get_interpreter(binary_path: Path) -> str:

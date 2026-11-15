@@ -11,7 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS
 # ##############################################################################
 project(
   aember
-  VERSION 0.9.0
+  VERSION 0.10.0
   HOMEPAGE_URL "https://github.com/ajdariarian94/aember.git"
   DESCRIPTION "aember superbuild project"
   LANGUAGES C

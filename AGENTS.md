@@ -39,8 +39,8 @@ aember-resources (`../aember-resources`,
 <https://github.com/ajdariarian94/aember-resources>) builds the low-level
 pieces with kas/Yocto and publishes them as assets of the GitHub release
 `v<version>`. The version aember uses is pinned in
-`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.1`;
-x64 only so far).
+`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.2`;
+x64 and aarch64).
 
 `aember fetch-resources` (also the first step of `aember qemu build`,
 `steps/resources/fetch_resources.py`):
@@ -161,7 +161,8 @@ everyday build command.
 4. `BuildStep`: `cmake --build`, then merges `compile_commands.json` for clangd
 5. `PackStep` (`steps/packaging/`): initramfs tree + BusyBox (installed with
    `qemu-<arch>-static` when cross) + `aember` + examples/tests + `/init`
-   symlink; runtime libs resolved with `objdump -p` (NEEDED) from the LXC
+   symlink; runtime libs resolved with `readelf -d` (NEEDED; works for every
+   arch, unlike the host objdump) from the LXC
    libs and the SDK target sysroot; kernel modules from `modules.json` +
    `depmod`; `aember-initramfs.cpio.gz`; `aember-rootfs.img` built with
    guestfish in a `docker run` of the current dev image (bind mount via
@@ -255,8 +256,8 @@ Python (aember-cli): Typer commands in `cli/`, `Step` subclasses in
 
 Only `vcpkg` (fork, with the poky triplets) is a submodule. Don't bump its
 pointer without being asked. `aember-cli/` used to be a submodule
-(ajdariarian94/aember-cli); it's now regular files here, so edit it
-directly.
+(ajdariarian94/aember-cli, now **archived** and read-only; it only holds the
+CLI's history up to `af5bc15`). It's regular files here: edit it directly.
 
 ## Environment
 
@@ -265,9 +266,11 @@ directly.
   `HOST_ROOT_PATH` = host path of the repo (needed by the guestfish `docker
   run`). `tools/scripts/init.sh` fixes the Docker GID and sets up the shell
   on start.
-- `/venv/bin/aember` imports from `aember-cli/` through `PYTHONPATH`, set by
-  the container's shell setup. In a non-interactive `docker exec`, pass
-  `-e PYTHONPATH=/aember_ws/aember/aember-cli` and put `/venv/bin` on `PATH`.
+- `/venv/bin/aember` is a symlink to `aember-cli/run.py`, created at
+  container start by `tools/scripts/init.sh` (via `bashrc.d/setup_prompt.sh`).
+  A plain `docker run` of the dev image must run `init.sh` first. In a
+  non-interactive `docker exec`, put `/venv/bin` on `PATH`; without the
+  symlink, `/venv/bin/python aember-cli/run.py <args>` works the same.
 - `devcontainer.json` uses the prebuilt image; switch to the `build:` block
   to test Dockerfile changes.
 - Downloads (overlay images, aember-resources) use plain HTTPS; `gh` and a
@@ -279,9 +282,9 @@ directly.
 
 - `cli/qemu/build.py`: `if build_tests or BuildType.debug:` is always true,
   so every `aember qemu build` starts with `CleanStep`.
-- aarch64: aember-resources has no aarch64 assets yet, so
-  `aember qemu build --architecture aarch64-poky-linux` stops at
-  `FetchResources`. The QEMU profile still uses `-cpu cortex-a57`.
+- `aember app build` runs `cmake --build --parallel` with no job count; on
+  WSL pass `CMAKE_BUILD_PARALLEL_LEVEL=8` (and `VCPKG_MAX_CONCURRENCY=8`),
+  using every core crashes it.
 - The dev Dockerfile still has Yocto-era leftovers (GNU tar 1.34
   downgrade, gcc-12/14 PPA). Harmless, but can go on the next image rebuild.
 
