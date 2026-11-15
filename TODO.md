@@ -4,6 +4,9 @@ Ideas and findings collected so far. **Nothing here is approved yet:** implement
 an item only when the user says so. Related items for the low-level pieces
 (kernel, BusyBox, LXC, SDK) are in `../aember-resources/TODO.md`.
 
+**Agreed order (2026-11-15):** 1. aarch64 working end to end, 2. arm32,
+3. then size optimization (kernel trimming etc.).
+
 ## Boot time and the debug shell
 
 - [ ] **Remove the 5 s "press 'd' for debug shell" wait.** It's about half of
@@ -67,8 +70,13 @@ BusyBox init / s6 / runit / dinit.
 - [ ] **OTA updates with rollback** (A/B rootfs). Most important for fleets.
 - [ ] Signed images; seccomp/AppArmor profiles for containers; dropping
   privileges where possible.
-- [ ] **aarch64 / Raspberry Pi** end to end (needs aarch64 assets from
-  aember-resources first; see its TODO).
+- [ ] **aarch64 / Raspberry Pi** end to end: in progress on branch
+  `feature/aarch64` (QEMU first, then real hardware).
+- [ ] **arm32 (ARMv7, `arm-poky-linux`)** after aarch64 works: common on
+  embedded boards (i.MX6, STM32MP1, older Pis). Needs a machine/kas file,
+  kernel and BusyBox fragments, LXC conf and assets in aember-resources, plus
+  a toolchain file, vcpkg triplet, `config/` entries and a QEMU profile
+  (`virt`, Cortex-A15/A7) here. Own branch, after aarch64 is merged.
 - [ ] Docs and a small example appliance, so others can try it in an
   afternoon.
 
@@ -76,8 +84,6 @@ BusyBox init / s6 / runit / dinit.
 
 - [ ] `cli/qemu/build.py`: `if build_tests or BuildType.debug:` is always
   true, so every `aember qemu build` starts with `CleanStep`.
-- [ ] aarch64 QEMU profile still uses `-cpu cortex-a57`; the target is
-  Cortex-A72.
 - [ ] Dev Dockerfile has Yocto-era leftovers (GNU tar 1.34 downgrade,
   gcc-12/14 PPA, gcc cross packages); drop them on the next image rebuild.
 - [ ] `aember changelog` compares `main..HEAD`, so it finds nothing on
@@ -86,5 +92,3 @@ BusyBox init / s6 / runit / dinit.
   aember-resources' (gh release create/upload at the pushed HEAD).
 - [ ] `utils/fetch_artifact.py` still has the old gh-based download helpers;
   remove what's no longer used.
-- [ ] The separate `ajdariarian94/aember-cli` repo is obsolete now that the
-  CLI lives here; archive it.
