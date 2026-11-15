@@ -203,6 +203,27 @@ The toolchain files find everything relative to the repo
 (`AEMBER_ROOT`, `AEMBER_RESOURCES_DIR`, `POKY_SYSROOT`, `POKY_SDK_ROOT`,
 `VIRT_ROOT`). Both C and C++ use the SDK's `<triplet>-gcc`/`-g++`.
 
+## Releasing aember
+
+1. Bump `project(VERSION)` in `CMakeLists.txt` and write
+   `doc/changelog/`. `aember changelog --version-bump minor|patch|major`
+   compares `main..HEAD`, so it only finds changes on a feature branch; on
+   `main` run its `ChangelogStep` with `base_branch` set to the last tag.
+2. `aember release` (x64 by default, `--arch` to add more once
+   aember-resources has them): for each build type it fetches resources,
+   configures, builds, packs and writes
+   `build/release/<arch>/<type>/`: `aember-app-<arch>-<type>-v<V>.tar.gz`
+   (kernel, initramfs, rootfs image), `aember-binary-…`, and
+   `aember-resources-v<V>.tar.gz` + `.sha256` (the overlay).
+3. Commit and push, then create the GitHub release `v<V>` at that commit
+   with `gh release create`, uploading the overlay tarball **once** plus the
+   app and binary tarballs. A fresh clone needs
+   `aember-resources-v<project VERSION>.tar.gz` in release `v<VERSION>`, so
+   a version bump must always be followed by its release.
+
+Kernel, BusyBox, LXC and SDK are no longer part of aember's releases; they
+live in aember-resources' releases.
+
 ## Coding conventions
 
 C++:
