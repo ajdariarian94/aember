@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <aember-libs/aember-init/pid1.h>
 #include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/device-health/aember-monitor.h>
@@ -28,8 +29,10 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace aember::aember_init {
 
@@ -39,6 +42,7 @@ class AemberInit {
   using ContainerState = aember::utils::container::ContainerState;
   using ProcessState = aember::process_manager::ProcessManager::ProcessState;
   using Logger = aember::utils::logging::Logger;
+  using ShutdownAction = pid1::ShutdownAction;
 
   /// Lightweight error type used throughout init — just a message string.
   struct Error {
@@ -54,9 +58,14 @@ class AemberInit {
   AemberInit(const AemberInit&) = delete;
   AemberInit& operator=(const AemberInit&) = delete;
 
+  /// Both return only after a shutdown was requested (or if the pivot
+  /// exec'd away). Exceptions from a phase are logged, never propagated.
   void StartInitramfs();
   void StartRoot();
   void Stop();
+
+  /// Set by the shutdown signals; main() passes it to pid1::Finish().
+  ShutdownAction RequestedShutdown() const { return shutdown_.load(); }
 
  private:
   // ---------------------------------------------------------------------------
@@ -72,6 +81,9 @@ class AemberInit {
   Result<> LoadAndRegisterContainers(std::string_view path);
 
   void StartReaperThread();
+  void StopReaperThread();
+  void ReapOnce();
+  void RequestShutdown(ShutdownAction action);
 
   // ---------------------------------------------------------------------------
   // Run loop
@@ -99,8 +111,16 @@ class AemberInit {
   // ---------------------------------------------------------------------------
 
   std::atomic<bool> running_{false};
+  std::atomic<ShutdownAction> shutdown_{ShutdownAction::kNone};
   std::mutex mtx_;
   std::condition_variable cv_;
+
+  // The reaper thread is the only place that collects children. SIGCHLD
+  // only wakes it; it also polls every second because SIGCHLD can be lost
+  // (threads started before the signalfd don't block it).
+  std::mutex reap_mtx_;
+  std::condition_variable_any reap_cv_;
+  bool reap_pending_ = false;
 
   // ---------------------------------------------------------------------------
   // Subsystems — constructed in dependency order, destroyed in reverse

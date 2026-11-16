@@ -599,7 +599,12 @@ void NetworkManager::MonitorLoop(std::stop_token stop_token) {
             config_.ping_interval.count());
 
   while (!stop_token.stop_requested()) {
-    UpdateStatus(Ping(config_.ping_target) >= 0, Ping(config_.ping_target));
+    try {
+      const int rtt = Ping(config_.ping_target);
+      UpdateStatus(rtt >= 0, rtt);
+    } catch (const std::exception& e) {
+      log_.error("Connectivity check failed: {}", e.what());
+    }
     std::this_thread::sleep_for(config_.ping_interval);
   }
 

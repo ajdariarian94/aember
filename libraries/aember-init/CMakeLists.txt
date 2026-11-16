@@ -16,6 +16,7 @@ add_library(
   ${COMPONENT}
   STATIC
   src/aember-init.cpp
+  src/pid1.cpp
 )
 
 add_library(

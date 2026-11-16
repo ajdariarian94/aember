@@ -11,11 +11,6 @@ add_executable(
   src/config-manager.cpp
 )
 
-target_include_directories(
-  config-manager-unittest
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
 target_link_libraries(
   config-manager-unittest
   PRIVATE aember-libs::utils::config

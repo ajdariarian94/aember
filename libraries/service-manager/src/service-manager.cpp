@@ -195,22 +195,30 @@ bool ServiceManager::Stop(std::string_view name) {
 }
 
 bool ServiceManager::StopInternal(std::string_view name) {
-  std::lock_guard lock{mutex_};
   const std::string key{name};
+  bool is_container = false;
 
-  if (!states_.contains(key)) {
-    log_.error("Stop: '{}' not registered", name);
-    return false;
+  {
+    std::lock_guard lock{mutex_};
+
+    if (!states_.contains(key)) {
+      log_.error("Stop: '{}' not registered", name);
+      return false;
+    }
+
+    const auto state = states_.at(key);
+    if (state == ProcessState::Stopped || state == ProcessState::Stopping) {
+      return true;
+    }
+
+    MirrorState(key, ProcessState::Stopping);
+    is_container = containers_.contains(key);
   }
 
-  const auto state = states_.at(key);
-  if (state == ProcessState::Stopped || state == ProcessState::Stopping) {
-    return true;
-  }
-
-  MirrorState(key, ProcessState::Stopping);
-
-  if (containers_.contains(key)) {
+  // Without the lock: both managers report state changes through callbacks
+  // that take mutex_ (std::mutex, not recursive). Holding it here deadlocked
+  // every container stop, so PID 1 hung at shutdown.
+  if (is_container) {
     container_manager_.StopContainer(name);
   } else {
     process_manager_.Stop(name);

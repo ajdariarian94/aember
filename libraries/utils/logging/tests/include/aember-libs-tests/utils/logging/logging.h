@@ -14,7 +14,7 @@ class LoggingTest : public ::testing::Test {
   void TearDown() override;
 
   // Helper to create loggers
-  aember::utils::Logger make_logger(const std::string& name);
+  aember::utils::logging::Logger make_logger(const std::string& name);
 
   // Test log file path
   std::string log_file_path_;

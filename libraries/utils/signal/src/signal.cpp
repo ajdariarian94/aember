@@ -155,7 +155,13 @@ void SignalHandler::SignalLoop(std::stop_token stop) {
           log_.debug("Signal {} received (pid={})", sig, info.ssi_pid);
 
           if (auto it = callbacks_.find(sig); it != callbacks_.end()) {
-            it->second(sig);
+            // A throwing callback must not end this thread: the exception
+            // would reach std::terminate, which is fatal in PID 1.
+            try {
+              it->second(sig);
+            } catch (const std::exception& e) {
+              log_.error("Handler for signal {} threw: {}", sig, e.what());
+            } catch (...) { log_.error("Handler for signal {} threw", sig); }
           }
         }
       }

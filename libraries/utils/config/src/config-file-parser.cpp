@@ -26,7 +26,9 @@ bool IConfigFileParser::LoadJsonFromFile(const std::string& path,
 
   try {
     file >> json;
-  } catch (const nlohmann::json::parse_error& e) {
+  } catch (const std::exception& e) {
+    // parse_error for bad JSON; anything else (e.g. a read error) must not
+    // reach PID 1 either.
     error = ConfigError("JSON parse error: " + std::string(e.what()), path);
     return false;
   }

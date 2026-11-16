@@ -12,10 +12,30 @@
 #include <format>
 #include <fstream>
 #include <ranges>
+#include <stdexcept>
+#include <utility>
 
 #include <sys/wait.h>
 
 namespace aember::aember_init {
+
+namespace {
+
+/// Run one init phase. PID 1 must never die, so an exception from a phase is
+/// logged and init carries on with the next one.
+template <typename F>
+bool Guarded(aember::utils::logging::Logger& log, std::string_view phase,
+             F&& fn) {
+  try {
+    std::forward<F>(fn)();
+    return true;
+  } catch (const std::exception& e) {
+    log.error("{} failed: {}", phase, e.what());
+  } catch (...) { log.error("{} failed: unknown exception", phase); }
+  return false;
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Ctor / Dtor
@@ -39,40 +59,51 @@ AemberInit::~AemberInit() {
 // ---------------------------------------------------------------------------
 
 void AemberInit::StartInitramfs() {
-  if (running_.load()) return;
+  if (running_.exchange(true)) return;
 
   log_.info("Starting Aember in initramfs mode");
 
-  mount_manager_ = std::make_shared<aember::mount_manager::MountManager>();
-  mount_manager_->MountInitramfsFilesystems();
-
-  if (!mount_manager_->MountEarlyFilesystems()) {
-    log_.warn("Some early filesystems failed to mount, continuing anyway");
-  }
+  Guarded(log_, "Initramfs mounts", [this] {
+    mount_manager_ = std::make_shared<aember::mount_manager::MountManager>();
+    mount_manager_->MountInitramfsFilesystems();
+    if (!mount_manager_->MountEarlyFilesystems()) {
+      log_.warn("Some early filesystems failed to mount, continuing anyway");
+    }
+  });
 
   log_.info("Initramfs detected, preparing to pivot to real root");
 
-  root_manager_ =
-      std::make_unique<aember::root_manager::RootManager>(mount_manager_);
+  // PerformPivot exec's switch_root on success and does not return.
+  Guarded(log_, "Pivot to real root", [this] {
+    root_manager_ =
+        std::make_unique<aember::root_manager::RootManager>(mount_manager_);
 
-  aember::utils::root::RootConfig root_config;
-  root_config.ParseFromProcCmdline();
+    aember::utils::root::RootConfig root_config;
+    root_config.ParseFromProcCmdline();
 
-  if (!mount_manager_->EnsureDirectory(root_config.new_root_path)) {
-    log_.error("Failed to create pivot mount point: {}",
-               root_config.new_root_path);
-  }
+    if (!mount_manager_->EnsureDirectory(root_config.new_root_path)) {
+      log_.error("Failed to create pivot mount point: {}",
+                 root_config.new_root_path);
+    }
 
-  if (!root_manager_->PerformPivot(root_config)) {
-    log_.warn("Pivot to real root failed; continuing in initramfs");
+    if (!root_manager_->PerformPivot(root_config)) {
+      log_.warn("Pivot to real root failed");
+    }
+  });
 
+  log_.warn("Continuing in initramfs");
+
+  Guarded(log_, "Signal init", [this] { std::ignore = InitSignals(); });
+  StartReaperThread();
+
+  Guarded(log_, "Heartbeat", [this] {
     heartbeat_.emplace([this](const nlohmann::json& p) { OnHeartbeat(p); });
     heartbeat_->Start();
+  });
 
-    log_.info("Aember Init System started successfully");
-    RunLoop();
-    Stop();
-  }
+  log_.info("Aember Init System started successfully");
+  RunLoop();
+  Stop();
 }
 
 // ---------------------------------------------------------------------------
@@ -80,72 +111,90 @@ void AemberInit::StartInitramfs() {
 // ---------------------------------------------------------------------------
 
 void AemberInit::StartRoot() {
-  if (running_.load()) return;
+  if (running_.exchange(true)) return;
 
   aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
   log_.info("Starting Aember in root mode");
 
   // Create heartbeat JSON file early — needed for aember-monitor container
   // mount
-  std::ofstream file{"/var/log/aember-monitor.json"};
-  file << "{}";
-  file.flush();
-
-  debug_shell_.emplace();
-  const bool spawn_debug_shell =
-      debug_shell_ && debug_shell_->CheckDebugShell();
-
-  InitMounts().or_else([this](const Error& e) -> Result<> {
-    log_.warn("Mount phase failed: {}", e.message);
-    return {};
-  });
-
-  InitNetwork().or_else([this](const Error& e) -> Result<> {
-    log_.warn("Network phase failed: {}", e.message);
-    return {};
-  });
-
-  if (auto r = InitServiceStack(); !r) {
-    log_.error("Service stack init failed: {}", r.error().message);
-    return;
+  {
+    std::ofstream file{"/var/log/aember-monitor.json"};
+    file << "{}";
   }
 
-  LoadAndRegisterProcesses("/etc/aember/services.json")
-      .or_else([this](const Error& e) -> Result<> {
-        log_.warn("{}", e.message);
-        return {};
-      });
-
-  LoadAndRegisterContainers("/etc/aember/containers.json")
-      .or_else([this](const Error& e) -> Result<> {
-        log_.warn("{}", e.message);
-        return {};
-      });
-
-  service_manager_->StartAll();
-
-  InitSignals().or_else([this](const Error& e) -> Result<> {
-    log_.error("Signal init failed: {}", e.message);
-    return {};
+  bool spawn_debug_shell = false;
+  Guarded(log_, "Debug shell check", [&] {
+    debug_shell_.emplace();
+    spawn_debug_shell = debug_shell_->CheckDebugShell();
   });
 
-  running_.store(true);
+  Guarded(log_, "Mount phase", [this] {
+    InitMounts().or_else([this](const Error& e) -> Result<> {
+      log_.warn("Mount phase failed: {}", e.message);
+      return {};
+    });
+  });
 
-  // Initialize AemberMonitor — reads PID1 stats from /proc.
-  monitor_ = std::make_unique<aember::device_health::AemberMonitor>();
+  Guarded(log_, "Network phase", [this] {
+    InitNetwork().or_else([this](const Error& e) -> Result<> {
+      log_.warn("Network phase failed: {}", e.message);
+      return {};
+    });
+  });
 
-  heartbeat_.emplace([this](const nlohmann::json& p) { OnHeartbeat(p); });
-  heartbeat_->Start();
+  // Signals and the reaper come before any service starts, so exits during
+  // StartAll are collected and a shutdown request works from here on.
+  Guarded(log_, "Signal init", [this] { std::ignore = InitSignals(); });
 
-  log_.info("Aember Init System started successfully");
+  const bool stack_ok = Guarded(log_, "Service stack init", [this] {
+    if (auto r = InitServiceStack(); !r) {
+      throw std::runtime_error(r.error().message);
+    }
+  });
+  if (!stack_ok) { service_manager_.reset(); }
 
   StartReaperThread();
 
+  if (service_manager_) {
+    Guarded(log_, "Loading services", [this] {
+      LoadAndRegisterProcesses("/etc/aember/services.json")
+          .or_else([this](const Error& e) -> Result<> {
+            log_.warn("{}", e.message);
+            return {};
+          });
+    });
+
+    Guarded(log_, "Loading containers", [this] {
+      LoadAndRegisterContainers("/etc/aember/containers.json")
+          .or_else([this](const Error& e) -> Result<> {
+            log_.warn("{}", e.message);
+            return {};
+          });
+    });
+
+    Guarded(
+        log_, "Starting services", [this] { service_manager_->StartAll(); });
+  } else {
+    log_.error("No service manager: services and containers are not started");
+  }
+
+  Guarded(log_, "Monitor and heartbeat", [this] {
+    // AemberMonitor reads PID1 stats from /proc.
+    monitor_ = std::make_unique<aember::device_health::AemberMonitor>();
+    heartbeat_.emplace([this](const nlohmann::json& p) { OnHeartbeat(p); });
+    heartbeat_->Start();
+  });
+
+  log_.info("Aember Init System started successfully");
+
   if (spawn_debug_shell) {
-    spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
-    aember::utils::logging::enable_console_silence();
-    debug_shell_->SilenceAemberInBackground();
-    debug_shell_->SpawnDebugShell();
+    Guarded(log_, "Debug shell", [this] {
+      spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
+      aember::utils::logging::enable_console_silence();
+      debug_shell_->SilenceAemberInBackground();
+      debug_shell_->SpawnDebugShell();
+    });
   }
 
   RunLoop();
@@ -161,7 +210,13 @@ void AemberInit::Stop() {
 
   log_.info("Stopping Aember Init System...");
 
-  if (service_manager_) { service_manager_->StopAll(); }
+  // Services stop while the reaper still runs: it reports their exits.
+  Guarded(log_, "Stopping services", [this] {
+    if (service_manager_) { service_manager_->StopAll(); }
+  });
+
+  // Join before the managers it calls into are destroyed below.
+  StopReaperThread();
 
   signal_handler_.Stop();
   child_supervisor_.StopAll();
@@ -223,12 +278,18 @@ AemberInit::Result<> AemberInit::InitNetwork() {
         Error{std::format("Failed to parse network config: {}", e.what())});
   }
 
-  network_manager_ = std::make_unique<aember::network::NetworkManager>(
-      net_cfg, [this](const aember::utils::network::ConnectivityStatus& s) {
-        OnNetworkStatus(s);
-      });
-
-  network_manager_->Start();
+  // Throws on an invalid config or a required interface that stays down.
+  try {
+    network_manager_ = std::make_unique<aember::network::NetworkManager>(
+        net_cfg, [this](const aember::utils::network::ConnectivityStatus& s) {
+          OnNetworkStatus(s);
+        });
+    network_manager_->Start();
+  } catch (const std::exception& e) {
+    network_manager_.reset();
+    return std::unexpected(
+        Error{std::format("Network bring-up failed: {}", e.what())});
+  }
 
   if (!network_manager_->WaitForConnectivity(std::chrono::seconds(30))) {
     log_.warn("No internet connectivity after 30s, continuing anyway");
@@ -284,19 +345,26 @@ AemberInit::Result<> AemberInit::InitServiceStack() {
 }
 
 AemberInit::Result<> AemberInit::InitSignals() {
-  signal_handler_.Register(SIGTERM, [this](int) { Stop(); });
-  signal_handler_.Register(SIGINT, [this](int) { Stop(); });
+  // Handlers run on the signal thread: they only record the request and
+  // wake the main thread, which does the actual Stop(). Calling Stop() here
+  // would join the signal thread from itself (std::system_error, terminate).
+  // Same signals as BusyBox init, so its reboot/poweroff/halt work.
+  signal_handler_.Register(
+      SIGTERM, [this](int) { RequestShutdown(ShutdownAction::kReboot); });
+  signal_handler_.Register(
+      SIGINT, [this](int) { RequestShutdown(ShutdownAction::kReboot); });
+  signal_handler_.Register(
+      SIGUSR2, [this](int) { RequestShutdown(ShutdownAction::kPowerOff); });
+  signal_handler_.Register(
+      SIGUSR1, [this](int) { RequestShutdown(ShutdownAction::kHalt); });
   signal_handler_.Register(SIGHUP, [this](int) { /* reload config */ });
 
   signal_handler_.Register(SIGCHLD, [this](int) {
-    log_.info("SIGCHLD received");  // ← add this
-    int status = 0;
-    pid_t pid;
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-      log_.info("Reaped pid={} status={}", pid, status);
-      service_manager_->HandleExit(pid, status);
-      child_supervisor_.RemoveChild(pid);
+    {
+      std::lock_guard lock{reap_mtx_};
+      reap_pending_ = true;
     }
+    reap_cv_.notify_one();
   });
 
   signal_handler_.Start();
@@ -359,22 +427,49 @@ AemberInit::Result<> AemberInit::LoadAndRegisterContainers(
 }
 
 void AemberInit::StartReaperThread() {
+  if (reaper_thread_.joinable()) return;
+
   reaper_thread_ = std::jthread{[this](std::stop_token st) {
     while (!st.stop_requested()) {
-      std::this_thread::sleep_for(std::chrono::seconds(1));
-      log_.info("Observing for zombie processes...");
-      int status = 0;
-      pid_t pid;
-      while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        log_.info("Reaper reaped zombie pid={}", pid);
-        // Don't call HandleExit — signal handler owns that
-        // Just remove from child supervisor tracking
-        child_supervisor_.RemoveChild(pid);
-        // Notify service manager directly without mutex
-        service_manager_->HandleExit(pid, status);
+      {
+        std::unique_lock lock{reap_mtx_};
+        reap_cv_.wait_for(lock, st, std::chrono::seconds(1), [this] {
+          return reap_pending_;
+        });
+        reap_pending_ = false;
       }
+      Guarded(log_, "Reaping", [this] { ReapOnce(); });
     }
   }};
+}
+
+void AemberInit::StopReaperThread() {
+  if (!reaper_thread_.joinable()) return;
+  reaper_thread_.request_stop();
+  reaper_thread_.join();
+}
+
+void AemberInit::ReapOnce() {
+  for (const auto& exit : child_supervisor_.ReapZombies()) {
+    if (exit.tracked) {
+      log_.debug(
+          "Reaped '{}' (pid={} status={})", exit.name, exit.pid, exit.status);
+    } else {
+      log_.debug("Reaped orphan pid={} status={}", exit.pid, exit.status);
+    }
+    if (service_manager_) {
+      service_manager_->HandleExit(exit.pid, exit.status);
+    }
+  }
+}
+
+void AemberInit::RequestShutdown(ShutdownAction action) {
+  auto expected = ShutdownAction::kNone;
+  if (!shutdown_.compare_exchange_strong(expected, action)) return;
+
+  log_.info("Shutdown requested: {}", pid1::ToString(action));
+  { std::lock_guard lock{mtx_}; }
+  cv_.notify_all();
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +479,9 @@ void AemberInit::StartReaperThread() {
 void AemberInit::RunLoop() {
   log_.info("Aember Init run loop started");
   std::unique_lock lock{mtx_};
-  while (running_.load()) { cv_.wait_for(lock, std::chrono::seconds(1)); }
+  while (running_.load() && shutdown_.load() == ShutdownAction::kNone) {
+    cv_.wait_for(lock, std::chrono::seconds(1));
+  }
   log_.info("Aember Init run loop exiting");
 }
 

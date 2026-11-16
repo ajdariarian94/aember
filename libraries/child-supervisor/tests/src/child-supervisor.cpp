@@ -258,3 +258,104 @@ TEST_F(ChildSupervisorTest, HandleSIGCHLDWithNoExitedChildren) {
 }
 
 }  // namespace aember_test::child_supervisor
+
+// ---------------------------------------------------------------------------
+// ReapZombies — the PID 1 reaper
+// ---------------------------------------------------------------------------
+
+namespace aember_test::child_supervisor {
+
+namespace {
+
+// Unlike the fixture's WaitForZombie(), this only reads /proc and never
+// reaps the child itself.
+bool WaitUntilZombie(pid_t pid, std::chrono::milliseconds timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    const auto zombies =
+        aember::child_supervisor::ChildSupervisor::ListZombieChildren();
+    if (std::ranges::find(zombies, pid) != zombies.end()) { return true; }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  return false;
+}
+
+}  // namespace
+
+TEST_F(ChildSupervisorTest, ListZombieChildrenFindsOnlyZombies) {
+  const pid_t zombie = SpawnQuickExitChild(0);
+  const pid_t running = SpawnSleepingChild(5);
+  ASSERT_TRUE(WaitUntilZombie(zombie, std::chrono::seconds(2)));
+
+  const auto zombies =
+      aember::child_supervisor::ChildSupervisor::ListZombieChildren();
+  EXPECT_NE(std::ranges::find(zombies, zombie), zombies.end());
+  EXPECT_EQ(std::ranges::find(zombies, running), zombies.end());
+}
+
+TEST_F(ChildSupervisorTest, ReapZombiesReapsTrackedAtOnce) {
+  const pid_t pid = SpawnQuickExitChild(3);
+  supervisor_->AddChild(pid, "tracked");
+  ASSERT_TRUE(WaitUntilZombie(pid, std::chrono::seconds(2)));
+
+  const auto exits = supervisor_->ReapZombies(std::chrono::hours{1});
+
+  ASSERT_EQ(exits.size(), 1u);
+  EXPECT_EQ(exits[0].pid, pid);
+  EXPECT_TRUE(exits[0].tracked);
+  EXPECT_EQ(exits[0].name, "tracked");
+  EXPECT_TRUE(WIFEXITED(exits[0].status));
+  EXPECT_EQ(WEXITSTATUS(exits[0].status), 3);
+  EXPECT_FALSE(IsZombie(pid));
+  EXPECT_FALSE(supervisor_->IsTracked(pid));
+}
+
+TEST_F(ChildSupervisorTest, ReapZombiesWaitsGraceForUntracked) {
+  const pid_t pid = SpawnQuickExitChild(0);
+  ASSERT_TRUE(WaitUntilZombie(pid, std::chrono::seconds(2)));
+
+  const auto grace = std::chrono::milliseconds{300};
+
+  // First sight: within the grace period, left for its own waiter.
+  EXPECT_TRUE(supervisor_->ReapZombies(grace).empty());
+  EXPECT_TRUE(IsZombie(pid));
+
+  std::this_thread::sleep_for(grace + std::chrono::milliseconds{50});
+
+  // Still a zombie after the grace period: an orphan, reaped.
+  const auto exits = supervisor_->ReapZombies(grace);
+  ASSERT_EQ(exits.size(), 1u);
+  EXPECT_EQ(exits[0].pid, pid);
+  EXPECT_FALSE(exits[0].tracked);
+  EXPECT_FALSE(IsZombie(pid));
+}
+
+// The bug the reaper fixes: a blind waitpid(-1) in PID 1 stole the exit
+// status of children that other code waits for itself (system(), modprobe,
+// liblxc), so their waitpid(pid) failed with ECHILD.
+TEST_F(ChildSupervisorTest, ReapZombiesDoesNotStealFromSynchronousWaiter) {
+  std::atomic<bool> stop{false};
+  std::thread reaper{[&] {
+    while (!stop) {
+      supervisor_->ReapZombies(std::chrono::milliseconds{500});
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+  }};
+
+  int failures = 0;
+  for (int i = 0; i < 50; ++i) {
+    const pid_t pid = fork();
+    if (pid == 0) { _exit(7); }
+    int status = 0;
+    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 7) {
+      ++failures;
+    }
+  }
+
+  stop = true;
+  reaper.join();
+  EXPECT_EQ(failures, 0);
+}
+
+}  // namespace aember_test::child_supervisor
