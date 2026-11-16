@@ -48,9 +48,19 @@ set(POKY_FLAGS
 # -fno-exceptions      nlohmann/json and std::expected use exceptions.
 # -fno-rtti            std::any / dynamic_cast used indirectly by some deps.
 # ---------------------------------------------------------------------------
-cmake_host_system_information(RESULT CPU_COUNT QUERY NUMBER_OF_LOGICAL_CORES)
+# LTO jobs: AEMBER_BUILD_JOBS (exported by the aember CLI), else 2/3 of the
+# logical cores. -flto=auto would use every core, which crashes WSL.
+if(DEFINED ENV{AEMBER_BUILD_JOBS})
+  set(AEMBER_LTO_JOBS "$ENV{AEMBER_BUILD_JOBS}")
+else()
+  cmake_host_system_information(RESULT _aember_cores QUERY NUMBER_OF_LOGICAL_CORES)
+  math(EXPR AEMBER_LTO_JOBS "${_aember_cores} * 2 / 3")
+  if(AEMBER_LTO_JOBS LESS 1)
+    set(AEMBER_LTO_JOBS 1)
+  endif()
+endif()
 set(RELEASE_FLAGS
-  "-O3 -flto=${CPU_COUNT} -ffunction-sections -fdata-sections -fvisibility=hidden"
+  "-O3 -flto=${AEMBER_LTO_JOBS} -ffunction-sections -fdata-sections -fvisibility=hidden"
 )
 
 # ---------------------------------------------------------------------------
@@ -64,7 +74,7 @@ set(RELEASE_FLAGS
 #                      invocation; remove if you need post-link debug info).
 # ---------------------------------------------------------------------------
 set(RELEASE_LINK_FLAGS
-  "-flto -Wl,--gc-sections -Wl,--as-needed -Wl,--strip-all"
+  "-flto=${AEMBER_LTO_JOBS} -Wl,--gc-sections -Wl,--as-needed -Wl,--strip-all"
 )
 
 set(CMAKE_C_FLAGS_INIT          "${POKY_FLAGS}")

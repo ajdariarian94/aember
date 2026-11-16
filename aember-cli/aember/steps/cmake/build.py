@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+from aember.config.build import JOBS_ENV, build_jobs
 from aember.config.resources import sdk_dir
 from aember.config.sdk import SDK_ENV_MAP
 from aember.core.context import Context
@@ -41,6 +42,7 @@ class BuildStep(Step):
             "--build",
             f"build/configure/{ctx.architecture}/{ctx.build_type}",
             "--parallel",
+            str(build_jobs()),
         ]
         log.debug("CMake build command: %s", " ".join(cmd))
         return cmd
@@ -65,11 +67,14 @@ class BuildStep(Step):
 
         sdk_env   = self.sdk_env(ctx)
         cmake_cmd = " ".join(self.cmake_command(ctx))
+        # WSL crashes when a build uses every core (config/build.py)
+        jobs = build_jobs()
 
         full_cmd = f"""
             source {sdk_env} &&
             unset CC &&
             unset CXX &&
+            export {JOBS_ENV}={jobs} VCPKG_MAX_CONCURRENCY={jobs} &&
             {cmake_cmd}
         """
 

@@ -72,12 +72,6 @@ BusyBox init / s6 / runit / dinit.
   privileges where possible.
 - [ ] **aarch64 / Raspberry Pi** on real hardware. Builds, packs and boots in
   QEMU (`virt`, Cortex-A72) since 0.10.0 with aember-resources v0.1.2.
-- [ ] `BuildStep` (`steps/cmake/build.py`): give `--parallel` a job count
-  (WSL crashes when the build uses every core).
-- [ ] `aember release` (`cli/base/release.py`) still defaults to x64 only, with
-  a stale "aarch64 has no aember-resources assets yet" comment. Default to
-  all architectures now that aember-resources has them (repeat `-a`
-  meanwhile).
 - [ ] **arm32 (ARMv7-A hf NEON, `arm-poky-linux`)** on real boards (i.MX6,
   STM32MP1, Raspberry Pi 2). Builds, packs and boots in QEMU (`virt`,
   Cortex-A15) since 0.11.0 with aember-resources v0.1.3.
@@ -95,7 +89,8 @@ BusyBox init / s6 / runit / dinit.
   gcc-12/14 PPA, gcc cross packages); drop them on the next image rebuild.
 - [ ] `aember changelog` compares `main..HEAD`, so it finds nothing on
   `main`; let it take the last tag as base (`--since v0.9.0`).
-- [ ] `aember release` has no upload step; add an `aember publish` like
-  aember-resources' (gh release create/upload at the pushed HEAD).
+- [ ] `utils/merge_compile_command.py` also merges its own previous output
+  (top-level `build/configure/<arch>/<type>/compile_commands.json`), so the
+  file gains a copy of every entry on each build, stale flags included.
 - [ ] `utils/fetch_artifact.py` still has the old gh-based download helpers;
   remove what's no longer used.

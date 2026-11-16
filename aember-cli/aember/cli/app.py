@@ -11,6 +11,7 @@ from .base.documentation import generate_docs, view_docs
 from .base.launch import launch
 from .base.lint import lint
 from .base.pack import pack
+from .base.publish import publish
 from .base.release import release
 from .base.resources import fetch_resources
 from .qemu.build import build_qemu
@@ -53,6 +54,7 @@ aember.command(
     help="Download kernel, BusyBox, LXC and SDK from aember-resources",
 )(fetch_resources)
 aember.command(help="Create a release archive")(release)
+aember.command(help="Upload build/release/ as GitHub release v<VERSION>")(publish)
 aember.command(help="Serve documentation locally")(view_docs)
 
 # ----------------------------
