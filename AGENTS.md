@@ -215,8 +215,18 @@ does **not** read `modules.builtin`, so the C++ `ModuleLoader` checks
 (Debug also starts GDB). **`aember qemu launch --headless --timeout 30`**
 runs QEMU in the current terminal with the serial console on stdout, for
 checks without a display. aember is PID 1 and never exits, so the timeout is
-what ends the run (or, from the debug shell, `kill -USR2 1; exit` powers the
-VM off and QEMU ends by itself); the boot itself takes ~10 s. Headless keeps the virtual
+what ends the run (or, from the debug shell, `kill -USR2 1` powers the VM
+off and QEMU ends by itself); the boot itself takes ~5 s.
+
+Debug shell: boot never waits for it. Press `d` on the console at any time
+(a listener thread in `utils/shell/debug-shell.cpp` watches it; after the
+shell exits, `d` opens a new one). `aember.shell=1` on the kernel command
+line opens one at boot: `aember app launch --debug-shell` adds it, on a
+board it goes into the boot loader's command line (`cmdline.txt` on a
+Raspberry Pi). If the switch to the real root fails, the initramfs opens
+an emergency shell by itself. While a shell is open PID 1's console log is
+muted (`set_console_logging`); the file log keeps everything. In headless
+QEMU, type into the terminal (or pipe into `docker exec -i`). Headless keeps the virtual
 GPU (`-display none`, not `-vga none`): the `aember-monitor` container binds
 `/dev/dri` and `/dev/fb0` and fails without them. Serial logs go to
 `build/logging/<arch>/`.
@@ -278,7 +288,7 @@ C++:
   install/export), `Config.cmake.in`, `include/`, `src/`, optional `tests/`
   (GTest, `<lib>-unittest`, `add_test`). Tests built: child-supervisor,
   process-manager, device-health (heartbeat), mount-manager, utils/config,
-  utils/logging, utils/signal. service-manager's tests are disabled (written
+  utils/logging, utils/shell (debug shell on a pty), utils/signal. service-manager's tests are disabled (written
   for the old ServiceConfig API, need a rewrite).
 - Tests build only with `--with-tests`, which forces x64 Debug; the test
   binaries are packed into the initramfs and also run in the dev container

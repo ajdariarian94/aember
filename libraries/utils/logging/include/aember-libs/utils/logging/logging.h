@@ -26,6 +26,13 @@ void logging_level_info();
 void enable_console_silence();
 
 /**
+ * @brief Mute or unmute log output on the console (stdout) without removing
+ *        the sink; the file log is unaffected. Used while a debug shell owns
+ *        the console.
+ */
+void set_console_logging(bool enabled);
+
+/**
  * @brief Initialize early logging to stdout.
  *
  * Should be called once during early initialization before file logging

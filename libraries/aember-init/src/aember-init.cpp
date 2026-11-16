@@ -96,6 +96,9 @@ void AemberInit::StartInitramfs() {
   Guarded(log_, "Signal init", [this] { std::ignore = InitSignals(); });
   StartReaperThread();
 
+  // Emergency shell: the real root is unusable, so open one right away.
+  StartDebugShell(/*shell_now=*/true);
+
   Guarded(log_, "Heartbeat", [this] {
     heartbeat_.emplace([this](const nlohmann::json& p) { OnHeartbeat(p); });
     heartbeat_->Start();
@@ -123,12 +126,6 @@ void AemberInit::StartRoot() {
     file << "{}";
   }
 
-  bool spawn_debug_shell = false;
-  Guarded(log_, "Debug shell check", [&] {
-    debug_shell_.emplace();
-    spawn_debug_shell = debug_shell_->CheckDebugShell();
-  });
-
   Guarded(log_, "Mount phase", [this] {
     InitMounts().or_else([this](const Error& e) -> Result<> {
       log_.warn("Mount phase failed: {}", e.message);
@@ -155,6 +152,10 @@ void AemberInit::StartRoot() {
   if (!stack_ok) { service_manager_.reset(); }
 
   StartReaperThread();
+
+  // From here on 'd' on the console opens a shell at any time; boot does not
+  // wait for it. aember.shell=1 on the kernel command line opens one now.
+  StartDebugShell(DebugShell::RequestedOnCmdline());
 
   if (service_manager_) {
     Guarded(log_, "Loading services", [this] {
@@ -188,15 +189,6 @@ void AemberInit::StartRoot() {
 
   log_.info("Aember Init System started successfully");
 
-  if (spawn_debug_shell) {
-    Guarded(log_, "Debug shell", [this] {
-      spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
-      aember::utils::logging::enable_console_silence();
-      debug_shell_->SilenceAemberInBackground();
-      debug_shell_->SpawnDebugShell();
-    });
-  }
-
   RunLoop();
   Stop();
 }
@@ -209,6 +201,9 @@ void AemberInit::Stop() {
   if (!running_.exchange(false)) return;
 
   log_.info("Stopping Aember Init System...");
+
+  // Gives the console back; a running shell is killed with everything else.
+  if (debug_shell_) { debug_shell_->Stop(); }
 
   // Services stop while the reaper still runs: it reports their exits.
   Guarded(log_, "Stopping services", [this] {
@@ -441,6 +436,17 @@ void AemberInit::StartReaperThread() {
       Guarded(log_, "Reaping", [this] { ReapOnce(); });
     }
   }};
+}
+
+void AemberInit::StartDebugShell(bool shell_now) {
+  Guarded(log_, "Debug shell", [this, shell_now] {
+    debug_shell_.emplace();
+    // The reaper collects the shell: track it, and it is alive until reaped.
+    debug_shell_->Start(
+        [this](pid_t pid) { child_supervisor_.AddChild(pid, "debug-shell"); },
+        [this](pid_t pid) { return child_supervisor_.IsTracked(pid); },
+        shell_now);
+  });
 }
 
 void AemberInit::StopReaperThread() {

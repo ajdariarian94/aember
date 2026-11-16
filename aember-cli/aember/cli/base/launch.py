@@ -28,7 +28,13 @@ def launch(
         "--timeout",
         help="With --headless: stop QEMU after this many seconds",
     ),
+    debug_shell: bool = typer.Option(
+        False,
+        "--debug-shell",
+        help="Open a debug shell on the console at boot (aember.shell=1); "
+        "otherwise press 'd' on the console at any time",
+    ),
 ):
     ctx = Context(architecture=architecture.value, build_type=build_type.value)
-    ctx.data.update(headless=headless, timeout=timeout)
+    ctx.data.update(headless=headless, timeout=timeout, debug_shell=debug_shell)
     LaunchStep().run(ctx)
