@@ -6,7 +6,7 @@
 #include <aember-libs/utils/logging/logging.h>
 
 #include <spdlog/pattern_formatter.h>
-#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -24,6 +24,8 @@ static bool file_logging_enabled = false;
 static std::vector<spdlog::sink_ptr> global_sinks;
 
 // SINGLE SOURCE OF TRUTH for log pattern
+static constexpr std::size_t kLogFileMaxBytes = 1024 * 1024;
+static constexpr std::size_t kLogFileMaxFiles = 3;
 static constexpr const char* LOG_PATTERN = "[%Y-%m-%d %H:%M:%S] [%l] [%n] %v";
 
 static std::unique_ptr<spdlog::formatter> make_formatter() {
@@ -91,14 +93,21 @@ void init_early_logging() {
 void enable_file_logging(const std::filesystem::path& path) {
   std::lock_guard lock(sink_mutex);
   if (file_logging_enabled) return;
+
+  // Rotate at 1 MiB, keep 3 old files: PID 1 runs for the device's lifetime
+  // and must not fill the disk. A log file is optional, so a read-only or
+  // missing /var/log only costs the file, never init (no exception escapes).
+  std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> file_sink;
+  try {
+    std::filesystem::create_directories(path.parent_path());
+    file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+        path.string(), kLogFileMaxBytes, kLogFileMaxFiles);
+  } catch (const std::exception& e) {
+    spdlog::default_logger()->error(
+        "file logging to {} disabled: {}", path.string(), e.what());
+    return;
+  }
   file_logging_enabled = true;
-
-  // Ensure directory exists
-  std::filesystem::create_directories(path.parent_path());
-
-  // Build the file sink with the same pattern as console
-  auto file_sink =
-      std::make_shared<spdlog::sinks::basic_file_sink_mt>(path.string(), false);
   file_sink->set_formatter(make_formatter());
   file_sink->set_level(spdlog::level::trace);
 

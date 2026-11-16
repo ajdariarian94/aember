@@ -72,7 +72,9 @@ void Heartbeat::Beep() {
         {"status", "online"},
         {"timestamp", now_ms},
     });
-  } catch (const std::exception& e) { log_.error("Beep failed: {}", e.what()); }
+  } catch (const std::exception& e) {
+    log_.error("Beep failed: {}", e.what());
+  } catch (...) { log_.error("Beep failed"); }
 }
 
 }  // namespace aember::device_health

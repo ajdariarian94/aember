@@ -14,7 +14,7 @@ class SignalHandlerTest : public ::testing::Test {
     // Save the original signal mask to restore later
     pthread_sigmask(SIG_SETMASK, nullptr, &original_mask_);
 
-    handler_ = std::make_unique<aember::utils::SignalHandler>();
+    handler_ = std::make_unique<aember::utils::signal::SignalHandler>();
   }
 
   void TearDown() override {
@@ -28,7 +28,7 @@ class SignalHandlerTest : public ::testing::Test {
   }
 
   sigset_t original_mask_{};
-  std::unique_ptr<aember::utils::SignalHandler> handler_;
+  std::unique_ptr<aember::utils::signal::SignalHandler> handler_;
 };
 
 }  // namespace aember_test::utils

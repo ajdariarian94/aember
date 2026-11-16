@@ -28,17 +28,28 @@ an item only when the user says so. Related items for the low-level pieces
 
 ## PID 1 robustness
 
-- [ ] **PID 1 must never die:** top-level `try`/`catch` around the run loop
-  that logs and keeps reaping; parse configs without exceptions (nlohmann
-  `json::parse(..., nullptr, false)` / `std::expected`). An uncaught
-  exception is a kernel panic.
-- [ ] **Re-enable and add tests.** Several libraries have their `tests/`
-  subdirectory commented out in CMake. A unit test would have caught the
-  `ModuleLoader` bug fixed in d841a7e (`std::ranges::all_of`
-  stopped at the first failing module).
-- [ ] **Investigate `RemoveChild: unknown pid=<n>`** warnings at boot: a child
-  exits that `ChildSupervisor` doesn't track (probably LXC helper processes).
-  Possible reaping race.
+Done (2026-11-16): PID 1 never returns or dies on an exception
+(`pid1::Finish`, terminate handler, guarded phases and threads), shutdown
+signals (reboot/poweroff/halt), one reaper that doesn't steal children
+other code waits for (this was the `RemoveChild: unknown pid` warning),
+signals blocked before any thread starts, the ServiceManager stop deadlock,
+`ProcessManager::Stop` racing the reaper, a rotating file log, and
+re-enabled tests. Left:
+
+- [ ] Rewrite the service-manager tests for the current API (they still use
+  `ServiceConfig`/`AddService`, disabled in CMake).
+- [ ] Tests for container-manager, module-loader, network-manager,
+  root-manager and the remaining utils (no `tests/` dirs yet).
+- [ ] Containers ignore the graceful stop: `lxc shutdown` times out after
+  5 s per container, then `stop` kills them. Set `lxc.signal.halt` to
+  something the container init handles (SIGTERM for BusyBox init).
+- [ ] At shutdown the SquashFS lower dir can't be unmounted (`EBUSY`): the
+  overlay on top is only lazily detached (`MNT_DETACH`). Unmount the
+  overlay for real first.
+- [ ] `NetworkManager::Stop` waits up to one ping interval (the monitor
+  thread sleeps); use a condition variable with the stop token.
+- [ ] `ProcessManager::ScheduleRestart` detaches a thread that captures
+  `this`; a restart pending at shutdown can touch a destroyed manager.
 - [ ] Hardware **watchdog** support and recovery for PID 1 itself.
 
 ## Architecture

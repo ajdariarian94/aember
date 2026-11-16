@@ -110,17 +110,41 @@ under `include/aember-libs/<lib>/`, CMake target `aember-libs::<lib>`.
 
 | Library             | Role |
 |---------------------|------|
-| `aember-init`       | Top level: `StartInitramfs()` / `StartRoot()`, wires everything together |
+| `aember-init`       | Top level: `StartInitramfs()` / `StartRoot()`, wires everything together; `pid1.h`: terminate handler, signal mask, `Finish()` (shutdown) |
 | `root-manager`      | Mounts the real root and does `pivot_root` |
 | `mount-manager`     | Mounts and tracks filesystems |
 | `module-loader`     | Loads kernel modules from `modules.json` |
 | `network-manager`   | Interfaces, bridge, connectivity monitoring (`network.json`) |
 | `process-manager`   | Spawns and tracks native processes |
 | `container-manager` | LXC container lifecycle (liblxc from `VIRT_ROOT`, set by the toolchain file) |
-| `child-supervisor`  | Reaps children, dispatches PID exit events |
+| `child-supervisor`  | Tracks service pids; `ReapZombies()` is PID 1's only reaper (see below) |
 | `service-manager`   | Coordinator over process/container managers, dependency order |
 | `device-health`     | Heartbeat + `AemberMonitor` runtime stats |
 | `utils/*`           | config, container, logging (spdlog), module, mount, network, process, root, shell, signal (signalfd + epoll) |
+
+**PID 1 rules** (if PID 1 exits or dies, the kernel panics):
+- `main()` never returns as PID 1: it ends in `pid1::Finish()`, which
+  reboots/powers off/halts when requested and otherwise reaps forever. The
+  terminate handler keeps PID 1 alive after an uncaught exception.
+- Init phases run through `Guarded()` in `aember-init.cpp` (log and carry
+  on); threads (`jthread` loops, signal callbacks, restart timers) catch
+  everything. Parsers return errors, never throw.
+- Signals: `pid1::BlockInitSignals()` blocks SIGTERM/INT/HUP/USR1/USR2/CHLD
+  first thing in `main()`, before any thread exists (a thread with them
+  unblocked takes the default action = init dies). fork() children get them
+  unblocked via `pthread_atfork`. Signal callbacks only record a request;
+  never call `Stop()` from the signal thread (it joins itself).
+- Shutdown like BusyBox init: SIGTERM/SIGINT reboot, SIGUSR2 power off,
+  SIGUSR1 halt (BusyBox `reboot`/`poweroff`/`halt` work).
+- Reaping: never `waitpid(-1)` while services run. `system()`, modprobe,
+  liblxc and the debug shell wait for their own children; a blind
+  `waitpid(-1)` steals their status (ECHILD). The reaper thread calls
+  `ChildSupervisor::ReapZombies()`: zombies found in `/proc`, tracked pids
+  at once, untracked ones after 2 s (an orphan nobody waits for).
+- Don't hold a manager's mutex while calling another manager: state
+  callbacks lock it again (`ServiceManager::StopInternal` deadlocked every
+  container stop that way).
+- The file log `/var/log/aember-init.log` rotates (1 MiB × 3).
 
 Runtime config lives in the overlay at
 `resources/<arch>/rootfs/etc/aember/{services,containers,modules,network}.json`;
@@ -191,7 +215,8 @@ does **not** read `modules.builtin`, so the C++ `ModuleLoader` checks
 (Debug also starts GDB). **`aember qemu launch --headless --timeout 30`**
 runs QEMU in the current terminal with the serial console on stdout, for
 checks without a display. aember is PID 1 and never exits, so the timeout is
-what ends the run; the boot itself takes ~10 s. Headless keeps the virtual
+what ends the run (or, from the debug shell, `kill -USR2 1; exit` powers the
+VM off and QEMU ends by itself); the boot itself takes ~10 s. Headless keeps the virtual
 GPU (`-display none`, not `-vga none`): the `aember-monitor` container binds
 `/dev/dri` and `/dev/fb0` and fails without them. Serial logs go to
 `build/logging/<arch>/`.
@@ -251,10 +276,19 @@ C++:
 - Classes `PascalCase`, methods `PascalCase()`, members `snake_case_`.
 - A library dir has `CMakeLists.txt` (STATIC lib + `aember-libs::` alias +
   install/export), `Config.cmake.in`, `include/`, `src/`, optional `tests/`
-  (GTest, `<lib>-unittest`, `add_test`). Several libraries have their
-  `tests` subdirectory commented out; check before assuming tests run.
+  (GTest, `<lib>-unittest`, `add_test`). Tests built: child-supervisor,
+  process-manager, device-health (heartbeat), mount-manager, utils/config,
+  utils/logging, utils/signal. service-manager's tests are disabled (written
+  for the old ServiceConfig API, need a rewrite).
 - Tests build only with `--with-tests`, which forces x64 Debug; the test
-  binaries are packed into the initramfs and run inside QEMU.
+  binaries are packed into the initramfs and also run in the dev container
+  through the SDK's loader:
+  `S=build/aember-resources/x64-poky-linux/sdk/sysroots/core2-64-poky-linux;
+  $S/lib/ld-linux-x86-64.so.2 --library-path $S/lib:$S/usr/lib
+  build/install/x64-poky-linux/Debug/bin/tests/<lib>-unittest`.
+- PID 1's file log survives in the rootfs image after a run: copy partition
+  1 (`dd skip=128`), `e2fsck -fy` it (QEMU was killed, so the ext4 journal
+  must be replayed), then `debugfs -R "cat /var/log/aember-init.log"`.
 
 CMake: cmake-format (`.cmake-format.yaml`) and cmakelint (`.cmakelintrc`).
 

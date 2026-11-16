@@ -146,15 +146,30 @@ bool ProcessManager::Stop(std::string_view name) {
   // Release lock while polling so HandleExit can acquire it.
   lock.unlock();
 
+  // In PID 1 the reaper collects the child and calls HandleExit, which drops
+  // the pid from name_to_pid_. Without a reaper (tests, plain processes) we
+  // collect it ourselves and call HandleExit so the bookkeeping matches.
+  const auto exited = [&] {
+    if (int status = 0; waitpid(pid, &status, WNOHANG) == pid) {
+      HandleExit(pid, status);
+      return true;
+    }
+    std::lock_guard relock{mutex_};
+    const auto cur = name_to_pid_.find(key);
+    return cur == name_to_pid_.end() || cur->second != pid;
+  };
+
   const auto deadline = std::chrono::steady_clock::now() + stop_timeout;
   while (std::chrono::steady_clock::now() < deadline) {
-    if (waitpid(pid, nullptr, WNOHANG) == pid) {
+    if (exited()) {
       log_.info("'{}' exited after SIGTERM", name);
       return true;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds{50});
   }
 
+  // Only kill the pid while it is still ours: after a reap it may be reused.
+  if (exited()) { return true; }
   log_.warn("'{}' did not exit after SIGTERM — SIGKILL", name);
   kill(pid, SIGKILL);
   return true;
@@ -235,13 +250,18 @@ void ProcessManager::ScheduleRestart(std::string_view name) {
 
   // jthread auto-joins on destruction — detach replaced with move-to-local.
   std::jthread{[this, key, delay](std::stop_token) {
-    std::this_thread::sleep_for(delay);
-    log_.info("Restarting '{}'", key);
-    if (on_restart_) {
-      on_restart_(key);
-    } else {
-      std::ignore = Start(key);
-    }
+    // An exception escaping a thread calls std::terminate: fatal in PID 1.
+    try {
+      std::this_thread::sleep_for(delay);
+      log_.info("Restarting '{}'", key);
+      if (on_restart_) {
+        on_restart_(key);
+      } else {
+        std::ignore = Start(key);
+      }
+    } catch (const std::exception& e) {
+      log_.error("Restart of '{}' failed: {}", key, e.what());
+    } catch (...) { log_.error("Restart of '{}' failed", key); }
   }}.detach();
 }
 
