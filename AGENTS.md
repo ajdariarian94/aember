@@ -203,8 +203,8 @@ Every name in `resources/<arch>/rootfs/etc/aember/modules.json` must exist in
 the aember-resources kernel, as a `.ko` or listed in `modules.builtin`
 (bridge, veth, br_netfilter, overlay, llc, stp, ttm are built in). The
 packer fails on anything missing, packs each listed `.ko` **plus its
-dependencies** (from `modules.dep`, generated with `depmod -n` because the
-kernel asset doesn't ship one; e.g. virtio-gpu needs drm_shmem_helper), and
+dependencies** (from the `modules.dep` the kernel asset ships since
+aember-resources v0.1.4; e.g. virtio-gpu needs drm_shmem_helper), and
 copies `modules.builtin*`/`modules.order` into the rootfs. BusyBox `modprobe`
 does **not** read `modules.builtin`, so the C++ `ModuleLoader` checks
 `/lib/modules/<release>/modules.builtin` itself and skips built-in modules.

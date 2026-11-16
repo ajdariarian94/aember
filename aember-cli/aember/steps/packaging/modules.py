@@ -82,24 +82,17 @@ def _module_deps(version_dir: Path) -> dict[str, list[str]]:
     """
     Module dependencies of the kernel: module rel path → rel paths it needs.
 
-    Uses modules.dep if the kernel ships one, otherwise generates it with
-    `depmod -n` (the aember-resources kernel asset has no modules.dep).
+    Read from the modules.dep that the aember-resources kernel asset ships
+    (since v0.1.4); it used to be regenerated here with `depmod -n`.
     """
     path = version_dir / "modules.dep"
-    if path.exists():
-        text = path.read_text()
-    else:
-        # depmod -b <base> expects <base>/lib/modules/<version>/
-        base = version_dir.parent.parent.parent
-        result = subprocess.run(
-            ["depmod", "-n", "-b", str(base), version_dir.name],
-            capture_output=True,
-            text=True,
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not found: the kernel asset ships modules.dep since "
+            f"aember-resources v0.1.4. Fetch a current kernel "
+            f"(RESOURCES_VERSION in config/resources.py)."
         )
-        if result.returncode != 0:
-            log.warning("depmod -n failed: %s", result.stderr.strip())
-            return {}
-        text = result.stdout
+    text = path.read_text()
 
     deps: dict[str, list[str]] = {}
     for line in text.splitlines():
