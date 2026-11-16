@@ -15,11 +15,10 @@ from aember.steps.resources.fetch_resources import FetchResources
 
 def release(
     architectures: list[Architecture] = typer.Option(
-        # aarch64 has no aember-resources assets yet
-        [Architecture.x64_linux],
+        list(Architecture),
         "--arch",
         "-a",
-        help="Architectures to release (repeatable)",
+        help="Architectures to release (repeatable; default: all)",
         case_sensitive=False,
     ),
 ):

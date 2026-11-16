@@ -160,7 +160,12 @@ everyday build command.
 3. `ConfigureStep`: sources the SDK `environment-setup-*`, unsets CC/CXX,
    runs CMake with the vcpkg toolchain chain-loading `tools/toolchains/<arch>.cmake`
    into `build/configure/<arch>/<BuildType>/`
-4. `BuildStep`: `cmake --build`, then merges `compile_commands.json` for clangd
+4. `BuildStep`: `cmake --build --parallel <jobs>`, then merges
+   `compile_commands.json` for clangd. **Jobs = 66% of the CPUs**
+   (`config/build.py`, override `AEMBER_BUILD_JOBS=<n>`): using every core
+   crashes WSL. Configure and build also export it as `AEMBER_BUILD_JOBS`
+   and `VCPKG_MAX_CONCURRENCY`, and the toolchain files use it for
+   `-flto=<jobs>`.
 5. `PackStep` (`steps/packaging/`): initramfs tree + BusyBox (installed with
    `qemu-<arch>-static` when cross) + `aember` + examples/tests + `/init`
    symlink; runtime libs resolved with `readelf -d` (NEEDED; works for every
@@ -213,15 +218,18 @@ The toolchain files find everything relative to the repo
    `doc/changelog/`. `aember changelog --version-bump minor|patch|major`
    compares `main..HEAD`, so it only finds changes on a feature branch; on
    `main` run its `ChangelogStep` with `base_branch` set to the last tag.
-2. `aember release` (x64 by default, `--arch` to add more once
-   aember-resources has them): for each build type it fetches resources,
+2. `aember release` (every architecture by default, `-a` repeatable to pick
+   some): for each architecture and build type it fetches resources,
    configures, builds, packs and writes
    `build/release/<arch>/<type>/`: `aember-app-<arch>-<type>-v<V>.tar.gz`
    (kernel, initramfs, rootfs image), `aember-binary-…`, and
    `aember-resources-v<V>.tar.gz` + `.sha256` (the overlay).
-3. Commit and push, then create the GitHub release `v<V>` at that commit
-   with `gh release create`, uploading the overlay tarball **once** plus the
-   app and binary tarballs. A fresh clone needs
+3. Commit and push, then `aember publish [--clobber]`
+   (`steps/releasing/publish.py`): it checks the overlay tarballs against
+   their `.sha256` and that HEAD is pushed, creates the GitHub release `v<V>`
+   at HEAD (notes: that version's `doc/changelog/` file) and uploads the
+   overlay tarball **once** plus every app and binary tarball. Existing
+   assets are refused unless `--clobber`. A fresh clone needs
    `aember-resources-v<project VERSION>.tar.gz` in release `v<VERSION>`, so
    a version bump must always be followed by its release.
 
@@ -277,17 +285,17 @@ CLI's history up to `af5bc15`). It's regular files here: edit it directly.
 - `devcontainer.json` uses the prebuilt image; switch to the `build:` block
   to test Dockerfile changes.
 - Downloads (overlay images, aember-resources) use plain HTTPS; `gh` and a
-  token are not needed to build. For other `gh` use, `GITHUB_TOKEN` can come
-  from `tools/scripts/.env` (git-ignored, **never commit or print it**).
+  token are not needed to build. For `aember publish` and other `gh` use,
+  `GITHUB_TOKEN` can come from `tools/scripts/.env` (git-ignored, **never
+  commit or print it**, `utils/github.load_github_token`) or a
+  `gh auth login`. With a login, `init.sh` runs `gh auth setup-git` at
+  container start, so plain `git push` works.
 - `aember-cli/aember/config/host_path.py` reads `HOST_ROOT_PATH` at import.
 
 ## Known issues (don't fix unless asked)
 
 - `cli/qemu/build.py`: `if build_tests or BuildType.debug:` is always true,
   so every `aember qemu build` starts with `CleanStep`.
-- `aember app build` runs `cmake --build --parallel` with no job count; on
-  WSL pass `CMAKE_BUILD_PARALLEL_LEVEL=8` (and `VCPKG_MAX_CONCURRENCY=8`),
-  using every core crashes it.
 - The dev Dockerfile still has Yocto-era leftovers (GNU tar 1.34
   downgrade, gcc-12/14 PPA). Harmless, but can go on the next image rebuild.
 
