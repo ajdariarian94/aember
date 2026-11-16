@@ -75,6 +75,16 @@ QEMU_PROFILES: dict[str, QemuProfile] = {
         root="root=/dev/vda1",
         display=("-device", "virtio-gpu-pci", "-display", "gtk"),
     ),
+    "arm-poky-linux": QemuProfile(
+        binary="qemu-system-arm",
+        # highmem=off: the kernel has no LPAE, so keep all devices below 4 GB
+        machine="virt,highmem=off",
+        cpu="cortex-a15",  # ARMv7-A with NEON; the SDK targets generic ARMv7-A
+        drive="if=virtio,format=raw",
+        console="console=tty0 console=ttyAMA0,115200",
+        root="root=/dev/vda1",
+        display=("-device", "virtio-gpu-pci", "-display", "gtk"),
+    ),
 }
 
 # Maps architecture → GDB binary and extra setup commands
@@ -86,6 +96,10 @@ GDB_PROFILES: dict[str, dict] = {
     "aarch64-poky-linux": {
         "binary": "gdb-multiarch",
         "setup": ["-ex", "set architecture aarch64"],
+    },
+    "arm-poky-linux": {
+        "binary": "gdb-multiarch",
+        "setup": ["-ex", "set architecture arm"],
     },
 }
 

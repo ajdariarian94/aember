@@ -39,8 +39,8 @@ aember-resources (`../aember-resources`,
 <https://github.com/ajdariarian94/aember-resources>) builds the low-level
 pieces with kas/Yocto and publishes them as assets of the GitHub release
 `v<version>`. The version aember uses is pinned in
-`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.2`;
-x64 and aarch64).
+`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.3`;
+x64, aarch64 and arm32).
 
 `aember fetch-resources` (also the first step of `aember qemu build`,
 `steps/resources/fetch_resources.py`):
@@ -88,6 +88,8 @@ resources/<arch>/rootfs rootfs overlay: configs tracked, *.squashfs images from 
 tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (SDK compilers, sysroot, flags)
 tools/scripts/          init.sh (postStart), prerequisites.sh, bashrc.d/
 vcpkg/                  SUBMODULE (fork) incl. x64/aarch64-poky-linux triplets
+tools/triplets/         overlay triplets not in the submodule (arm-poky-linux),
+                        passed as VCPKG_OVERLAY_TRIPLETS by ConfigureStep
 vcpkg.json              cli11, gtest, nlohmann-json, spdlog
 doc/                    Doxyfile, changelog/ (written by `aember changelog`)
 build/                  git-ignored: aember-resources/, configure/, install/,
@@ -179,7 +181,8 @@ does **not** read `modules.builtin`, so the C++ `ModuleLoader` checks
 `/lib/modules/<release>/modules.builtin` itself and skips built-in modules.
 
 `aember qemu launch` boots `build/package/<arch>/<BuildType>/` in
-`qemu-system-x86_64` / `qemu-system-aarch64 -machine virt`, in xterm windows
+`qemu-system-x86_64` / `qemu-system-aarch64 -machine virt` /
+`qemu-system-arm -machine virt,highmem=off -cpu cortex-a15`, in xterm windows
 (Debug also starts GDB). **`aember qemu launch --headless --timeout 30`**
 runs QEMU in the current terminal with the serial console on stdout, for
 checks without a display. aember is PID 1 and never exits, so the timeout is
