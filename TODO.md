@@ -9,22 +9,21 @@ an item only when the user says so. Related items for the low-level pieces
 
 ## Boot time and the debug shell
 
-- [ ] **Remove the 5 s "press 'd' for debug shell" wait.** It's about half of
-  the ~10 s boot (log: 18:48:06 → 18:48:11 before mounting continues).
-  Replace it with a combination of:
-  - [ ] **Background key listener:** watch the console from the existing
-    `epoll` loop (or a thread) instead of blocking. Boot continues
-    immediately; pressing `d` at any time spawns a supervised shell on the
-    console.
-  - [ ] **Emergency shell on failure:** if the root mount or `pivot_root`
-    fails, drop into a shell instead of hanging or panicking.
-  - [ ] **Kernel command line flags**, read from `/proc/cmdline`:
-    `aember.shell=1` (shell at start) and `aember.shell=initramfs` (stop
-    before the pivot, for root mount problems). Add
-    `aember app launch --debug-shell` to append it in QEMU; on a Raspberry Pi
-    it goes into `cmdline.txt`.
-  - [ ] Optional: in Debug builds, a console shell/getty as a normal entry
-    in `services.json` (restarted when it exits), absent in Release.
+Done (2026-11-16): no 5 s wait at boot any more. A console listener opens
+a shell when `d` is pressed at any time; `aember.shell=1` on the kernel
+command line (`aember app launch --debug-shell`) opens one at boot; the
+initramfs opens an emergency shell when the switch to the real root fails.
+Left:
+
+- [ ] `aember.shell=initramfs`: stop before the pivot, for root mount
+  problems (today the shell only opens there when the pivot fails).
+- [ ] The listener starts after the network phase (it needs the reaper),
+  so `d` works only after up to 30 s when there is no network.
+- [ ] The emergency shell path was tested in the unit tests only, not by
+  booting QEMU with a broken `root=`.
+- [ ] `d` works in Release images too, as before: anyone at the serial
+  console gets a root shell. Decide whether production images should
+  disable it (build option or kernel parameter).
 
 ## PID 1 robustness
 

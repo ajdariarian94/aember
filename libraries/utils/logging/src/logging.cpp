@@ -72,6 +72,17 @@ void enable_console_silence() {
       global_sinks.end());
 }
 
+void set_console_logging(bool enabled) {
+  std::lock_guard lock(sink_mutex);
+  spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
+  // The stdout sink is shared by every logger, so its level mutes them all.
+  for (const auto& sink : global_sinks) {
+    if (std::dynamic_pointer_cast<spdlog::sinks::stdout_sink_mt>(sink)) {
+      sink->set_level(enabled ? spdlog::level::trace : spdlog::level::off);
+    }
+  }
+}
+
 void init_early_logging() {
   std::lock_guard lock(sink_mutex);
   if (early_initialized) return;

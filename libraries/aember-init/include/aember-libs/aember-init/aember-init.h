@@ -82,6 +82,7 @@ class AemberInit {
 
   void StartReaperThread();
   void StopReaperThread();
+  void StartDebugShell(bool shell_now);
   void ReapOnce();
   void RequestShutdown(ShutdownAction action);
 

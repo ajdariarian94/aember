@@ -27,7 +27,9 @@ class QemuProfile:
     root: str  # kernel append root=...
     display: tuple[str, ...] = ()  # display args — empty = headless
 
-    def base_cmd(self, kernel: str, initrd: str, rootfs: str) -> list[str]:
+    def base_cmd(
+        self, kernel: str, initrd: str, rootfs: str, kernel_args: str = ""
+    ) -> list[str]:
         cmd = [self.binary]
         if self.machine:
             cmd += ["-machine", self.machine]
@@ -43,7 +45,7 @@ class QemuProfile:
             "-drive",
             f"file={rootfs},{self.drive}",
             "-append",
-            f"{self.console} {self.root} rw rootwait",
+            f"{self.console} {self.root} rw rootwait {kernel_args}".rstrip(),
             "-netdev",
             "user,id=net0",
             "-device",
@@ -201,7 +203,9 @@ class LaunchStep(Step):
         raw_log_path = str(log_dir / f"qemu-serial-{ts}.log.raw")
         serial_log_path = str(log_dir / f"qemu-serial-{ts}.log")
 
-        base_cmd = profile.base_cmd(kernel_path, initrd_path, rootfs_img)
+        # aember.shell=1: PID 1 opens a debug shell on the console at boot
+        kernel_args = "aember.shell=1" if ctx.data.get("debug_shell") else ""
+        base_cmd = profile.base_cmd(kernel_path, initrd_path, rootfs_img, kernel_args)
         serial_chardevs = [
             "-chardev",
             f"stdio,id=char0,logfile={raw_log_path},logappend=on",
@@ -222,7 +226,7 @@ class LaunchStep(Step):
                 "none" if arg == "gtk" else arg for arg in profile.display
             )
             cmd = replace(profile, display=headless_display).base_cmd(
-                kernel_path, initrd_path, rootfs_img
+                kernel_path, initrd_path, rootfs_img, kernel_args
             )
             cmd += serial_chardevs + ["-monitor", "none"]
             log.info("Launching QEMU headless (timeout=%s s)", timeout)
