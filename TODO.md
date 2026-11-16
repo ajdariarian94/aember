@@ -76,12 +76,14 @@ BusyBox init / s6 / runit / dinit.
   (WSL crashes when the build uses every core).
 - [ ] `aember release` (`cli/base/release.py`) still defaults to x64 only, with
   a stale "aarch64 has no aember-resources assets yet" comment. Default to
-  both architectures now that v0.1.2 has them (`-a` twice works meanwhile).
-- [ ] **arm32 (ARMv7, `arm-poky-linux`)** after aarch64 works: common on
-  embedded boards (i.MX6, STM32MP1, older Pis). Needs a machine/kas file,
-  kernel and BusyBox fragments, LXC conf and assets in aember-resources, plus
-  a toolchain file, vcpkg triplet, `config/` entries and a QEMU profile
-  (`virt`, Cortex-A15/A7) here. Own branch, after aarch64 is merged.
+  all architectures now that aember-resources has them (repeat `-a`
+  meanwhile).
+- [ ] **arm32 (ARMv7-A hf NEON, `arm-poky-linux`)** on real boards (i.MX6,
+  STM32MP1, Raspberry Pi 2). Builds, packs and boots in QEMU (`virt`,
+  Cortex-A15) since 0.11.0 with aember-resources v0.1.3.
+- [ ] aarch64's `alpine` container image is an old aember initramfs copy
+  (40 MB: glibc, liblxc, kernel modules). arm32's is just static BusyBox +
+  `echo-alpine.sh` (1 MB); rebuild aarch64's the same way.
 - [ ] Docs and a small example appliance, so others can try it in an
   afternoon.
 

@@ -18,6 +18,7 @@ log = logging.getLogger("aember.pack")
 KERNEL_IMAGE_NAMES: dict[str, str] = {
     "x64-poky-linux": "bzImage",
     "aarch64-poky-linux": "Image",
+    "arm-poky-linux": "zImage",
 }
 
 

@@ -59,6 +59,8 @@ class ConfigureStep(Step):
             f"-DCMAKE_TOOLCHAIN_FILE={vcpkg_toolchain}",
             f"-DVCPKG_TARGET_TRIPLET={triplet}",
             f"-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE={vcpkg_chainload_file}",
+            # triplets not in the vcpkg submodule (arm-poky-linux)
+            f"-DVCPKG_OVERLAY_TRIPLETS={ctx.root / 'tools' / 'triplets'}",
             f"-DVCPKG_INSTALLED_DIR={vcpkg_installed_path}",
             f"-DBUILD_TESTS={ctx.build_tests}",
             "-DVCPKG_MANIFEST_MODE=ON",
