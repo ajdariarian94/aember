@@ -248,6 +248,34 @@ checks without a display. aember is PID 1 and never exits, so the timeout is
 what ends the run (or, from the debug shell, `kill -USR2 1` powers the VM
 off and QEMU ends by itself); the boot itself takes ~5 s.
 
+**Without QEMU: `aember app launch --chroot`** (also `aember qemu launch
+--chroot`; `--timeout N` for unattended runs) runs the packed system on the
+host kernel: aember as PID 1 in a chroot of `aember-rootfs.img`, inside a
+privileged helper container of the dev image (`steps/launching/chroot.py`).
+- The image partition is mounted read-only with a tmpfs overlay: a run
+  never changes the image. /proc, /sys, /dev (so /dev/console is your
+  terminal: `d` opens the debug shell), /tmp, /run are prepared first;
+  aember skips existing mounts. `aember --root --chroot` loads no kernel
+  modules (they'd go into the WSL kernel).
+- Network: Docker's eth0 already has an address, and aember keeps any
+  existing address instead of running DHCP (general rule, also for `ip=`).
+- Screen: the WSLg X11 socket is bound to /tmp/.X11-unix and
+  `/etc/aember/lxc-extra.conf` (applied by ContainerManager to every
+  container) passes `DISPLAY`, `QT_QPA_PLATFORM=xcb` and software
+  rendering (no GPU in the container), so the Qt monitor opens as a window
+  ("Aember Monitor") on the Windows desktop. On a device the platform is
+  `linuxfb` (`lxc.environment` in its lxc.container.conf; the fb0/dri
+  binds are `optional`).
+- WSL's kernel can't mount zstd SquashFS (`CONFIG_SQUASHFS_ZSTD` off): zstd
+  container images are repacked once with xz into `build/chroot-cache/<arch>/`
+  and bind-mounted over the originals inside the chroot.
+- aarch64/arm32 run through qemu-user: a binfmt_misc handler with the F
+  flag is registered for that architecture (`aember-qemu-<arch>`, until WSL
+  restarts). aember, services and network work; **LXC containers don't**
+  (qemu-user can't create namespaces): use the QEMU boot or the board.
+- Ctrl-C/timeout = `docker stop` = SIGTERM to aember = clean shutdown; from
+  the debug shell `kill -USR2 1` ends the run (exit 130; 129 for reboot).
+
 Debug shell: boot never waits for it. Press `d` on the console at any time
 (a listener thread in `utils/shell/debug-shell.cpp` watches it; after the
 shell exits, `d` opens a new one). `aember.shell=1` on the kernel command

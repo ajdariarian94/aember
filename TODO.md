@@ -25,6 +25,17 @@ Left:
   console gets a root shell. Decide whether production images should
   disable it (build option or kernel parameter).
 
+## Running without QEMU
+
+Done (2026-11-17): `aember app launch --chroot` runs the packed system as
+PID 1 in a chroot on the host kernel (privileged helper container), with
+the Qt monitor on the WSLg desktop through X11. Left:
+
+- [ ] aarch64/arm32 containers can't run in the chroot (qemu-user can't
+  clone namespaces); only aember, services and network do.
+- [ ] The X11 window has no input checks yet (keyboard/mouse into the Qt
+  app untested).
+
 ## PID 1 robustness
 
 Done (2026-11-16): PID 1 never returns or dies on an exception

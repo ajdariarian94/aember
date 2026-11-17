@@ -41,8 +41,8 @@ bool Guarded(aember::utils::logging::Logger& log, std::string_view phase,
 // Ctor / Dtor
 // ---------------------------------------------------------------------------
 
-AemberInit::AemberInit(std::string_view logger_name)
-    : log_(std::string{logger_name}) {
+AemberInit::AemberInit(std::string_view logger_name, Options options)
+    : options_(options), log_(std::string{logger_name}) {
 #ifndef NDEBUG
   aember::utils::logging::logging_level_debug();
 #else
@@ -117,7 +117,8 @@ void AemberInit::StartRoot() {
   if (running_.exchange(true)) return;
 
   aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
-  log_.info("Starting Aember in root mode");
+  log_.info("Starting Aember in root mode{}",
+            options_.chroot ? " (chroot)" : "");
 
   // Create heartbeat JSON file early — needed for aember-monitor container
   // mount
@@ -247,6 +248,11 @@ AemberInit::Result<> AemberInit::InitMounts() {
 
   if (!mount_manager_->MountEarlyFilesystems()) {
     return std::unexpected(Error{"Some early filesystems failed to mount"});
+  }
+
+  if (options_.chroot) {
+    log_.info("chroot mode: not loading kernel modules (host kernel)");
+    return {};
   }
 
   module_loader_.emplace();

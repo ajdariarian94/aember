@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string_view>
 
 #include <netinet/in.h>
@@ -23,6 +24,9 @@ namespace aember::network::netlink {
 
 /// Interface index, or -1 if there is no such interface.
 int InterfaceIndex(std::string_view name);
+
+/// First IPv4 address of interface @p name, if it has one.
+std::optional<in_addr> FirstIPv4Address(std::string_view name);
 
 /// `ip link set <idx> up`
 int SetLinkUp(int ifindex);
