@@ -26,3 +26,24 @@ install(
   TARGETS network-manager-unittest
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
 )
+
+add_executable(
+  dhcp-netlink-unittest
+  src/dhcp-netlink.cpp
+)
+
+target_link_libraries(
+  dhcp-netlink-unittest
+  PRIVATE aember-libs::network-manager
+          GTest::gtest_main
+)
+
+add_test(
+  NAME dhcp-netlink-unittest
+  COMMAND dhcp-netlink-unittest
+)
+
+install(
+  TARGETS dhcp-netlink-unittest
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
+)

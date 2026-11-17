@@ -8,6 +8,8 @@
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
 
+#include <aember-libs/network-manager/dhcp-client.h>
+#include <aember-libs/network-manager/netlink.h>
 #include <aember-libs/network-manager/network-manager.h>
 
 #include <nlohmann/json.hpp>
@@ -30,7 +32,6 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 namespace aember::network {
@@ -40,35 +41,6 @@ namespace aember::network {
 // ---------------------------------------------------------------------------
 
 namespace {
-
-int RunCommand(const std::vector<std::string>& args) {
-  if (args.empty()) { return -1; }
-
-  // Build argv — LXC C API pattern, const_cast unavoidable.
-  std::vector<char*> argv;
-  argv.reserve(args.size() + 1);
-  std::ranges::transform(args, std::back_inserter(argv), [](const auto& a) {
-    return const_cast<char*>(a.c_str());
-  });
-  argv.push_back(nullptr);
-
-  const pid_t pid = fork();
-  if (pid < 0) { return -1; }
-
-  if (pid == 0) {
-    if (const int devnull = open("/dev/null", O_WRONLY); devnull >= 0) {
-      dup2(devnull, STDOUT_FILENO);
-      dup2(devnull, STDERR_FILENO);
-      close(devnull);
-    }
-    execvp(argv[0], argv.data());
-    _exit(127);
-  }
-
-  int status = 0;
-  waitpid(pid, &status, 0);
-  return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-}
 
 bool ParseCidr(const std::string& cidr, in_addr& addr, int& prefix_len) {
   const auto slash = cidr.find('/');
@@ -81,58 +53,6 @@ bool ParseCidr(const std::string& cidr, in_addr& addr, int& prefix_len) {
   prefix_len = std::stoi(cidr.substr(slash + 1));
   return prefix_len >= 0 && prefix_len <= 32;
 }
-
-}  // namespace
-
-// ---------------------------------------------------------------------------
-// Netlink RAII socket
-// ---------------------------------------------------------------------------
-
-namespace {
-
-struct NetlinkSocket {
-  int fd{-1};
-
-  NetlinkSocket() {
-    fd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
-  }
-
-  ~NetlinkSocket() {
-    if (fd >= 0) { close(fd); }
-  }
-
-  [[nodiscard]] bool Valid() const { return fd >= 0; }
-
-  bool SendAndAck(struct nlmsghdr* nlh) {
-    if (!Valid()) { return false; }
-
-    struct sockaddr_nl sa {};
-    sa.nl_family = AF_NETLINK;
-
-    struct iovec iov {
-      nlh, nlh->nlmsg_len
-    };
-    struct msghdr msg {};
-    msg.msg_name = &sa;
-    msg.msg_namelen = sizeof(sa);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-
-    if (sendmsg(fd, &msg, 0) < 0) { return false; }
-
-    alignas(NLMSG_ALIGNTO) char buf[4096];
-    const ssize_t n = recv(fd, buf, sizeof(buf), 0);
-    if (n < 0) { return false; }
-
-    auto* reply = reinterpret_cast<struct nlmsghdr*>(buf);
-    if (!NLMSG_OK(reply, static_cast<unsigned>(n))) { return false; }
-    if (reply->nlmsg_type == NLMSG_ERROR) {
-      auto* err = reinterpret_cast<struct nlmsgerr*>(NLMSG_DATA(reply));
-      return err->error == 0;
-    }
-    return true;
-  }
-};
 
 }  // namespace
 
@@ -284,7 +204,6 @@ void NetworkManager::BringUpInterfaces() {
       log_.warn("Interface {} failed (not required, continuing)", iface.name);
     } else {
       log_.info("Interface {} is up", iface.name);
-      WriteResolvConf(iface);
     }
   }
 }
@@ -294,203 +213,111 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
       iface.mode == aember::utils::network::IpMode::kDhcp ? "dhcp" : "static";
   log_.info("Bringing up interface: {} (mode={})", iface.name, mode_str);
 
-  if (!NetlinkSetInterfaceUp(iface.name)) {
-    log_.warn("{}: netlink UP failed, trying fallback", iface.name);
-    if (!FallbackIpCommand({"ip", "link", "set", iface.name, "up"})) {
-      log_.error("{}: could not set interface UP", iface.name);
-      return false;
-    }
+  const int idx = netlink::InterfaceIndex(iface.name);
+  if (idx < 0) {
+    log_.error("{}: no such interface", iface.name);
+    return false;
+  }
+  if (const int rc = netlink::SetLinkUp(idx); rc != 0) {
+    log_.error("{}: could not set link up: {}", iface.name, strerror(-rc));
+    return false;
   }
 
   if (iface.mode == aember::utils::network::IpMode::kStatic) {
-    if (!NetlinkSetStaticAddress(iface)) {
-      log_.warn("{}: netlink static address failed, trying fallback",
-                iface.name);
-      if (!FallbackIpCommand(
-              {"ip", "addr", "add", iface.address, "dev", iface.name})) {
-        log_.error("{}: could not assign static address {}",
-                   iface.name,
-                   iface.address);
-        return false;
-      }
-      if (!iface.gateway.empty()) {
-        FallbackIpCommand({"ip",
-                           "route",
-                           "add",
-                           "default",
-                           "via",
-                           iface.gateway,
-                           "dev",
-                           iface.name});
-      }
-    }
-    return true;
+    return ConfigureStatic(iface, idx);
   }
-
-  return RunUdhcpc(iface);
+  return ConfigureDhcp(iface, idx);
 }
 
-// ---------------------------------------------------------------------------
-// Netlink: set interface UP
-// ---------------------------------------------------------------------------
-
-bool NetworkManager::NetlinkSetInterfaceUp(std::string_view iface_name) {
-  NetlinkSocket nl;
-  if (!nl.Valid()) {
-    log_.error("Failed to open netlink socket: {}", strerror(errno));
-    return false;
-  }
-
-  const int idx = GetInterfaceIndex(iface_name);
-  if (idx < 0) {
-    log_.error("Interface {} not found", iface_name);
-    return false;
-  }
-
-  struct {
-    struct nlmsghdr nlh;
-    struct ifinfomsg ifi;
-  } req{};
-  req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg));
-  req.nlh.nlmsg_type = RTM_NEWLINK;
-  req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-  req.nlh.nlmsg_seq = 1;
-  req.ifi.ifi_family = AF_UNSPEC;
-  req.ifi.ifi_index = idx;
-  req.ifi.ifi_flags = IFF_UP;
-  req.ifi.ifi_change = IFF_UP;
-
-  return nl.SendAndAck(&req.nlh);
-}
-
-// ---------------------------------------------------------------------------
-// Netlink: assign static address + default route
-// ---------------------------------------------------------------------------
-
-bool NetworkManager::NetlinkSetStaticAddress(const InterfaceConfig& iface) {
-  NetlinkSocket nl;
-  if (!nl.Valid()) { return false; }
-
+bool NetworkManager::ConfigureStatic(const InterfaceConfig& iface, int idx) {
   in_addr addr{};
   int prefix_len = 0;
   if (!ParseCidr(iface.address, addr, prefix_len)) {
     log_.error("{}: invalid CIDR '{}'", iface.name, iface.address);
     return false;
   }
-
-  const int idx = GetInterfaceIndex(iface.name);
-  if (idx < 0) { return false; }
-
-  struct {
-    struct nlmsghdr nlh;
-    struct ifaddrmsg ifa;
-    char attrbuf[256];
-  } req{};
-
-  req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifaddrmsg));
-  req.nlh.nlmsg_type = RTM_NEWADDR;
-  req.nlh.nlmsg_flags =
-      NLM_F_REQUEST | NLM_F_CREATE | NLM_F_REPLACE | NLM_F_ACK;
-  req.nlh.nlmsg_seq = 2;
-  req.ifa.ifa_family = AF_INET;
-  req.ifa.ifa_prefixlen = static_cast<unsigned char>(prefix_len);
-  req.ifa.ifa_index = idx;
-
-  auto* rta = reinterpret_cast<struct rtattr*>(
-      reinterpret_cast<char*>(&req.nlh) + NLMSG_ALIGN(req.nlh.nlmsg_len));
-  rta->rta_type = IFA_LOCAL;
-  rta->rta_len = RTA_LENGTH(sizeof(in_addr));
-  memcpy(RTA_DATA(rta), &addr, sizeof(in_addr));
-  req.nlh.nlmsg_len = NLMSG_ALIGN(req.nlh.nlmsg_len) + rta->rta_len;
-
-  if (!nl.SendAndAck(&req.nlh)) {
-    log_.error("{}: RTM_NEWADDR failed", iface.name);
+  if (const int rc = netlink::AddAddress(idx, addr, prefix_len); rc != 0) {
+    log_.error("{}: could not assign {}: {}",
+               iface.name,
+               iface.address,
+               strerror(-rc));
     return false;
   }
 
-  if (iface.gateway.empty()) { return true; }
-
-  in_addr gw{};
-  if (inet_pton(AF_INET, iface.gateway.c_str(), &gw) != 1) {
-    log_.warn(
-        "{}: invalid gateway '{}', skipping route", iface.name, iface.gateway);
-    return true;
+  if (!iface.gateway.empty()) {
+    in_addr gw{};
+    if (inet_pton(AF_INET, iface.gateway.c_str(), &gw) != 1) {
+      log_.warn("{}: invalid gateway '{}', no default route",
+                iface.name,
+                iface.gateway);
+    } else if (const int rc = netlink::AddDefaultRoute(idx, gw); rc != 0) {
+      log_.warn("{}: default route via {} failed: {}",
+                iface.name,
+                iface.gateway,
+                strerror(-rc));
+    }
   }
-
-  struct {
-    struct nlmsghdr nlh;
-    struct rtmsg rtm;
-    char attrbuf[256];
-  } rtreq{};
-
-  rtreq.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct rtmsg));
-  rtreq.nlh.nlmsg_type = RTM_NEWROUTE;
-  rtreq.nlh.nlmsg_flags =
-      NLM_F_REQUEST | NLM_F_CREATE | NLM_F_REPLACE | NLM_F_ACK;
-  rtreq.nlh.nlmsg_seq = 3;
-  rtreq.rtm.rtm_family = AF_INET;
-  rtreq.rtm.rtm_table = RT_TABLE_MAIN;
-  rtreq.rtm.rtm_protocol = RTPROT_STATIC;
-  rtreq.rtm.rtm_scope = RT_SCOPE_UNIVERSE;
-  rtreq.rtm.rtm_type = RTN_UNICAST;
-
-  rta = reinterpret_cast<struct rtattr*>(reinterpret_cast<char*>(&rtreq.nlh) +
-                                         NLMSG_ALIGN(rtreq.nlh.nlmsg_len));
-  rta->rta_type = RTA_GATEWAY;
-  rta->rta_len = RTA_LENGTH(sizeof(in_addr));
-  memcpy(RTA_DATA(rta), &gw, sizeof(in_addr));
-  rtreq.nlh.nlmsg_len = NLMSG_ALIGN(rtreq.nlh.nlmsg_len) + rta->rta_len;
-
-  rta = reinterpret_cast<struct rtattr*>(reinterpret_cast<char*>(&rtreq.nlh) +
-                                         NLMSG_ALIGN(rtreq.nlh.nlmsg_len));
-  rta->rta_type = RTA_OIF;
-  rta->rta_len = RTA_LENGTH(sizeof(int));
-  memcpy(RTA_DATA(rta), &idx, sizeof(int));
-  rtreq.nlh.nlmsg_len = NLMSG_ALIGN(rtreq.nlh.nlmsg_len) + rta->rta_len;
-
-  if (!nl.SendAndAck(&rtreq.nlh)) {
-    log_.warn("{}: RTM_NEWROUTE failed, continuing anyway", iface.name);
-  }
-
+  WriteResolvConf(iface.dns_servers);
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// DHCP via udhcpc
-// ---------------------------------------------------------------------------
-
-bool NetworkManager::RunUdhcpc(const InterfaceConfig& iface) {
+bool NetworkManager::ConfigureDhcp(const InterfaceConfig& iface, int idx) {
+  dhcp::DhcpClient client{iface.name};
   for (int attempt = 1; attempt <= config_.dhcp_retries; ++attempt) {
     log_.info(
         "{}: DHCP attempt {}/{}", iface.name, attempt, config_.dhcp_retries);
 
-    const auto timeout_str = std::to_string(
-        std::max(1, static_cast<int>(config_.dhcp_timeout.count() / 1000)));
-
-    const int ret = RunCommand({
-        "udhcpc",
-        "-i",
-        iface.name,
-        "-n",
-        "-q",
-        "-t",
-        "5",
-        "-T",
-        timeout_str,
-        "-s",
-        "/usr/share/udhcpc/default.script",
-    });
-
-    if (ret == 0) {
-      log_.info("{}: DHCP lease obtained", iface.name);
-      return true;
+    auto lease = client.Acquire(config_.dhcp_timeout);
+    if (!lease) {
+      log_.warn("{}: {}", iface.name, lease.error());
+      continue;
     }
 
-    log_.warn(
-        "{}: udhcpc attempt {} failed (exit {})", iface.name, attempt, ret);
-    if (attempt < config_.dhcp_retries) {
-      std::this_thread::sleep_for(std::chrono::seconds{2});
+    char ip[INET_ADDRSTRLEN] = {};
+    inet_ntop(AF_INET, &lease->address, ip, sizeof(ip));
+    const int prefix = lease->PrefixLength();
+    if (const int rc = netlink::AddAddress(idx, lease->address, prefix);
+        rc != 0) {
+      log_.error("{}: could not assign {}/{}: {}",
+                 iface.name,
+                 ip,
+                 prefix,
+                 strerror(-rc));
+      continue;
     }
+
+    std::string router = "none";
+    if (lease->router) {
+      char gw[INET_ADDRSTRLEN] = {};
+      inet_ntop(AF_INET, &*lease->router, gw, sizeof(gw));
+      router = gw;
+      if (const int rc = netlink::AddDefaultRoute(idx, *lease->router);
+          rc != 0) {
+        log_.warn("{}: default route via {} failed: {}",
+                  iface.name,
+                  router,
+                  strerror(-rc));
+      }
+    }
+
+    // Configured DNS servers win over the ones the lease offers.
+    std::vector<std::string> dns = iface.dns_servers;
+    if (dns.empty()) {
+      for (const auto& d : lease->dns) {
+        char buf[INET_ADDRSTRLEN] = {};
+        inet_ntop(AF_INET, &d, buf, sizeof(buf));
+        dns.emplace_back(buf);
+      }
+    }
+    WriteResolvConf(dns);
+
+    log_.info("{}: DHCP lease {}/{} router={} lease={}s",
+              iface.name,
+              ip,
+              prefix,
+              router,
+              lease->lease_seconds);
+    return true;
   }
 
   log_.error("{}: all DHCP attempts exhausted", iface.name);
@@ -498,32 +325,16 @@ bool NetworkManager::RunUdhcpc(const InterfaceConfig& iface) {
 }
 
 // ---------------------------------------------------------------------------
-// Fallback ip command
+// Netlink: assign static address + default route
 // ---------------------------------------------------------------------------
-
-bool NetworkManager::FallbackIpCommand(const std::vector<std::string>& args) {
-  std::string cmd;
-  for (const auto& a : args) {
-    cmd += a;
-    cmd += ' ';
-  }
-  log_.debug("Fallback: {}", cmd);
-
-  if (const int ret = RunCommand(args); ret != 0) {
-    log_.warn("ip command failed (exit {}): {}", ret, cmd);
-    return false;
-  }
-  return true;
-}
 
 // ---------------------------------------------------------------------------
 // resolv.conf
 // ---------------------------------------------------------------------------
 
-void NetworkManager::WriteResolvConf(const InterfaceConfig& iface) {
-  const auto& servers = !iface.dns_servers.empty()
-                            ? iface.dns_servers
-                            : std::vector<std::string>{"8.8.8.8", "1.1.1.1"};
+void NetworkManager::WriteResolvConf(const std::vector<std::string>& dns) {
+  const auto& servers =
+      !dns.empty() ? dns : std::vector<std::string>{"8.8.8.8", "1.1.1.1"};
 
   std::ofstream f{"/etc/resolv.conf", std::ios::trunc};
   if (!f.is_open()) {
@@ -556,28 +367,35 @@ void NetworkManager::CreateBridges() {
 bool NetworkManager::CreateBridge(const BridgeConfig& bridge) {
   log_.info("Creating bridge: {} address={}", bridge.name, bridge.address);
 
-  if (InterfaceExists(bridge.name)) {
-    log_.info("Bridge '{}' already exists, skipping creation", bridge.name);
-    FallbackIpCommand({"ip", "link", "set", bridge.name, "up"});
-    return true;
+  if (const int rc = netlink::CreateBridge(bridge.name);
+      rc != 0 && rc != -EEXIST) {
+    log_.error("Failed to create bridge '{}': {}", bridge.name, strerror(-rc));
+    return false;
   }
 
-  if (!FallbackIpCommand(
-          {"ip", "link", "add", bridge.name, "type", "bridge"})) {
-    log_.error("Failed to create bridge '{}'", bridge.name);
+  const int idx = netlink::InterfaceIndex(bridge.name);
+  if (idx < 0) {
+    log_.error("Bridge '{}' missing after creation", bridge.name);
     return false;
   }
 
   if (!bridge.address.empty()) {
-    if (!FallbackIpCommand(
-            {"ip", "addr", "add", bridge.address, "dev", bridge.name})) {
-      log_.error(
-          "Failed to assign '{}' to bridge '{}'", bridge.address, bridge.name);
+    in_addr addr{};
+    int prefix_len = 0;
+    if (!ParseCidr(bridge.address, addr, prefix_len)) {
+      log_.error("Bridge '{}': invalid CIDR '{}'", bridge.name, bridge.address);
+    } else if (const int rc = netlink::AddAddress(idx, addr, prefix_len);
+               rc != 0) {
+      log_.error("Failed to assign '{}' to bridge '{}': {}",
+                 bridge.address,
+                 bridge.name,
+                 strerror(-rc));
     }
   }
 
-  if (!FallbackIpCommand({"ip", "link", "set", bridge.name, "up"})) {
-    log_.error("Failed to bring up bridge '{}'", bridge.name);
+  if (const int rc = netlink::SetLinkUp(idx); rc != 0) {
+    log_.error(
+        "Failed to bring up bridge '{}': {}", bridge.name, strerror(-rc));
     return false;
   }
 

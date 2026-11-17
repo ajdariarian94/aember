@@ -12,8 +12,10 @@
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/mount/mount-point.h>
 
+#include <expected>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace aember::mount_manager {
@@ -25,7 +27,7 @@ namespace aember::mount_manager {
  *  - mount essential early-boot filesystems (/proc, /sys, /dev, etc.)
  *  - track successfully mounted targets for ordered unmount on shutdown
  *  - ensure mount point directories exist before mounting
- *  - mount SquashFS images via BusyBox
+ *  - mount SquashFS images (loop device + mount(2), no BusyBox)
  */
 class MountManager {
  public:
@@ -55,9 +57,29 @@ class MountManager {
   /** Mount a filesystem described by @p mp. */
   bool Mount(const MountPoint& mp);
 
-  /** Mount a SquashFS image at @p target via BusyBox. */
+  /** Mount a SquashFS image at @p target through a loop device. */
   bool MountSquashFS(std::string_view image, std::string_view target,
                      bool read_only = true);
+
+  /** An attached loop device. Holds its fd: with autoclear the kernel
+   *  detaches the device when the last reference goes, so the fd must stay
+   *  open until a mount holds the device. */
+  struct LoopDevice {
+    std::string path;  ///< /dev/loopN
+    int fd{-1};
+    LoopDevice() = default;
+    LoopDevice(std::string p, int f) : path(std::move(p)), fd(f) {}
+    LoopDevice(LoopDevice&& o) noexcept
+        : path(std::move(o.path)), fd(std::exchange(o.fd, -1)) {}
+    LoopDevice& operator=(LoopDevice&&) = delete;
+    LoopDevice(const LoopDevice&) = delete;
+    ~LoopDevice();
+  };
+
+  /** Attach @p image read-only to a free loop device (autoclear: it
+   *  detaches when its last mount and fd go away). */
+  static std::expected<LoopDevice, std::string> AttachLoop(
+      std::string_view image);
 
   /** Unmount @p target. Optionally force with MNT_FORCE. */
   bool Unmount(std::string_view target, bool force = false);

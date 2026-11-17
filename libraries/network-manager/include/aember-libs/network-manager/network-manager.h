@@ -34,7 +34,7 @@ namespace aember::network {
 
 /**
  * Brings up configured network interfaces (DHCP or static, via netlink
- * with udhcpc fallback), creates bridge interfaces for LXC containers,
+ * with the built-in DHCP client), creates bridge interfaces for LXC containers,
  * and periodically monitors internet connectivity via TCP probe.
  *
  * Uses std::jthread for the monitor loop — no manual running_ flag or
@@ -96,11 +96,12 @@ class NetworkManager {
 
   void BringUpInterfaces();
   bool BringUpInterface(const InterfaceConfig& iface);
-  bool NetlinkSetInterfaceUp(std::string_view iface_name);
-  bool NetlinkSetStaticAddress(const InterfaceConfig& iface);
-  bool RunUdhcpc(const InterfaceConfig& iface);
-  bool FallbackIpCommand(const std::vector<std::string>& args);
-  void WriteResolvConf(const InterfaceConfig& iface);
+  /// Address (+ default route, DNS) from network.json, via rtnetlink.
+  bool ConfigureStatic(const InterfaceConfig& iface, int ifindex);
+  /// Address, default route and DNS from a DHCP lease (built-in client).
+  bool ConfigureDhcp(const InterfaceConfig& iface, int ifindex);
+  /// Write /etc/resolv.conf (8.8.8.8 + 1.1.1.1 if @p dns is empty).
+  void WriteResolvConf(const std::vector<std::string>& dns);
 
   // ---------------------------------------------------------------------------
   // Bridge management

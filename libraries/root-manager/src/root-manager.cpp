@@ -18,9 +18,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <linux/magic.h>
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <unistd.h>
 
 namespace aember::root_manager {
@@ -193,23 +195,77 @@ bool RootManager::MountEssentialFilesystems() {
 }
 
 bool RootManager::SwitchRoot() {
-  log_.info("Executing switch_root...");
+  // What BusyBox switch_root did, in-process: free the initramfs, move the
+  // new root onto /, chroot into it and exec aember from it as PID 1.
+  log_.info("Switching root to {}", new_root_path_);
 
-  // switch_root argv — these string literals are valid for the lifetime of
-  // this stack frame; execv replaces the process image immediately.
-  std::array<char*, 5> args{
-      const_cast<char*>("/bin/switch_root"),
-      const_cast<char*>("/mnt/root"),
-      const_cast<char*>("/usr/bin/aember"),
-      const_cast<char*>("--root"),
-      nullptr,
-  };
+  if (::chdir(new_root_path_.c_str()) != 0) {
+    log_.error("chdir {}: {}", new_root_path_, strerror(errno));
+    return false;
+  }
 
-  execv(args[0], args.data());
+  // The initramfs stays in RAM until its files are deleted. Only delete if
+  // / really is the initramfs (ramfs/tmpfs), never on a disk.
+  struct statfs root_fs {};
+  if (::statfs("/", &root_fs) == 0 &&
+      (root_fs.f_type == RAMFS_MAGIC || root_fs.f_type == TMPFS_MAGIC)) {
+    struct stat root_st {};
+    if (::stat("/", &root_st) == 0) {
+      const int dir = ::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+      if (dir >= 0) {
+        DeleteInitramfs(dir, root_st.st_dev);
+        ::close(dir);
+      }
+    }
+  } else {
+    log_.warn("/ is not an initramfs; leaving its contents alone");
+  }
+
+  if (::mount(".", "/", nullptr, MS_MOVE, nullptr) != 0) {
+    log_.error("MS_MOVE {} -> /: {}", new_root_path_, strerror(errno));
+    return false;
+  }
+  if (::chroot(".") != 0 || ::chdir("/") != 0) {
+    log_.error("chroot into new root: {}", strerror(errno));
+    return false;
+  }
+
+  std::array<char*, 3> args{
+      const_cast<char*>(kRootInit), const_cast<char*>("--root"), nullptr};
+  log_.info("Executing {} --root", kRootInit);
+  aember::utils::logging::flush();
+  ::execv(args[0], args.data());
 
   // execv only returns on failure.
-  log_.error("switch_root failed: errno={} ({})", errno, strerror(errno));
+  log_.error("exec {}: {}", kRootInit, strerror(errno));
   return false;
+}
+
+void RootManager::DeleteInitramfs(int dir_fd, dev_t root_dev) {
+  // Recursive delete that stays on the initramfs: directories on another
+  // device (the new root, /dev, /proc, /sys) are mount points and skipped.
+  DIR* dir = ::fdopendir(::dup(dir_fd));
+  if (dir == nullptr) return;
+  while (const dirent* e = ::readdir(dir)) {
+    if (std::strcmp(e->d_name, ".") == 0 || std::strcmp(e->d_name, "..") == 0) {
+      continue;
+    }
+    struct stat st {};
+    if (::fstatat(dir_fd, e->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) continue;
+    if (st.st_dev != root_dev) continue;  // another filesystem
+    if (S_ISDIR(st.st_mode)) {
+      const int sub =
+          ::openat(dir_fd, e->d_name, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+      if (sub >= 0) {
+        DeleteInitramfs(sub, root_dev);
+        ::close(sub);
+      }
+      ::unlinkat(dir_fd, e->d_name, AT_REMOVEDIR);
+    } else {
+      ::unlinkat(dir_fd, e->d_name, 0);
+    }
+  }
+  ::closedir(dir);
 }
 
 bool RootManager::UnmountOldRoot() {

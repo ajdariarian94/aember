@@ -18,7 +18,12 @@
 #include <string>
 #include <string_view>
 
+#include <sys/types.h>
+
 namespace aember::root_manager {
+
+/// Program exec'd as PID 1 in the new root.
+inline constexpr const char* kRootInit = "/usr/bin/aember";
 
 class RootManager {
  public:
@@ -53,6 +58,11 @@ class RootManager {
 
   /** Returns true if running inside initramfs (no services.json present). */
   [[nodiscard]] static bool IsInInitramfs();
+
+  /// Delete everything under @p dir_fd that lives on @p root_dev (the
+  /// initramfs); other filesystems (mount points) and symlink targets are
+  /// left alone. Used by SwitchRoot to free the initramfs RAM.
+  static void DeleteInitramfs(int dir_fd, dev_t root_dev);
 
   /** Returns the path where the new root is mounted. */
   [[nodiscard]] std::string_view GetNewRootPath() const {
