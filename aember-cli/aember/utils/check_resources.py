@@ -2,7 +2,7 @@
 The resources/ rootfs overlay.
 
 resources/<arch>/rootfs/ is copied over the root filesystem by the pack step.
-Its small text files (etc/aember/*.json, lxc.container.conf, udhcpc script)
+Its small text files (etc/aember/*.json, lxc.container.conf)
 are tracked in git. The container images (*.squashfs, e.g. the Qt-based
 aember-monitor) are too large for git: they come from aember's own GitHub
 release v<VERSION> as aember-resources-v<VERSION>.tar.gz (packed by

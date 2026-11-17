@@ -11,13 +11,16 @@
 #include <aember-libs/module-loader/module-loader.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <format>
 #include <fstream>
 #include <ranges>
+#include <sstream>
 
 #include <fcntl.h>
+#include <sys/syscall.h>
 #include <sys/utsname.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 namespace aember::module_loader {
@@ -37,8 +40,15 @@ std::string Normalize(std::string_view name) {
 // Ctor
 // ---------------------------------------------------------------------------
 
-ModuleLoader::ModuleLoader() {
-  log_.info("ModuleLoader initialized");
+ModuleLoader::ModuleLoader(std::filesystem::path modules_dir)
+    : modules_dir_(std::move(modules_dir)) {
+  if (modules_dir_.empty()) {
+    utsname uts{};
+    if (uname(&uts) == 0) {
+      modules_dir_ = std::filesystem::path{"/lib/modules"} / uts.release;
+    }
+  }
+  log_.info("ModuleLoader initialized ({})", modules_dir_.string());
 }
 
 // ---------------------------------------------------------------------------
@@ -53,8 +63,7 @@ ModuleLoader::Result<> ModuleLoader::Load(std::string_view name) {
     return std::unexpected(err);
   }
 
-  // BusyBox modprobe does not read modules.builtin, so it fails for
-  // built-in modules; they need no loading.
+  // Built-in modules need no loading.
   if (IsBuiltin(name)) {
     log_.info("Module '{}' is built into the kernel", name);
     results_.push_back({std::string{name},
@@ -75,21 +84,32 @@ ModuleLoader::Result<> ModuleLoader::Load(std::string_view name) {
 
   log_.info("Loading module '{}'", name);
 
-  const int ret = RunModprobe(name);
-
-  if (ret == 0) {
+  const auto order = LoadOrder(name);
+  if (order.empty()) {
+    const Error err{std::format("not in {}/modules.dep", modules_dir_.string()),
+                    ModuleErrorCode::NotFound};
     results_.push_back(
-        {std::string{name}, ModuleStatus::Loaded, ModuleErrorCode::None, ""});
-    log_.info("Module '{}' loaded successfully", name);
-    return {};
+        {std::string{name}, ModuleStatus::Failed, err.code, err.message});
+    log_.error("Failed to load module '{}': {}", name, err.message);
+    return std::unexpected(err);
   }
 
-  const Error err{std::format("modprobe exited with code {}", ret),
-                  ModuleErrorCode::ModprobeFailed};
+  // Dependencies first, then the module itself (last in the order).
+  for (const auto& rel : order) {
+    const int rc = LoadFile(modules_dir_ / rel);
+    if (rc == 0 || rc == -EEXIST) { continue; }
+    const Error err{std::format("finit_module {}: {}", rel, strerror(-rc)),
+                    ModuleErrorCode::LoadFailed};
+    results_.push_back(
+        {std::string{name}, ModuleStatus::Failed, err.code, err.message});
+    log_.error("Failed to load module '{}': {}", name, err.message);
+    return std::unexpected(err);
+  }
+
   results_.push_back(
-      {std::string{name}, ModuleStatus::Failed, err.code, err.message});
-  log_.error("Failed to load module '{}': {}", name, err.message);
-  return std::unexpected(err);
+      {std::string{name}, ModuleStatus::Loaded, ModuleErrorCode::None, ""});
+  log_.info("Module '{}' loaded successfully", name);
+  return {};
 }
 
 // ---------------------------------------------------------------------------
@@ -161,11 +181,7 @@ bool ModuleLoader::IsLoaded(std::string_view name) const {
 // ---------------------------------------------------------------------------
 
 bool ModuleLoader::IsBuiltin(std::string_view name) const {
-  utsname uts{};
-  if (uname(&uts) != 0) { return false; }
-
-  std::ifstream builtin{
-      std::format("/lib/modules/{}/modules.builtin", uts.release)};
+  std::ifstream builtin{modules_dir_ / "modules.builtin"};
   if (!builtin.is_open()) { return false; }
 
   // Lines look like "kernel/net/llc/llc.ko".
@@ -182,37 +198,78 @@ bool ModuleLoader::IsBuiltin(std::string_view name) const {
 }
 
 // ---------------------------------------------------------------------------
-// RunModprobe
+// modules.dep, finit_module (what modprobe did)
 // ---------------------------------------------------------------------------
 
-int ModuleLoader::RunModprobe(std::string_view name) {
-  const pid_t pid = fork();
+namespace {
 
-  if (pid < 0) {
-    log_.error("fork() failed: {}", strerror(errno));
-    return -1;
+/// "kernel/drivers/gpu/drm/virtio/virtio-gpu.ko" -> "virtio_gpu"
+std::string ModuleNameOf(std::string_view rel) {
+  const auto slash = rel.rfind('/');
+  auto file = slash == std::string_view::npos ? rel : rel.substr(slash + 1);
+  file = file.substr(0, file.find(".ko"));
+  return Normalize(file);
+}
+
+}  // namespace
+
+const std::unordered_map<std::string, ModuleLoader::DepEntry>&
+ModuleLoader::DepMap() {
+  if (dep_map_) { return *dep_map_; }
+  dep_map_.emplace();
+
+  std::ifstream dep{modules_dir_ / "modules.dep"};
+  if (!dep.is_open()) {
+    log_.warn("No {}/modules.dep", modules_dir_.string());
+    return *dep_map_;
   }
 
-  if (pid == 0) {
-    // Child: silence stdout/stderr then exec modprobe.
-    if (const int devnull = open("/dev/null", O_WRONLY); devnull >= 0) {
-      dup2(devnull, STDOUT_FILENO);
-      dup2(devnull, STDERR_FILENO);
-      close(devnull);
+  // "kernel/a/b.ko: kernel/c/d.ko kernel/e/f.ko"
+  std::string line;
+  while (std::getline(dep, line)) {
+    const auto colon = line.find(':');
+    if (colon == std::string::npos) { continue; }
+    DepEntry entry{line.substr(0, colon), {}};
+    std::istringstream rest{line.substr(colon + 1)};
+    for (std::string d; rest >> d;) { entry.deps.push_back(std::move(d)); }
+    (*dep_map_)[ModuleNameOf(entry.path)] = std::move(entry);
+  }
+  return *dep_map_;
+}
+
+std::vector<std::string> ModuleLoader::LoadOrder(std::string_view name) {
+  const auto& map = DepMap();
+  const auto it = map.find(Normalize(name));
+  if (it == map.end()) { return {}; }
+
+  // modules.dep lists the full transitive closure of each module, deepest
+  // dependencies last; load each dependency's own dependencies before it.
+  std::vector<std::string> order;
+  std::vector<std::string> visiting;  // guards against a cyclic modules.dep
+  const auto visit = [&](auto&& self, const DepEntry& entry) -> void {
+    if (std::ranges::find(order, entry.path) != order.end()) { return; }
+    if (std::ranges::find(visiting, entry.path) != visiting.end()) { return; }
+    visiting.push_back(entry.path);
+    for (const auto& d : entry.deps) {
+      if (const auto dep = map.find(ModuleNameOf(d)); dep != map.end()) {
+        self(self, dep->second);
+      }
     }
+    if (std::ranges::find(order, entry.path) == order.end()) {
+      order.push_back(entry.path);
+    }
+  };
+  visit(visit, it->second);
+  return order;
+}
 
-    // name is valid for the lifetime of this call — safe to c_str().
-    execlp("modprobe", "modprobe", std::string{name}.c_str(), nullptr);
-    _exit(127);
-  }
-
-  int status = 0;
-  if (waitpid(pid, &status, 0) < 0) {
-    log_.error("waitpid() failed: {}", strerror(errno));
-    return -1;
-  }
-
-  return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+int ModuleLoader::LoadFile(const std::filesystem::path& ko) {
+  const int fd = ::open(ko.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) { return -errno; }
+  const long rc = ::syscall(SYS_finit_module, fd, "", 0);
+  const int err = rc == 0 ? 0 : -errno;
+  ::close(fd);
+  return err;
 }
 
 }  // namespace aember::module_loader

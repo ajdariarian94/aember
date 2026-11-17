@@ -16,8 +16,11 @@
 #include <aember-libs/utils/module/module-status.h>
 
 #include <expected>
+#include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace aember::module_loader {
@@ -39,7 +42,9 @@ class ModuleLoader {
   template <typename T = void>
   using Result = std::expected<T, Error>;
 
-  ModuleLoader();
+  /** @param modules_dir directory with modules.dep / modules.builtin and
+   *         the .ko files; default /lib/modules/<uname -r>. */
+  explicit ModuleLoader(std::filesystem::path modules_dir = {});
   ~ModuleLoader() = default;
 
   ModuleLoader(const ModuleLoader&) = delete;
@@ -65,17 +70,35 @@ class ModuleLoader {
   [[nodiscard]] bool IsLoaded(std::string_view name) const;
 
   /** True if the module is built into the running kernel
-   *  (listed in /lib/modules/<release>/modules.builtin). */
+   *  (listed in <modules_dir>/modules.builtin). */
   [[nodiscard]] bool IsBuiltin(std::string_view name) const;
+
+  /** .ko files (relative to modules_dir) to load for @p name, its
+   *  dependencies first, from modules.dep. Empty if the module is unknown.
+   */
+  [[nodiscard]] std::vector<std::string> LoadOrder(std::string_view name);
+
+  [[nodiscard]] const std::filesystem::path& ModulesDir() const {
+    return modules_dir_;
+  }
 
   [[nodiscard]] const std::vector<ModuleResult>& GetResults() const {
     return results_;
   }
 
  private:
-  /** Fork + exec modprobe. Returns the exit code, or -1 on fork/wait failure.
-   */
-  int RunModprobe(std::string_view name);
+  /** finit_module(2) one .ko: 0, or -errno (-EEXIST: already loaded). */
+  static int LoadFile(const std::filesystem::path& ko);
+
+  /** modules.dep parsed once: normalized module name -> its line. */
+  struct DepEntry {
+    std::string path;               ///< relative .ko path
+    std::vector<std::string> deps;  ///< relative .ko paths it needs
+  };
+  const std::unordered_map<std::string, DepEntry>& DepMap();
+
+  std::filesystem::path modules_dir_;
+  std::optional<std::unordered_map<std::string, DepEntry>> dep_map_;
 
   std::vector<ModuleResult> results_;
 

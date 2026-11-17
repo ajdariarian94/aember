@@ -14,9 +14,8 @@ namespace aember::utils::module {
 
 enum class ModuleErrorCode {
   None,
-  ModprobeFailed,
-  ForkFailed,
-  NotFound,
+  LoadFailed,  ///< finit_module(2) failed for the module or a dependency
+  NotFound,    ///< not in modules.dep (and not built in)
   InvalidInput,
   Unknown
 };

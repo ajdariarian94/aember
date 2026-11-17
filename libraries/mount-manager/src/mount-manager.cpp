@@ -11,13 +11,17 @@
 #include <aember-libs/mount-manager/mount-manager.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <ranges>
 
 #include <errno.h>
+#include <fcntl.h>
+#include <linux/loop.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -105,6 +109,67 @@ bool MountManager::Mount(const MountPoint& mp) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Loop devices (what `mount -o loop` / BusyBox did for us)
+// ---------------------------------------------------------------------------
+
+MountManager::LoopDevice::~LoopDevice() {
+  if (fd >= 0) ::close(fd);
+}
+
+std::expected<MountManager::LoopDevice, std::string> MountManager::AttachLoop(
+    std::string_view image) {
+  const int file = ::open(std::string{image}.c_str(), O_RDONLY | O_CLOEXEC);
+  if (file < 0) {
+    return std::unexpected(std::format("open {}: {}", image, strerror(errno)));
+  }
+  struct FdCloser {
+    int fd;
+    ~FdCloser() {
+      if (fd >= 0) ::close(fd);
+    }
+  } file_closer{file};
+
+  const int control = ::open("/dev/loop-control", O_RDWR | O_CLOEXEC);
+  if (control < 0) {
+    return std::unexpected(
+        std::format("open /dev/loop-control: {}", strerror(errno)));
+  }
+  FdCloser control_closer{control};
+
+  // Another process can grab the free device between GET_FREE and
+  // CONFIGURE (EBUSY): just ask again.
+  for (int attempt = 0; attempt < 8; ++attempt) {
+    const int n = ::ioctl(control, LOOP_CTL_GET_FREE);
+    if (n < 0) {
+      return std::unexpected(
+          std::format("LOOP_CTL_GET_FREE: {}", strerror(errno)));
+    }
+    const auto device = std::format("/dev/loop{}", n);
+    const int loop = ::open(device.c_str(), O_RDONLY | O_CLOEXEC);
+    if (loop < 0) {
+      return std::unexpected(
+          std::format("open {}: {}", device, strerror(errno)));
+    }
+    LoopDevice handle{device, loop};  // keeps the fd open for the caller
+
+    loop_config config{};
+    config.fd = static_cast<__u32>(file);
+    config.info.lo_flags = LO_FLAGS_READ_ONLY | LO_FLAGS_AUTOCLEAR;
+    std::snprintf(reinterpret_cast<char*>(config.info.lo_file_name),
+                  LO_NAME_SIZE,
+                  "%.*s",
+                  static_cast<int>(image.size()),
+                  image.data());
+    if (::ioctl(loop, LOOP_CONFIGURE, &config) == 0) return handle;
+    if (errno != EBUSY) {
+      return std::unexpected(
+          std::format("LOOP_CONFIGURE {}: {}", device, strerror(errno)));
+    }
+  }
+  return std::unexpected("no free loop device");
+}
+
 bool MountManager::MountSquashFS(std::string_view image,
                                  std::string_view target, bool /*read_only*/) {
   if (IsMounted(target)) {
@@ -114,18 +179,29 @@ bool MountManager::MountSquashFS(std::string_view image,
 
   if (!EnsureDirectory(target)) { return false; }
 
-  log_.info("Mounting {} on {} via BusyBox", image, target);
+  const auto loop = AttachLoop(image);
+  if (!loop) {
+    log_.error("Cannot attach {} to a loop device: {}", image, loop.error());
+    return false;
+  }
 
-  const auto cmd = std::format(
-      "/bin/busybox mount -t squashfs {} {} -o async", image, target);
-
-  if (::system(cmd.c_str()) != 0) {
-    log_.error("BusyBox mount failed: {}", cmd);
+  // The loop device is set up with autoclear: it detaches by itself when
+  // this mount goes away, or when `loop` closes its fd if the mount fails.
+  if (::mount(loop->path.c_str(),
+              std::string{target}.c_str(),
+              "squashfs",
+              MS_RDONLY,
+              nullptr) != 0) {
+    log_.error("mount {} ({}) on {} failed: {}",
+               image,
+               loop->path,
+               target,
+               strerror(errno));
     return false;
   }
 
   mounted_targets_.emplace_back(target);
-  log_.info("Mounted {} on {}", image, target);
+  log_.info("Mounted {} on {} via {}", image, target, loop->path);
 
   // Overlay a writable tmpfs on <target>/tmp.
   const auto tmp_path = std::format("{}/tmp", target);
@@ -134,11 +210,8 @@ bool MountManager::MountSquashFS(std::string_view image,
     return true;  // squashfs itself succeeded
   }
 
-  const auto tmp_cmd =
-      std::format("/bin/busybox mount -t tmpfs tmpfs {}", tmp_path);
-
-  if (::system(tmp_cmd.c_str()) != 0) {
-    log_.warn("Failed to mount tmpfs on {}", tmp_path);
+  if (::mount("tmpfs", tmp_path.c_str(), "tmpfs", 0, nullptr) != 0) {
+    log_.warn("Failed to mount tmpfs on {}: {}", tmp_path, strerror(errno));
   } else {
     mounted_targets_.push_back(tmp_path);
     log_.info("Mounted tmpfs on {}", tmp_path);

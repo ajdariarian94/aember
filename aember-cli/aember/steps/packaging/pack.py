@@ -90,7 +90,14 @@ class PackStep(Step):
         shutil.copy2(install_dir / "bin" / "aember", aember_dst)
         aember_dst.chmod(0o755)
 
-    def copy_tests(self, ctx: Context, initramfs_root: Path) -> None:
+    def copy_tests(self, ctx: Context, tests_root: Path) -> None:
+        """Test binaries go into the rootfs image only (tests_root is copied
+        in after the initramfs tree): in the initramfs they cost RAM at
+        every boot, and 20 Debug suites (~360 MB) no longer fit in the VM's
+        512 MB. They run from the debug shell, after the switch to the real
+        root."""
+        if tests_root.exists():
+            shutil.rmtree(tests_root)
         if not ctx.build_tests:
             log.debug("build_tests disabled, skipping tests")
             return
@@ -101,7 +108,7 @@ class PackStep(Step):
 
         self._copy_tree_into(
             install_dir / "bin" / "tests",
-            initramfs_root / "usr" / "bin",
+            tests_root / "usr" / "bin",
             "test binaries",
         )
 
@@ -159,7 +166,8 @@ class PackStep(Step):
         install_busybox(ctx.architecture, ctx.root, initramfs_root)
 
         self.copy_aember(ctx, initramfs_root)
-        self.copy_tests(ctx, initramfs_root)
+        tests_root = package_dir / "tests_root"
+        self.copy_tests(ctx, tests_root)
         self.copy_examples(ctx, initramfs_root)
         self.copy_init(ctx, initramfs_root)
 
@@ -186,6 +194,7 @@ class PackStep(Step):
             initramfs_root=initramfs_root,
             overlay_dir=self.overlay_dir(ctx),
             package_dir=package_dir,
+            extra_trees=[tests_root],
         )
 
         ctx.data.update(

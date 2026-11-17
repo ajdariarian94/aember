@@ -54,17 +54,28 @@ off by guestfish. Left:
 
 ## Architecture
 
-- [ ] **Move containers out of PID 1** (planned by the user). liblxc (4.8 MB)
-  is linked into PID 1 and a crash there takes down init. Target: PID 1 only
-  mounts, loads modules, reaps, handles signals and supervises; network,
-  containers and the monitor become supervised services talking to PID 1
-  over a small IPC (Unix socket, JSON). `ContainerManager` is the natural
-  first service.
-- [ ] **Fewer shell-outs to BusyBox** from PID 1 (squashfs `mount`,
-  `ip link` fallback, `modprobe`): each is a fork/exec plus a hidden
-  dependency (BusyBox `modprobe` doesn't read `modules.builtin`, see the
-  `IsBuiltin` workaround). Use syscalls: `mount(2)` with `LOOP_CONFIGURE`,
-  netlink, `finit_module(2)`.
+- [ ] **Network and containers out of PID 1** — agreed 2026-11-17, to do
+  after the chroot launch (branch 3), each step on its own branch, tested on
+  all 3 architectures:
+  1. `utils/ipc`: socketpair (SOCK_SEQPACKET) inherited as fd 3, JSON
+     messages; "ready" notification in ProcessManager (a service stays
+     Starting until it reports ready or times out).
+  2. `aember netd`: NetworkManager in its own process (multi-call: same
+     `/usr/bin/aember` file, role from argv; fork+exec by PID 1, built in,
+     not in services.json). Status events feed the heartbeat; restart keeps
+     kernel net state; DHCP renewal becomes possible.
+  3. `aember containerd`: ContainerManager + liblxc, loaded with `dlopen`
+     only in this role so PID 1 never maps liblxc. Subreaper for the LXC
+     monitors; adopts running containers after a restart (pidfd for
+     non-children); graceful stop of all containers at shutdown.
+  ProcessManager/ServiceManager stay in PID 1 (supervision is init's job);
+  afterwards consider merging the two (they mirror each other's state), and
+  use posix_spawn + pidfd for services.
+- [x] **No BusyBox calls from PID 1** (2026-11-17): loop + `mount(2)`,
+  `finit_module(2)` with `modules.dep`, rtnetlink, a built-in DHCP client
+  (AF_PACKET), in-process switch_root.
+- [ ] DHCP lease renewal (T1/T2) and release on shutdown; today, like
+  `udhcpc -q` before, the first lease is kept forever.
 - [ ] **Simplify the CMake superbuild.** ExternalProject per subtree plus
   install/export/`Config.cmake` for every internal library is heavy and caused
   the stale-cache problem during the migration (a full configure-dir delete

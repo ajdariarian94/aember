@@ -16,7 +16,7 @@ namespace aember::utils::network {
  * @brief IP configuration mode for a network interface.
  */
 enum class IpMode {
-  kDhcp,    ///< Obtain address via DHCP (udhcpc)
+  kDhcp,    ///< Obtain address via DHCP (built-in client)
   kStatic,  ///< Use a statically configured address
 };
 

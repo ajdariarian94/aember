@@ -17,7 +17,7 @@ namespace aember::utils::network {
  */
 enum class InterfaceState {
   kDown,        ///< Interface not yet brought up
-  kBringingUp,  ///< Currently running udhcpc / applying static config
+  kBringingUp,  ///< Getting a DHCP lease / applying static config
   kUp,          ///< Interface is up and has an address
   kFailed,      ///< Failed to come up after all retries
 };

@@ -129,6 +129,25 @@ through the global logger, whose single sink is a thread-safe `dist_sink`
 (console, plus the rotating file once `enable_file_logging()` ran). Don't
 create spdlog loggers or call `std::print*`/`printf` in the libraries.
 
+**No BusyBox in the boot path:** PID 1 runs no external programs except
+services, the debug shell (`/bin/sh`) and LXC. Each former BusyBox call is
+a syscall now:
+- SquashFS: `MountManager::AttachLoop` (`/dev/loop-control`,
+  `LOOP_CONFIGURE`, read-only + autoclear) + `mount(2)`. Keep the
+  `LoopDevice` handle (its fd) alive until `mount()` returned: with
+  autoclear the device detaches when the last fd closes.
+- Modules: `ModuleLoader` walks `modules.dep` (dependencies first) and
+  calls `finit_module(2)`; built-ins from `modules.builtin`.
+- Network: `network-manager/netlink.{h,cpp}` (rtnetlink: link up, address,
+  default route, bridge, veth, delete) instead of `ip`; DHCP is
+  `dhcp-client.{h,cpp}` (DISCOVER/OFFER/REQUEST/ACK on an `AF_PACKET`
+  socket with self-built IPv4/UDP headers, source 0.0.0.0, like udhcpc;
+  one lease, no renewal, like the `udhcpc -q` it replaced).
+- Root switch: `RootManager::SwitchRoot` frees the initramfs (only if `/`
+  is ramfs/tmpfs; never crosses mounts or follows symlinks), `MS_MOVE`s the
+  new root onto `/`, `chroot`s and execs `/usr/bin/aember --root`.
+BusyBox stays in the image for the debug shell and interactive use.
+
 **PID 1 rules** (if PID 1 exits or dies, the kernel panics):
 - `main()` never returns as PID 1: it ends in `pid1::Finish()`, which
   reboots/powers off/halts when requested and otherwise reaps forever. The
@@ -161,8 +180,8 @@ Runtime config lives in the overlay at
 `resources/<arch>/rootfs/etc/aember/{services,containers,modules,network}.json`;
 container images under `rootfs/var/lib/aember/<name>/`.
 
-The overlay's text files (the JSON configs, `lxc.container.conf`, the udhcpc
-script) are **tracked in git**; edit them here and commit. The container
+The overlay's text files (the JSON configs, `lxc.container.conf`) are
+**tracked in git**; edit them here and commit. The container
 images (`*.squashfs`, e.g. the Qt-based `aember-monitor`) are git-ignored and
 come from aember's own release `v<project VERSION>` as
 `aember-resources-v<V>.tar.gz` (public, plain HTTPS). `CheckResources`
@@ -305,6 +324,16 @@ C++:
   shell) and run in the dev container with **`aember test`**
   (`-k <name>` to filter, `-n <N>` to repeat): it starts each binary through
   the SDK sysroot's loader with the SDK and LXC libs on the library path.
+- Test binaries go into the rootfs image only (`tests_root`), not the
+  initramfs: 20 Debug suites (~300 MB) would not fit the VM's 512 MB RAM.
+  Tests that need root (loop devices, veth/bridges, the DHCP exchange,
+  mount points) skip in the dev container as `dev`; run them in the VM, or
+  in the dev container with `docker exec -u root` (it is privileged). As
+  root, the mount-manager/root-manager tests first enter a private mount
+  namespace and dhcp-netlink a private network namespace (static init), so
+  nothing leaks into the system; keep that for any new test that mounts or
+  changes interfaces. (A root run without it once mounted tmpfs over the
+  dev container's /run and /tmp, hiding docker.sock and the X11 socket.)
 - The rootfs image is sized from its contents (at least `rootfs_size`,
   512 MB); a Debug build with tests needs ~700 MB. A guestfish error fails
   the pack (guestfish itself can exit 0 after a failed `copy-in`).

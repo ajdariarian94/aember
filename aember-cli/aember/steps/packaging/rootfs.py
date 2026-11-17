@@ -40,6 +40,7 @@ def create_rootfs_image(
     initramfs_root: Path,
     overlay_dir: Path,
     package_dir: Path,
+    extra_trees: list[Path] | None = None,
 ) -> Path:
     """
     Create a rootfs disk image using guestfish inside Docker.
@@ -47,12 +48,14 @@ def create_rootfs_image(
     - initramfs_root: path to the initramfs contents
     - overlay_dir: additional overlay files to copy in
     - package_dir: directory where rootfs.img will be created
+    - extra_trees: more trees copied in after the initramfs (e.g. tests)
     """
     rootfs_img = package_dir / "aember-rootfs.img"
 
     # Sparse image, sized for its contents (a Debug build with tests is
     # bigger than the default 512 MB)
-    size_mb = rootfs_size_mb(ctx, initramfs_root, overlay_dir)
+    extra = [t for t in (extra_trees or []) if t.exists()]
+    size_mb = rootfs_size_mb(ctx, initramfs_root, overlay_dir, *extra)
     with rootfs_img.open("wb") as f:
         f.truncate(size_mb * 1024 * 1024)
 
@@ -67,6 +70,8 @@ def create_rootfs_image(
 
     # Copy initramfs contents
     guestfish_script += [f"copy-in {entry} /" for entry in initramfs_root.iterdir()]
+    for tree in extra:
+        guestfish_script += [f"copy-in {entry} /" for entry in tree.iterdir()]
 
     # Copy overlay if it exists
     if overlay_dir.exists():
