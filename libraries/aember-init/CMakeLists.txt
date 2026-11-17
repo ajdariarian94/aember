@@ -94,3 +94,14 @@ install(
   NAMESPACE ${PROJECT_NAME}::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${COMPONENT}
 )
+
+# -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
+
+if (BUILD_TESTS)
+  include(CTest)
+  enable_testing()
+
+  add_subdirectory(tests)
+endif ()

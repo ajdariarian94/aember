@@ -11,14 +11,13 @@ add_executable(
   src/service-manager.cpp
 )
 
-target_include_directories(
-  service-manager-unittest
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
 target_link_libraries(
   service-manager-unittest
   PRIVATE aember-libs::service-manager
+          aember-libs::process-manager
+          aember-libs::container-manager
+          aember-libs::child-supervisor
+          aember-libs::mount-manager
           GTest::gtest_main
 )
 

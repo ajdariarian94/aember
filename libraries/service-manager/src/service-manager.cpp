@@ -141,6 +141,7 @@ bool ServiceManager::Start(std::string_view name) {
 bool ServiceManager::StartInternal(std::string_view name, bool is_restart) {
   const std::string key{name};
 
+  bool is_container = false;
   {
     std::lock_guard lock{mutex_};
 
@@ -153,20 +154,32 @@ bool ServiceManager::StartInternal(std::string_view name, bool is_restart) {
     if (state == ProcessState::Running || state == ProcessState::Starting) {
       return true;
     }
+    is_container = containers_.contains(key);
+  }
 
-    if (!containers_.contains(key)) {
-      const auto all_configs = process_manager_.GetConfigs();
-      DependencyResolver::DependencyGraph graph;
-      for (const auto& cfg : all_configs) {
-        graph[cfg.name] = cfg.dependencies;
-      }
-
-      if (!dependency_resolver_.CheckDependencies(key, graph)) {
-        log_.error("Dependencies not met for '{}'", name);
-        return false;
-      }
+  // Without the lock: the resolver asks whether each dependency is running,
+  // and that query (GetState) takes mutex_ (std::mutex, not recursive).
+  // Checking under the lock deadlocked every service with dependencies.
+  if (!is_container) {
+    DependencyResolver::DependencyGraph graph;
+    for (const auto& cfg : process_manager_.GetConfigs()) {
+      graph[cfg.name] = cfg.dependencies;
     }
+    if (!dependency_resolver_.CheckDependencies(key, graph)) {
+      log_.error("Dependencies not met for '{}'", name);
+      return false;
+    }
+  }
 
+  {
+    std::lock_guard lock{mutex_};
+    // Another thread may have started (or removed) it meanwhile.
+    const auto it = states_.find(key);
+    if (it == states_.end()) { return false; }
+    if (it->second == ProcessState::Running ||
+        it->second == ProcessState::Starting) {
+      return true;
+    }
     MirrorState(key, ProcessState::Starting);
   }
 
@@ -174,7 +187,7 @@ bool ServiceManager::StartInternal(std::string_view name, bool is_restart) {
 
   bool success = false;
 
-  if (IsContainer(name)) {
+  if (is_container) {
     success = container_manager_.StartContainer(name);
   } else {
     auto pid = process_manager_.Start(name);

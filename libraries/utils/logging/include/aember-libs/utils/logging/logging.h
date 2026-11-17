@@ -1,9 +1,17 @@
 /**
  * @file logging.h
  * @author Arian Ajdari
- * @brief Lightweight logging utilities for Aember components
- * @version 0.1
- * @date 2025-12-22
+ * @brief Logging for Aember components: one spdlog logger for the whole
+ *        process.
+ *
+ *        There is exactly one spdlog::logger (the spdlog default logger).
+ *        A Logger is only a component name: it formats "[<name>] <message>"
+ *        and hands it to the global logger. Its single sink is a thread-safe
+ *        dist_sink fanning out to the console and, once enabled, the file
+ *        sink, so sinks can be added or muted while other threads log.
+ *
+ * @version 0.2
+ * @date 2026-11-17
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
@@ -14,15 +22,20 @@
 #include <spdlog/spdlog.h>
 
 #include <filesystem>
-#include <memory>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace aember::utils::logging {
+
+/// The process-wide spdlog logger, created on first use with a console sink.
+spdlog::logger& global_logger();
 
 void logging_level_debug();
 
 void logging_level_info();
 
+/// Remove the console sink for good (a process that only logs to its file).
 void enable_console_silence();
 
 /**
@@ -33,78 +46,87 @@ void enable_console_silence();
 void set_console_logging(bool enabled);
 
 /**
- * @brief Initialize early logging to stdout.
- *
- * Should be called once during early initialization before file logging
- * is available.
+ * @brief Initialize early logging to stdout. Optional: the first log call
+ *        does it too.
  */
 void init_early_logging();
 
 /**
- * @brief Enable file logging after pivot_root.
- *
- * Must be called once the real root filesystem is mounted. Injects the
- * file sink into all existing loggers and stores it globally so that
- * any Logger constructed afterwards also receives it.
+ * @brief Also log to a file (rotating, 1 MiB x 3). Later calls are ignored.
+ *        A file that can't be opened is reported and skipped, never thrown.
  *
  * @param path Path to the log file.
  */
 void enable_file_logging(const std::filesystem::path& path);
 
+/// Flush every sink.
+void flush();
+
 /**
- * @brief Lightweight per-component logger.
+ * @brief Per-component logging handle: just the component name.
  *
- * Always inherits global sink configuration, including the file sink
- * if enable_file_logging() has already been called.
- * Provides convenient logging methods with format string support.
+ * Cheap to construct and copy; all Loggers share the one global logger.
  */
 class Logger {
  public:
   /**
    * @brief Construct a logger for a specific component.
    *
-   * @param name Component name for logger identification.
+   * @param name Component name shown as "[name]" in every line.
    */
-  explicit Logger(const std::string& name);
+  explicit Logger(std::string name);
+
+  const std::string& name() const { return name_; }
 
   /// Log a trace-level message
   template <typename... Args>
   void trace(fmt::format_string<Args...> fmt, Args&&... args) {
-    logger_->trace(fmt, std::forward<Args>(args)...);
+    Log(spdlog::level::trace, fmt, std::forward<Args>(args)...);
   }
 
   /// Log a debug-level message
   template <typename... Args>
   void debug(fmt::format_string<Args...> fmt, Args&&... args) {
-    logger_->debug(fmt, std::forward<Args>(args)...);
+    Log(spdlog::level::debug, fmt, std::forward<Args>(args)...);
   }
 
   /// Log an info-level message
   template <typename... Args>
   void info(fmt::format_string<Args...> fmt, Args&&... args) {
-    logger_->info(fmt, std::forward<Args>(args)...);
+    Log(spdlog::level::info, fmt, std::forward<Args>(args)...);
   }
 
   /// Log a warning-level message
   template <typename... Args>
   void warn(fmt::format_string<Args...> fmt, Args&&... args) {
-    logger_->warn(fmt, std::forward<Args>(args)...);
+    Log(spdlog::level::warn, fmt, std::forward<Args>(args)...);
   }
 
   /// Log an error-level message
   template <typename... Args>
   void error(fmt::format_string<Args...> fmt, Args&&... args) {
-    logger_->error(fmt, std::forward<Args>(args)...);
+    Log(spdlog::level::err, fmt, std::forward<Args>(args)...);
   }
 
   /// Log a critical-level message
   template <typename... Args>
   void critical(fmt::format_string<Args...> fmt, Args&&... args) {
-    logger_->critical(fmt, std::forward<Args>(args)...);
+    Log(spdlog::level::critical, fmt, std::forward<Args>(args)...);
   }
 
  private:
-  std::shared_ptr<spdlog::logger> logger_;
+  template <typename... Args>
+  void Log(spdlog::level::level_enum level, fmt::format_string<Args...> fmt,
+           Args&&... args) {
+    auto& logger = global_logger();
+    if (!logger.should_log(level)) return;
+    Write(level, fmt::format(fmt, std::forward<Args>(args)...));
+  }
+
+  /// Non-template part, so each call site only instantiates the formatting.
+  void Write(spdlog::level::level_enum level, std::string_view message);
+
+  std::string name_;
 };
 
 }  // namespace aember::utils::logging

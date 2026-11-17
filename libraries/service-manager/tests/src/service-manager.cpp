@@ -1,524 +1,307 @@
+/**
+ * @file service-manager.cpp
+ * @author Arian Ajdari
+ * @brief ServiceManager and DependencyResolver tests with real processes
+ *        (sleep) and the real Process/Container managers (no containers:
+ *        those need LXC and root).
+ * @version 0.2
+ * @date 2026-11-17
+ *
+ * @copyright Copyright (c) 2025, Aember, All rights reserved.
+ */
+
+#include <aember-libs/child-supervisor/child-supervisor.h>
+#include <aember-libs/container-manager/container-manager.h>
+#include <aember-libs/mount-manager/mount-manager.h>
+#include <aember-libs/process-manager/process-manager.h>
+#include <aember-libs/service-manager/dependency-resolver.h>
+#include <aember-libs/service-manager/service-manager.h>
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
 #include <chrono>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <string>
+#include <thread>
+#include <vector>
 
-#include <aember-libs-tests/service-manager/service-manager.h>
+#include <signal.h>
+#include <sys/wait.h>
 
-namespace aember_test::service_manager {
+namespace {
 
-TEST_F(ServiceManagerTest, ConstructorInitializes) {
-  EXPECT_NE(manager_, nullptr);
+using aember::service_manager::DependencyResolver;
+using aember::service_manager::ServiceManager;
+using ProcessManager = aember::process_manager::ProcessManager;
+using State = ProcessManager::ProcessState;
+using namespace std::chrono_literals;
+
+// ---------------------------------------------------------------------------
+// DependencyResolver
+// ---------------------------------------------------------------------------
+
+std::size_t IndexOf(const std::vector<std::string>& v, const std::string& s) {
+  return static_cast<std::size_t>(std::ranges::find(v, s) - v.begin());
 }
 
-TEST_F(ServiceManagerTest, AddServiceBasic) {
-  auto config = CreateTestConfig("test-service", "/bin/echo");
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->HasService("test-service"));
+TEST(DependencyResolverTest, DependenciesComeFirst) {
+  DependencyResolver r{[](const std::string&) { return true; }};
+  const auto order = r.ResolveStartOrder({
+      {"app", {"db", "net"}},
+      {"db", {"net"}},
+      {"net", {}},
+      {"log", {}},
+  });
+  ASSERT_EQ(order.size(), 4u);
+  EXPECT_LT(IndexOf(order, "net"), IndexOf(order, "db"));
+  EXPECT_LT(IndexOf(order, "db"), IndexOf(order, "app"));
+  EXPECT_LT(IndexOf(order, "log"), order.size());
 }
 
-TEST_F(ServiceManagerTest, AddServiceWithEmptyName) {
-  auto config = CreateTestConfig("", "/bin/echo");
-
-  EXPECT_FALSE(manager_->AddService(config));
+TEST(DependencyResolverTest, EmptyGraph) {
+  DependencyResolver r{[](const std::string&) { return true; }};
+  EXPECT_TRUE(r.ResolveStartOrder({}).empty());
 }
 
-TEST_F(ServiceManagerTest, AddServiceWithEmptyCommand) {
-  auto config = CreateTestConfig("test-service", "");
-
-  EXPECT_FALSE(manager_->AddService(config));
+// Regression: a cycle used to throw, and StartAll then started nothing.
+TEST(DependencyResolverTest, CycleSkipsOnlyTheCycle) {
+  DependencyResolver r{[](const std::string&) { return true; }};
+  std::vector<std::string> order;
+  EXPECT_NO_THROW(order = r.ResolveStartOrder({
+                      {"a", {"b"}},
+                      {"b", {"a"}},
+                      {"ok", {}},
+                      {"after-ok", {"ok"}},
+                  }));
+  EXPECT_EQ(order, (std::vector<std::string>{"ok", "after-ok"}));
 }
 
-TEST_F(ServiceManagerTest, AddDuplicateService) {
-  auto config = CreateTestConfig("test-service", "/bin/echo");
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_FALSE(manager_->AddService(config));  // Second add should fail
+TEST(DependencyResolverTest, UnknownDependencySkipsOnlyThatEntry) {
+  DependencyResolver r{[](const std::string&) { return true; }};
+  const auto order = r.ResolveStartOrder({
+      {"needs-ghost", {"ghost"}},
+      {"fine", {}},
+  });
+  EXPECT_EQ(order, (std::vector<std::string>{"fine"}));
 }
 
-TEST_F(ServiceManagerTest, RemoveService) {
-  auto config = CreateTestConfig("test-service", "/bin/echo");
+TEST(DependencyResolverTest, CheckDependencies) {
+  std::set<std::string> running{"net"};
+  DependencyResolver r{
+      [&](const std::string& n) { return running.contains(n); }};
+  const DependencyResolver::DependencyGraph graph{
+      {"app", {"net", "db"}}, {"net", {}}, {"db", {}}, {"bad", {"ghost"}}};
 
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->HasService("test-service"));
-
-  EXPECT_TRUE(manager_->RemoveService("test-service"));
-  EXPECT_FALSE(manager_->HasService("test-service"));
+  EXPECT_TRUE(r.CheckDependencies("net", graph));
+  EXPECT_FALSE(r.CheckDependencies("app", graph));  // db not running
+  running.insert("db");
+  EXPECT_TRUE(r.CheckDependencies("app", graph));
+  EXPECT_FALSE(r.CheckDependencies("bad", graph));      // unknown dependency
+  EXPECT_FALSE(r.CheckDependencies("missing", graph));  // not in graph
 }
 
-TEST_F(ServiceManagerTest, RemoveNonExistentService) {
-  EXPECT_FALSE(manager_->RemoveService("non-existent"));
-}
+// ---------------------------------------------------------------------------
+// ServiceManager
+// ---------------------------------------------------------------------------
 
-TEST_F(ServiceManagerTest, RemoveRunningService) {
-  auto config = CreateTestConfig("test-service", "/bin/sleep");
-  config.args = {"10"};
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  EXPECT_TRUE(WaitForServiceState(
-      "test-service", aember::service_manager::ServiceState::RUNNING));
-
-  EXPECT_FALSE(manager_->RemoveService("test-service"));
-
-  // Cleanup
-  manager_->StopService("test-service");
-}
-
-TEST_F(ServiceManagerTest, StartServiceBasic) {
-  auto config = CreateTestConfig("test-service", "/bin/true");
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  // /bin/true exits immediately, so we need to handle its exit
-  auto service = manager_->GetService("test-service");
-  pid_t pid = service->GetPid();
-
-  if (pid > 0) {
-    int status;
-    waitpid(pid, &status, 0);  // Reap the process
-    int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 0;
-    manager_->HandleServiceExit(pid, exit_code);
+class ServiceManagerTest : public ::testing::Test {
+ protected:
+  ServiceManagerTest()
+      : mounts_(std::make_shared<aember::mount_manager::MountManager>()),
+        containers_(mounts_),
+        resolver_([this](const std::string& name) {
+          return sm_ && sm_->GetState(name) == State::Running;
+        }) {
+    sm_ = std::make_unique<ServiceManager>(
+        processes_, containers_, resolver_, supervisor_);
+    sm_->SetStateChangeCallback(
+        [this](const std::string& name, State, State to) {
+          std::lock_guard lock{mutex_};
+          transitions_.emplace_back(name, to);
+        });
   }
 
-  // Give it time to process
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-  // Service should have exited cleanly
-  EXPECT_EQ(service->GetState(),
-            aember::service_manager::ServiceState::STOPPED);
-}
-
-TEST_F(ServiceManagerTest, StartNonExistentService) {
-  EXPECT_FALSE(manager_->StartService("non-existent"));
-}
-
-TEST_F(ServiceManagerTest, StartServiceTwice) {
-  auto config = CreateTestConfig("test-service", "/bin/sleep");
-  config.args = {"1"};
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-  EXPECT_TRUE(WaitForServiceState(
-      "test-service", aember::service_manager::ServiceState::RUNNING));
-
-  // Starting again should succeed (idempotent)
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  // Cleanup
-  manager_->StopService("test-service");
-}
-
-TEST_F(ServiceManagerTest, StopServiceBasic) {
-  auto config = CreateTestConfig("test-service", "/bin/sleep");
-  config.args = {"10"};
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-  EXPECT_TRUE(WaitForServiceState(
-      "test-service", aember::service_manager::ServiceState::RUNNING));
-
-  auto service = manager_->GetService("test-service");
-  pid_t pid = service->GetPid();
-
-  EXPECT_TRUE(manager_->StopService("test-service"));
-
-  // Manually reap the process and notify service manager
-  int status;
-  waitpid(pid, &status, 0);
-  int exit_code =
-      WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
-  manager_->HandleServiceExit(pid, exit_code);
-
-  EXPECT_TRUE(
-      WaitForServiceState("test-service",
-                          aember::service_manager::ServiceState::STOPPED,
-                          std::chrono::seconds(2)));
-}
-
-TEST_F(ServiceManagerTest, StopNonExistentService) {
-  EXPECT_FALSE(manager_->StopService("non-existent"));
-}
-
-TEST_F(ServiceManagerTest, StopAlreadyStoppedService) {
-  auto config = CreateTestConfig("test-service", "/bin/echo");
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(
-      manager_->StopService("test-service"));  // Should succeed (idempotent)
-}
-
-TEST_F(ServiceManagerTest, RestartService) {
-  auto config = CreateTestConfig("test-service", "/bin/sleep");
-  config.args = {"1"};
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-  EXPECT_TRUE(WaitForServiceState(
-      "test-service", aember::service_manager::ServiceState::RUNNING));
-
-  auto service = manager_->GetService("test-service");
-  pid_t first_pid = service->GetPid();
-
-  EXPECT_TRUE(manager_->RestartService("test-service"));
-  EXPECT_TRUE(WaitForServiceState(
-      "test-service", aember::service_manager::ServiceState::RUNNING));
-
-  // Should have a new PID after restart
-  pid_t second_pid = service->GetPid();
-  EXPECT_NE(first_pid, second_pid);
-
-  // Cleanup
-  manager_->StopService("test-service");
-}
-
-TEST_F(ServiceManagerTest, GetServiceState) {
-  auto config = CreateTestConfig("test-service", "/bin/echo");
-
-  // Before adding
-  EXPECT_EQ(manager_->GetServiceState("test-service"),
-            aember::service_manager::ServiceState::STOPPED);
-
-  // After adding
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_EQ(manager_->GetServiceState("test-service"),
-            aember::service_manager::ServiceState::STOPPED);
-}
-
-TEST_F(ServiceManagerTest, GetServiceNames) {
-  EXPECT_TRUE(manager_->GetServiceNames().empty());
-
-  auto config1 = CreateTestConfig("service1", "/bin/echo");
-  auto config2 = CreateTestConfig("service2", "/bin/cat");
-  auto config3 = CreateTestConfig("service3", "/bin/ls");
-
-  manager_->AddService(config1);
-  manager_->AddService(config2);
-  manager_->AddService(config3);
-
-  auto names = manager_->GetServiceNames();
-  EXPECT_EQ(names.size(), 3);
-
-  EXPECT_NE(std::find(names.begin(), names.end(), "service1"), names.end());
-  EXPECT_NE(std::find(names.begin(), names.end(), "service2"), names.end());
-  EXPECT_NE(std::find(names.begin(), names.end(), "service3"), names.end());
-}
-
-TEST_F(ServiceManagerTest, GetService) {
-  auto config = CreateTestConfig("test-service", "/bin/echo");
-
-  EXPECT_EQ(manager_->GetService("test-service"), nullptr);
-
-  EXPECT_TRUE(manager_->AddService(config));
-
-  auto service = manager_->GetService("test-service");
-  ASSERT_NE(service, nullptr);
-  EXPECT_EQ(service->GetName(), "test-service");
-}
-
-TEST_F(ServiceManagerTest, HasService) {
-  auto config = CreateTestConfig("test-service", "/bin/echo");
-
-  EXPECT_FALSE(manager_->HasService("test-service"));
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->HasService("test-service"));
-
-  EXPECT_TRUE(manager_->RemoveService("test-service"));
-  EXPECT_FALSE(manager_->HasService("test-service"));
-}
-
-TEST_F(ServiceManagerTest, StateChangeCallback) {
-  TrackStateChanges();
-
-  auto config = CreateTestConfig("test-service", "/bin/sleep");
-  config.args = {"1"};
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  EXPECT_TRUE(WaitForServiceState(
-      "test-service", aember::service_manager::ServiceState::RUNNING));
-
-  // Should have received state change notifications
-  EXPECT_GE(state_changes_.size(), 2);  // At least STOPPED->STARTING->RUNNING
-
-  // Cleanup
-  manager_->StopService("test-service");
-}
-
-TEST_F(ServiceManagerTest, ServiceWithArguments) {
-  auto config = CreateTestConfig("test-service", "/bin/echo");
-  config.args = {"hello", "world"};
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-}
-
-TEST_F(ServiceManagerTest, ServiceWithEnvironment) {
-  auto config = CreateTestConfig("test-service", "/bin/sh");
-  config.args = {"-c", "exit 0"};
-  config.environment = {{"TEST_VAR1", "value1"}, {"TEST_VAR2", "value2"}};
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-}
-
-TEST_F(ServiceManagerTest, ServiceWithWorkingDirectory) {
-  auto config = CreateTestConfig("test-service", "/bin/pwd");
-  config.working_directory = "/tmp";
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-}
-
-TEST_F(ServiceManagerTest, HandleServiceExitSuccess) {
-  auto config = CreateTestConfig("test-service", "/bin/true");
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  auto service = manager_->GetService("test-service");
-  pid_t pid = service->GetPid();
-
-  // Wait for process to exit
-  int status;
-  waitpid(pid, &status, 0);
-
-  // Notify service manager
-  manager_->HandleServiceExit(pid, WEXITSTATUS(status));
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-  EXPECT_EQ(service->GetState(),
-            aember::service_manager::ServiceState::STOPPED);
-  EXPECT_EQ(service->GetExitCode(), 0);
-}
-
-TEST_F(ServiceManagerTest, HandleServiceExitFailure) {
-  auto config = CreateTestConfig("test-service", "/bin/false");
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  auto service = manager_->GetService("test-service");
-  pid_t pid = service->GetPid();
-
-  // Wait for process to exit
-  int status;
-  waitpid(pid, &status, 0);
-
-  // Notify service manager
-  manager_->HandleServiceExit(pid, WEXITSTATUS(status));
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-  EXPECT_EQ(service->GetState(), aember::service_manager::ServiceState::FAILED);
-  EXPECT_NE(service->GetExitCode(), 0);
-}
-
-TEST_F(ServiceManagerTest, RestartPolicyNever) {
-  auto config = CreateTestConfig("test-service", "/bin/false");
-  config.restart_policy = aember::service_manager::RestartPolicy::NEVER;
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  auto service = manager_->GetService("test-service");
-  pid_t pid = service->GetPid();
-
-  // Wait for process to exit and reap it
-  int status;
-  ASSERT_GT(pid, 0);
-  ASSERT_EQ(waitpid(pid, &status, 0), pid);
-
-  // Notify service manager
-  int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
-  manager_->HandleServiceExit(pid, exit_code);
-
-  // Give it a moment to process
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-  // Should not restart
-  EXPECT_EQ(service->GetRestartCount(), 0);
-  EXPECT_EQ(service->GetState(), aember::service_manager::ServiceState::FAILED);
-}
-
-TEST_F(ServiceManagerTest, RestartPolicyOnFailure) {
-  auto config = CreateTestConfig("test-service", "/bin/false");
-  config.restart_policy = aember::service_manager::RestartPolicy::ON_FAILURE;
-  config.max_restart_attempts = 2;
-  config.restart_delay = std::chrono::seconds(1);  // Shorter delay for testing
-
-  TrackStateChanges();
-
-  EXPECT_TRUE(manager_->AddService(config));
-  EXPECT_TRUE(manager_->StartService("test-service"));
-
-  auto service = manager_->GetService("test-service");
-
-  // Manually handle exits to control the test
-  for (int i = 0; i < 3; ++i) {  // Initial start + 2 restarts
-    pid_t pid = service->GetPid();
-    if (pid <= 0) break;
-
-    int status;
-    waitpid(pid, &status, 0);
-    int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
-
-    manager_->HandleServiceExit(pid, exit_code);
-
-    // Wait for restart delay + processing time
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+  ~ServiceManagerTest() override { sm_.reset(); }
+
+  /// Register a `sleep 30` process in both managers.
+  void AddSleeper(const std::string& name, std::vector<std::string> deps = {}) {
+    ProcessManager::ProcessConfig cfg;
+    cfg.name = name;
+    cfg.executable = "sleep";
+    cfg.args = {"30"};
+    cfg.dependencies = std::move(deps);
+    cfg.restart_on_failure = false;
+    cfg.stop_timeout = 2s;
+    ASSERT_TRUE(processes_.AddProcess(cfg));
+    ASSERT_TRUE(sm_->AddProcess(name));
   }
 
-  // Should have attempted restarts
-  EXPECT_EQ(service->GetRestartCount(), 2);
-  EXPECT_EQ(service->GetState(), aember::service_manager::ServiceState::FAILED);
+  /// Names in the order they reached Running.
+  std::vector<std::string> RunningOrder() {
+    std::lock_guard lock{mutex_};
+    std::vector<std::string> names;
+    for (const auto& [name, to] : transitions_) {
+      if (to == State::Running) names.push_back(name);
+    }
+    return names;
+  }
+
+  std::vector<State> TransitionsOf(const std::string& name) {
+    std::lock_guard lock{mutex_};
+    std::vector<State> states;
+    for (const auto& [n, to] : transitions_) {
+      if (n == name) states.push_back(to);
+    }
+    return states;
+  }
+
+  ProcessManager processes_;
+  std::shared_ptr<aember::mount_manager::MountManager> mounts_;
+  aember::container_manager::ContainerManager containers_;
+  aember::child_supervisor::ChildSupervisor supervisor_;
+  DependencyResolver resolver_;
+  std::unique_ptr<ServiceManager> sm_;
+
+  std::mutex mutex_;
+  std::vector<std::pair<std::string, State>> transitions_;
+};
+
+TEST_F(ServiceManagerTest, AddRequiresRegistrationInTheManagers) {
+  EXPECT_FALSE(sm_->AddProcess("unknown"));
+  EXPECT_FALSE(sm_->AddContainer("unknown"));
+  EXPECT_FALSE(sm_->Has("unknown"));
+  AddSleeper("known");
+  EXPECT_TRUE(sm_->Has("known"));
+  EXPECT_FALSE(sm_->IsContainer("known"));
+  EXPECT_EQ(sm_->GetState("known"), State::Stopped);
 }
 
-TEST_F(ServiceManagerTest, StartAll) {
-  auto config1 = CreateTestConfig("service1", "/bin/sleep");
-  config1.args = {"1"};
-  auto config2 = CreateTestConfig("service2", "/bin/sleep");
-  config2.args = {"1"};
-  auto config3 = CreateTestConfig("service3", "/bin/sleep");
-  config3.args = {"1"};
+TEST_F(ServiceManagerTest, StartAndStopAProcess) {
+  AddSleeper("s");
+  ASSERT_TRUE(sm_->Start("s"));
+  EXPECT_EQ(sm_->GetState("s"), State::Running);
+  const auto pid = processes_.GetPid("s");
+  ASSERT_TRUE(pid.has_value());
+  EXPECT_TRUE(supervisor_.IsTracked(*pid));
+  EXPECT_EQ(::kill(*pid, 0), 0);
 
-  manager_->AddService(config1);
-  manager_->AddService(config2);
-  manager_->AddService(config3);
+  // Starting again is a no-op.
+  EXPECT_TRUE(sm_->Start("s"));
+  EXPECT_EQ(processes_.GetPid("s"), pid);
 
-  manager_->StartAll();
-
-  EXPECT_TRUE(WaitForServiceState(
-      "service1", aember::service_manager::ServiceState::RUNNING));
-  EXPECT_TRUE(WaitForServiceState(
-      "service2", aember::service_manager::ServiceState::RUNNING));
-  EXPECT_TRUE(WaitForServiceState(
-      "service3", aember::service_manager::ServiceState::RUNNING));
-
-  // Cleanup
-  manager_->StopAll();
+  const auto t0 = std::chrono::steady_clock::now();
+  EXPECT_TRUE(sm_->Stop("s"));
+  EXPECT_LT(std::chrono::steady_clock::now() - t0, 1500ms);
+  EXPECT_EQ(sm_->GetState("s"), State::Stopped);
+  EXPECT_FALSE(processes_.GetPid("s").has_value());
 }
 
-TEST_F(ServiceManagerTest, StopAll) {
-  auto config1 = CreateTestConfig("service1", "/bin/sleep");
-  config1.args = {"10"};
-  auto config2 = CreateTestConfig("service2", "/bin/sleep");
-  config2.args = {"10"};
-
-  manager_->AddService(config1);
-  manager_->AddService(config2);
-
-  manager_->StartService("service1");
-  manager_->StartService("service2");
-
-  EXPECT_TRUE(WaitForServiceState(
-      "service1", aember::service_manager::ServiceState::RUNNING));
-  EXPECT_TRUE(WaitForServiceState(
-      "service2", aember::service_manager::ServiceState::RUNNING));
-
-  manager_->StopAll();
-
-  EXPECT_TRUE(
-      WaitForServiceState("service1",
-                          aember::service_manager::ServiceState::STOPPED,
-                          std::chrono::seconds(5)));
-  EXPECT_TRUE(
-      WaitForServiceState("service2",
-                          aember::service_manager::ServiceState::STOPPED,
-                          std::chrono::seconds(5)));
+TEST_F(ServiceManagerTest, StateCallbackSeesEveryTransition) {
+  AddSleeper("s");
+  ASSERT_TRUE(sm_->Start("s"));
+  ASSERT_TRUE(sm_->Stop("s"));
+  const auto states = TransitionsOf("s");
+  ASSERT_GE(states.size(), 4u);
+  EXPECT_EQ(states[0], State::Starting);
+  EXPECT_EQ(states[1], State::Running);
+  EXPECT_EQ(states[2], State::Stopping);
+  EXPECT_EQ(states.back(), State::Stopped);
 }
 
-TEST_F(ServiceManagerTest, ServiceDependenciesBasic) {
-  auto config1 = CreateTestConfig("service1", "/bin/sleep");
-  config1.args = {"10"};
-
-  auto config2 = CreateTestConfig("service2", "/bin/sleep");
-  config2.args = {"10"};
-  config2.dependencies = {"service1"};
-
-  manager_->AddService(config1);
-  manager_->AddService(config2);
-
-  // Starting service2 should also start service1
-  EXPECT_TRUE(manager_->StartService("service2"));
-
-  EXPECT_TRUE(WaitForServiceState(
-      "service1", aember::service_manager::ServiceState::RUNNING));
-  EXPECT_TRUE(WaitForServiceState(
-      "service2", aember::service_manager::ServiceState::RUNNING));
-
-  // Stop all services
-  manager_->StopAll();
-
-  // Reap all running services
-  ReapAllRunningServices();
-
-  // Verify they stopped
-  EXPECT_TRUE(
-      WaitForServiceState("service1",
-                          aember::service_manager::ServiceState::STOPPED,
-                          std::chrono::seconds(1)));
-  EXPECT_TRUE(
-      WaitForServiceState("service2",
-                          aember::service_manager::ServiceState::STOPPED,
-                          std::chrono::seconds(1)));
+TEST_F(ServiceManagerTest, UnknownNames) {
+  EXPECT_FALSE(sm_->Start("ghost"));
+  EXPECT_FALSE(sm_->Stop("ghost"));
+  EXPECT_FALSE(sm_->Remove("ghost"));
+  EXPECT_EQ(sm_->GetState("ghost"), State::Failed);
 }
 
-TEST_F(ServiceManagerTest, ServiceDependenciesMissing) {
-  auto config = CreateTestConfig("service1", "/bin/sleep");
-  config.args = {"10"};
-  config.dependencies = {"non-existent"};
-
-  manager_->AddService(config);
-
-  // Should fail to start due to missing dependency
-  EXPECT_FALSE(manager_->StartService("service1"));
+TEST_F(ServiceManagerTest, StartAllFollowsDependencies) {
+  AddSleeper("app", {"db"});
+  AddSleeper("db", {"net"});
+  AddSleeper("net");
+  sm_->StartAll();
+  EXPECT_EQ(RunningOrder(), (std::vector<std::string>{"net", "db", "app"}));
+  for (const auto* n : {"net", "db", "app"}) {
+    EXPECT_EQ(sm_->GetState(n), State::Running) << n;
+  }
 }
 
-TEST_F(ServiceManagerTest, MultipleServicesIndependent) {
-  auto config1 = CreateTestConfig("service1", "/bin/sleep");
-  config1.args = {"1"};
-
-  auto config2 = CreateTestConfig("service2", "/bin/sleep");
-  config2.args = {"1"};
-
-  manager_->AddService(config1);
-  manager_->AddService(config2);
-
-  manager_->StartService("service1");
-  manager_->StartService("service2");
-
-  auto service1 = manager_->GetService("service1");
-  auto service2 = manager_->GetService("service2");
-
-  EXPECT_NE(service1->GetPid(), service2->GetPid());
-
-  pid_t pid1 = service1->GetPid();
-  pid_t pid2 = service2->GetPid();
-
-  // Cleanup
-  manager_->StopAll();
-
-  // Manually reap processes
-  int status;
-  waitpid(pid1, &status, 0);
-  int exit_code1 =
-      WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
-  manager_->HandleServiceExit(pid1, exit_code1);
-
-  waitpid(pid2, &status, 0);
-  int exit_code2 =
-      WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
-  manager_->HandleServiceExit(pid2, exit_code2);
+// Regression: a broken dependency used to make StartAll start nothing.
+TEST_F(ServiceManagerTest, StartAllStartsEverythingNotBroken) {
+  AddSleeper("good");
+  AddSleeper("cycle-a", {"cycle-b"});
+  AddSleeper("cycle-b", {"cycle-a"});
+  AddSleeper("orphan", {"ghost"});
+  EXPECT_NO_THROW(sm_->StartAll());
+  EXPECT_EQ(sm_->GetState("good"), State::Running);
+  EXPECT_NE(sm_->GetState("cycle-a"), State::Running);
+  EXPECT_NE(sm_->GetState("orphan"), State::Running);
 }
 
-}  // namespace aember_test::service_manager
+TEST_F(ServiceManagerTest, StartRefusesWhileADependencyIsDown) {
+  AddSleeper("net");
+  AddSleeper("app", {"net"});
+  EXPECT_FALSE(sm_->Start("app"));
+  EXPECT_NE(sm_->GetState("app"), State::Running);
+  ASSERT_TRUE(sm_->Start("net"));
+  EXPECT_TRUE(sm_->Start("app"));
+}
+
+TEST_F(ServiceManagerTest, CrashIsReportedThroughHandleExit) {
+  AddSleeper("s");
+  ASSERT_TRUE(sm_->Start("s"));
+  const pid_t pid = *processes_.GetPid("s");
+  ASSERT_EQ(::kill(pid, SIGKILL), 0);
+  int status = 0;
+  ASSERT_EQ(::waitpid(pid, &status, 0), pid);
+
+  sm_->HandleExit(pid, status);
+  EXPECT_EQ(sm_->GetState("s"), State::Failed);
+  EXPECT_FALSE(processes_.GetPid("s").has_value());
+}
+
+TEST_F(ServiceManagerTest, HandleExitOfAStrangerIsIgnored) {
+  AddSleeper("s");
+  ASSERT_TRUE(sm_->Start("s"));
+  EXPECT_NO_THROW(sm_->HandleExit(999999, 0));
+  EXPECT_EQ(sm_->GetState("s"), State::Running);
+}
+
+TEST_F(ServiceManagerTest, RestartGivesANewProcess) {
+  AddSleeper("s");
+  ASSERT_TRUE(sm_->Start("s"));
+  const pid_t before = *processes_.GetPid("s");
+  ASSERT_TRUE(sm_->Restart("s"));
+  const auto after = processes_.GetPid("s");
+  ASSERT_TRUE(after.has_value());
+  EXPECT_NE(*after, before);
+  EXPECT_EQ(sm_->GetState("s"), State::Running);
+}
+
+TEST_F(ServiceManagerTest, RemoveStopsAndForgets) {
+  AddSleeper("s");
+  ASSERT_TRUE(sm_->Start("s"));
+  const pid_t pid = *processes_.GetPid("s");
+  EXPECT_TRUE(sm_->Remove("s"));
+  EXPECT_FALSE(sm_->Has("s"));
+  EXPECT_FALSE(processes_.HasProcess("s"));
+  // The process is gone (Stop collected it).
+  EXPECT_NE(::kill(pid, 0), 0);
+}
+
+TEST_F(ServiceManagerTest, StopAllStopsEverything) {
+  AddSleeper("a");
+  AddSleeper("b");
+  AddSleeper("c");
+  sm_->StartAll();
+  sm_->StopAll();
+  for (const auto& name : sm_->GetNames()) {
+    EXPECT_EQ(sm_->GetState(name), State::Stopped) << name;
+  }
+  EXPECT_EQ(sm_->GetNames().size(), 3u);
+}
+
+}  // namespace

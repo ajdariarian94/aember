@@ -1,176 +1,140 @@
 /**
  * @file logging.cpp
- * @brief Logging utilities for Aember
+ * @author Arian Ajdari
+ * @brief One spdlog logger for the whole process.
+ * @version 0.2
+ * @date 2026-11-17
+ *
+ * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
 
 #include <aember-libs/utils/logging/logging.h>
 
 #include <spdlog/pattern_formatter.h>
+#include <spdlog/sinks/dist_sink.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_sinks.h>
-#include <spdlog/spdlog.h>
 
-#include <algorithm>
+#include <memory>
 #include <mutex>
-#include <vector>
 
 namespace aember::utils::logging {
 
-static std::mutex sink_mutex;
-static bool early_initialized = false;
-static bool file_logging_enabled = false;
+namespace {
 
-// All loggers always share THESE sinks
-static std::vector<spdlog::sink_ptr> global_sinks;
+constexpr std::size_t kLogFileMaxBytes = 1024 * 1024;
+constexpr std::size_t kLogFileMaxFiles = 3;
+// The component name is part of the message ("[name] text"), so the pattern
+// has no %n: there is only one logger.
+constexpr const char* kLogPattern = "[%Y-%m-%d %H:%M:%S] [%l] %v";
 
-// SINGLE SOURCE OF TRUTH for log pattern
-static constexpr std::size_t kLogFileMaxBytes = 1024 * 1024;
-static constexpr std::size_t kLogFileMaxFiles = 3;
-static constexpr const char* LOG_PATTERN = "[%Y-%m-%d %H:%M:%S] [%l] [%n] %v";
+std::unique_ptr<spdlog::formatter> MakeFormatter() {
+  return std::make_unique<spdlog::pattern_formatter>(kLogPattern);
+}
 
-static std::unique_ptr<spdlog::formatter> make_formatter() {
-  return std::make_unique<spdlog::pattern_formatter>(LOG_PATTERN);
+/// The single logger, its fan-out sink and the sinks we toggle.
+struct State {
+  std::shared_ptr<spdlog::sinks::dist_sink_mt> dist;
+  std::shared_ptr<spdlog::sinks::stdout_sink_mt> console;
+  bool console_attached = false;
+  bool file_attached = false;
+  std::shared_ptr<spdlog::logger> logger;
+  std::mutex mutex;  // guards console_attached / file_attached
+};
+
+State& GetState() {
+  // Function-local static: created on first use, thread-safe.
+  static State* state = [] {
+    auto* s = new State;  // never destroyed: threads may log during exit
+    s->dist = std::make_shared<spdlog::sinks::dist_sink_mt>();
+    s->console = std::make_shared<spdlog::sinks::stdout_sink_mt>();
+    s->console->set_formatter(MakeFormatter());
+    s->dist->add_sink(s->console);
+    s->console_attached = true;
+
+    s->logger = std::make_shared<spdlog::logger>("aember", s->dist);
+    s->logger->set_level(spdlog::level::info);
+    // Write through on every info line: PID 1 can lose power any time.
+    s->logger->flush_on(spdlog::level::info);
+    spdlog::set_default_logger(s->logger);
+    return s;
+  }();
+  return *state;
+}
+
+}  // namespace
+
+spdlog::logger& global_logger() {
+  return *GetState().logger;
 }
 
 void logging_level_debug() {
-  spdlog::set_level(spdlog::level::debug);
+  global_logger().set_level(spdlog::level::debug);
 }
 
 void logging_level_info() {
-  spdlog::set_level(spdlog::level::info);
-}
-
-void enable_console_silence() {
-  std::lock_guard lock(sink_mutex);
-
-  // Flush everything before removing stdout sink
-  spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
-
-  // Remove the stdout sink from every logger
-  spdlog::apply_all([](std::shared_ptr<spdlog::logger> logger) {
-    auto& sinks = logger->sinks();
-    sinks.erase(
-        std::remove_if(
-            sinks.begin(),
-            sinks.end(),
-            [](const spdlog::sink_ptr& s) {
-              return std::dynamic_pointer_cast<spdlog::sinks::stdout_sink_mt>(
-                         s) != nullptr;
-            }),
-        sinks.end());
-  });
-
-  // Also remove from global_sinks so new loggers don't get it either
-  global_sinks.erase(
-      std::remove_if(
-          global_sinks.begin(),
-          global_sinks.end(),
-          [](const spdlog::sink_ptr& s) {
-            return std::dynamic_pointer_cast<spdlog::sinks::stdout_sink_mt>(
-                       s) != nullptr;
-          }),
-      global_sinks.end());
-}
-
-void set_console_logging(bool enabled) {
-  std::lock_guard lock(sink_mutex);
-  spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) { l->flush(); });
-  // The stdout sink is shared by every logger, so its level mutes them all.
-  for (const auto& sink : global_sinks) {
-    if (std::dynamic_pointer_cast<spdlog::sinks::stdout_sink_mt>(sink)) {
-      sink->set_level(enabled ? spdlog::level::trace : spdlog::level::off);
-    }
-  }
+  global_logger().set_level(spdlog::level::info);
 }
 
 void init_early_logging() {
-  std::lock_guard lock(sink_mutex);
-  if (early_initialized) return;
-  early_initialized = true;
+  GetState();
+}
 
-  spdlog::drop_all();
-  global_sinks.clear();
+void flush() {
+  global_logger().flush();
+}
 
-  auto stdout_sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
-  stdout_sink->set_formatter(make_formatter());
-  global_sinks.push_back(stdout_sink);
+void enable_console_silence() {
+  auto& s = GetState();
+  std::lock_guard lock{s.mutex};
+  if (!s.console_attached) return;
+  s.logger->flush();
+  s.dist->remove_sink(s.console);
+  s.console_attached = false;
+}
 
-  auto root_logger = std::make_shared<spdlog::logger>(
-      "logging", global_sinks.begin(), global_sinks.end());
-  spdlog::set_default_logger(root_logger);
-  spdlog::set_level(spdlog::level::info);
+void set_console_logging(bool enabled) {
+  auto& s = GetState();
+  s.logger->flush();
+  s.console->set_level(enabled ? spdlog::level::trace : spdlog::level::off);
 }
 
 void enable_file_logging(const std::filesystem::path& path) {
-  std::lock_guard lock(sink_mutex);
-  if (file_logging_enabled) return;
+  auto& s = GetState();
+  {
+    std::lock_guard lock{s.mutex};
+    if (s.file_attached) return;
 
-  // Rotate at 1 MiB, keep 3 old files: PID 1 runs for the device's lifetime
-  // and must not fill the disk. A log file is optional, so a read-only or
-  // missing /var/log only costs the file, never init (no exception escapes).
-  std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> file_sink;
-  try {
-    std::filesystem::create_directories(path.parent_path());
-    file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-        path.string(), kLogFileMaxBytes, kLogFileMaxFiles);
-  } catch (const std::exception& e) {
-    spdlog::default_logger()->error(
-        "file logging to {} disabled: {}", path.string(), e.what());
-    return;
+    // Rotate at 1 MiB, keep 3 old files: PID 1 runs for the device's
+    // lifetime and must not fill the disk. A log file is optional, so a
+    // read-only or missing /var/log only costs the file, never init.
+    std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> file;
+    try {
+      std::filesystem::create_directories(path.parent_path());
+      file = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+          path.string(), kLogFileMaxBytes, kLogFileMaxFiles);
+    } catch (const std::exception& e) {
+      s.logger->error(
+          "[logging] file logging to {} disabled: {}", path.string(), e.what());
+      return;
+    }
+    file->set_formatter(MakeFormatter());
+    s.dist->add_sink(file);
+    s.file_attached = true;
   }
-  file_logging_enabled = true;
-  file_sink->set_formatter(make_formatter());
-  file_sink->set_level(spdlog::level::trace);
-
-  // Store globally so Logger() constructors called later also pick it up
-  global_sinks.push_back(file_sink);
-
-  // Backfill every already-registered logger and set flush_on immediately
-  spdlog::apply_all([&](std::shared_ptr<spdlog::logger> logger) {
-    logger->sinks().push_back(file_sink);
-    logger->flush_on(spdlog::level::info);
-  });
-
-  // No flush_every — it restarts spdlog's thread pool and drops flush_on
-  // settings. flush_on(info) in every logger is sufficient.
-
-  spdlog::default_logger()->info("{} file logging initialized: {}",
-                                 path.filename().c_str(),
-                                 path.string());
+  s.logger->info("[logging] file logging to {}", path.string());
 }
 
-Logger::Logger(const std::string& name) {
-  std::lock_guard lock(sink_mutex);
+// ---------------------------------------------------------------------------
+// Logger
+// ---------------------------------------------------------------------------
 
-  // Ensure early logging is bootstrapped even if caller forgot
-  if (!early_initialized) {
-    early_initialized = true;
+Logger::Logger(std::string name) : name_(std::move(name)) {
+  GetState();
+}
 
-    spdlog::drop_all();
-    global_sinks.clear();
-
-    auto stdout_sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
-    stdout_sink->set_formatter(make_formatter());
-    global_sinks.push_back(stdout_sink);
-
-    auto root_logger = std::make_shared<spdlog::logger>(
-        "logging", global_sinks.begin(), global_sinks.end());
-    spdlog::set_default_logger(root_logger);
-    spdlog::set_level(spdlog::level::info);
-  }
-
-  if (auto existing = spdlog::get(name)) {
-    logger_ = existing;
-    return;
-  }
-
-  logger_ = std::make_shared<spdlog::logger>(
-      name, global_sinks.begin(), global_sinks.end());
-  logger_->set_level(spdlog::default_logger()->level());
-  // flush_on(info) ensures every log call writes to file immediately,
-  // no background thread required — critical for post-silence file logging
-  logger_->flush_on(spdlog::level::info);
-  spdlog::register_logger(logger_);
+void Logger::Write(spdlog::level::level_enum level, std::string_view message) {
+  global_logger().log(level, "[{}] {}", name_, message);
 }
 
 }  // namespace aember::utils::logging

@@ -48,8 +48,9 @@ class DependencyResolver {
                                        const DependencyGraph& graph) const;
 
   /**
-   * Topological sort via Kahn's algorithm.
-   * Throws std::runtime_error on a dependency cycle.
+   * Topological sort via Kahn's algorithm: dependencies come first.
+   * Entries in a cycle or with an unknown dependency are left out (and
+   * logged); everything else is still ordered. Never throws.
    */
   [[nodiscard]] std::vector<std::string> ResolveStartOrder(
       const DependencyGraph& graph) const;

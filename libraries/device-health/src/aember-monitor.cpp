@@ -25,6 +25,25 @@ namespace aember::device_health {
 
 namespace {
 
+const nlohmann::json kNull;
+
+/// j[key] if j is an object that has it, else null. Never throws.
+const nlohmann::json& Child(const nlohmann::json& j, const char* key) {
+  if (!j.is_object()) return kNull;
+  const auto it = j.find(key);
+  return it == j.end() ? kNull : *it;
+}
+
+/// j[key] as T, or fallback if missing or of another type. Never throws.
+template <typename T>
+T Field(const nlohmann::json& j, const char* key, T fallback) {
+  const auto& v = Child(j, key);
+  if (v.is_null()) return fallback;
+  try {
+    return v.get<T>();
+  } catch (const nlohmann::json::exception&) { return fallback; }
+}
+
 long read_status_field(pid_t pid, std::string_view field) {
   std::ifstream f{std::format("/proc/{}/status", pid)};
   std::string line;
@@ -128,35 +147,35 @@ nlohmann::json AemberMonitor::Snapshot() const {
 }
 
 void AemberMonitor::Log(const nlohmann::json& payload) const {
-  const auto& pid1 = payload["pid1"];
+  // Field() never throws and never indexes a missing key: this runs in PID 1
+  // every second, and operator[] on a const json with a missing key is UB.
+  const auto& pid1 = Child(payload, "pid1");
 
   log_.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   log_.info(
       "  Aember PID1  │ pid={} │ rss={}kB │ threads={} │ children={} │ "
       "uptime={}s",
-      pid1["pid"].get<int>(),
-      pid1["vm_rss_kb"].get<long>(),
-      pid1["threads"].get<int>(),
-      pid1["children"].get<int>(),
-      pid1["uptime_seconds"].get<long>());
+      Field(pid1, "pid", 0),
+      Field(pid1, "vm_rss_kb", 0L),
+      Field(pid1, "threads", 0),
+      Field(pid1, "children", 0),
+      Field(pid1, "uptime_seconds", 0L));
 
-  if (payload.contains("network")) {
-    const auto& net = payload["network"];
+  if (const auto& net = Child(payload, "network"); net.is_object()) {
     log_.info("  Network      │ {} │ iface={} │ rtt={}ms │ ip={}",
-              net.value("online", false) ? "ONLINE " : "OFFLINE",
-              net.value("interface", ""),
-              net.value("rtt_ms", 0),
-              net.value("ip", ""));
+              Field(net, "online", false) ? "ONLINE " : "OFFLINE",
+              Field(net, "interface", std::string{}),
+              Field(net, "rtt_ms", 0),
+              Field(net, "ip", std::string{}));
   }
 
-  if (payload.contains("services")) {
-    const auto& services = payload["services"];
+  if (const auto& services = Child(payload, "services"); services.is_array()) {
     log_.info("  Services     │ {} service(s)", services.size());
     for (const auto& svc : services) {
       log_.info("    ├─ {} [{}] ({})",
-                svc["name"].get<std::string>(),
-                svc["state"].get<std::string>(),
-                svc["type"].get<std::string>());
+                Field(svc, "name", std::string{"?"}),
+                Field(svc, "state", std::string{"?"}),
+                Field(svc, "type", std::string{"?"}));
     }
   }
 
@@ -229,12 +248,12 @@ void AemberMonitorClient::Report() {
   log_.info(
       "[{}] pid={} ppid={} (aember PID1) │ rss={}kB │ uptime={}s │ "
       "pid1_rss={}kB",
-      s["service"].get<std::string>(),
-      s["pid"].get<int>(),
-      s["ppid"].get<int>(),
-      s["vm_rss_kb"].get<long>(),
-      s["uptime_s"].get<long>(),
-      s["pid1_rss_kb"].get<long>());
+      Field(s, "service", std::string{}),
+      Field(s, "pid", 0),
+      Field(s, "ppid", 0),
+      Field(s, "vm_rss_kb", 0L),
+      Field(s, "uptime_s", 0L),
+      Field(s, "pid1_rss_kb", 0L));
 }
 
 }  // namespace aember::device_health

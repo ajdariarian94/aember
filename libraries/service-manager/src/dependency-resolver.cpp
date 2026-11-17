@@ -10,6 +10,7 @@
 
 #include <aember-libs/service-manager/dependency-resolver.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -82,9 +83,18 @@ std::vector<std::string> DependencyResolver::ResolveStartOrder(
     order.push_back(current);
   }
 
+  // Entries in a cycle or depending on an unknown name never reach in-degree
+  // 0. Skip only those (logged): one bad entry in services.json must not
+  // keep every other service from starting.
   if (order.size() != graph.size()) {
-    throw std::runtime_error(
-        "DependencyResolver: cycle detected in dependency graph");
+    std::string skipped;
+    for (const auto& [name, deps] : graph) {
+      if (std::ranges::find(order, name) == order.end()) {
+        skipped += (skipped.empty() ? "" : ", ") + name;
+      }
+    }
+    log_.error("Not starting (dependency cycle or unknown dependency): {}",
+               skipped);
   }
 
   log_.info("Resolved start order for {} entries", order.size());

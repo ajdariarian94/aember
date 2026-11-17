@@ -122,6 +122,13 @@ under `include/aember-libs/<lib>/`, CMake target `aember-libs::<lib>`.
 | `device-health`     | Heartbeat + `AemberMonitor` runtime stats |
 | `utils/*`           | config, container, logging (spdlog), module, mount, network, process, root, shell, signal (signalfd + epoll) |
 
+**Logging:** one spdlog logger for the whole process
+(`utils/logging`: `global_logger()`, the spdlog default logger). A
+`Logger{"component"}` is only a name: it logs `[component] message`
+through the global logger, whose single sink is a thread-safe `dist_sink`
+(console, plus the rotating file once `enable_file_logging()` ran). Don't
+create spdlog loggers or call `std::print*`/`printf` in the libraries.
+
 **PID 1 rules** (if PID 1 exits or dies, the kernel panics):
 - `main()` never returns as PID 1: it ends in `pid1::Finish()`, which
   reboots/powers off/halts when requested and otherwise reaps forever. The
@@ -141,8 +148,12 @@ under `include/aember-libs/<lib>/`, CMake target `aember-libs::<lib>`.
   `waitpid(-1)` steals their status (ECHILD). The reaper thread calls
   `ChildSupervisor::ReapZombies()`: zombies found in `/proc`, tracked pids
   at once, untracked ones after 2 s (an orphan nobody waits for).
-- Don't hold a manager's mutex while calling another manager: state
-  callbacks lock it again (`ServiceManager::StopInternal` deadlocked every
+- Don't hold a manager's mutex while calling another manager or a
+  callback that may call back: they lock it again (std::mutex, not
+  recursive). Both `ServiceManager::StopInternal` (container stop) and
+  `StartInternal` (dependency check → `GetState`) deadlocked that way.
+- One bad `services.json` entry (dependency cycle, unknown dependency)
+  only skips that entry; the rest still starts.
   container stop that way).
 - The file log `/var/log/aember-init.log` rotates (1 MiB × 3).
 
@@ -286,16 +297,17 @@ C++:
 - Classes `PascalCase`, methods `PascalCase()`, members `snake_case_`.
 - A library dir has `CMakeLists.txt` (STATIC lib + `aember-libs::` alias +
   install/export), `Config.cmake.in`, `include/`, `src/`, optional `tests/`
-  (GTest, `<lib>-unittest`, `add_test`). Tests built: child-supervisor,
-  process-manager, device-health (heartbeat), mount-manager, utils/config,
-  utils/logging, utils/shell (debug shell on a pty), utils/signal. service-manager's tests are disabled (written
-  for the old ServiceConfig API, need a rewrite).
+  (GTest, `<lib>-unittest`, `add_test`). Every library has tests (18
+  suites, ~150 tests); only what needs root, real interfaces or LXC
+  containers is left to the QEMU boots.
 - Tests build only with `--with-tests`, which forces x64 Debug; the test
-  binaries are packed into the initramfs and also run in the dev container
-  through the SDK's loader:
-  `S=build/aember-resources/x64-poky-linux/sdk/sysroots/core2-64-poky-linux;
-  $S/lib/ld-linux-x86-64.so.2 --library-path $S/lib:$S/usr/lib
-  build/install/x64-poky-linux/Debug/bin/tests/<lib>-unittest`.
+  binaries are packed into the initramfs (run them in the VM from the debug
+  shell) and run in the dev container with **`aember test`**
+  (`-k <name>` to filter, `-n <N>` to repeat): it starts each binary through
+  the SDK sysroot's loader with the SDK and LXC libs on the library path.
+- The rootfs image is sized from its contents (at least `rootfs_size`,
+  512 MB); a Debug build with tests needs ~700 MB. A guestfish error fails
+  the pack (guestfish itself can exit 0 after a failed `copy-in`).
 - PID 1's file log survives in the rootfs image after a run: copy partition
   1 (`dd skip=128`), `e2fsck -fy` it (QEMU was killed, so the ext4 journal
   must be replayed), then `debugfs -R "cat /var/log/aember-init.log"`.
