@@ -32,7 +32,8 @@ target_include_directories(
 
 target_link_libraries(
   ${COMPONENT}
-  PUBLIC aember-libs::utils::logging
+  PUBLIC aember-libs::utils::ipc
+         aember-libs::utils::logging
          aember-libs::utils::process
 )
 

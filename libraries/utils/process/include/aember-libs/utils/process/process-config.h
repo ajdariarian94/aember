@@ -73,6 +73,14 @@ struct ProcessConfig {
   /// Grace period after SIGTERM before SIGKILL is sent.
   std::chrono::milliseconds stop_timeout{std::chrono::seconds(5)};
 
+  /// Start with a message channel to PID 1 on fd 3 (utils/ipc). The process
+  /// counts as running only once it sent {"type": "ready"} (or after
+  /// ready_timeout); dependents wait for that.
+  bool ipc{false};
+
+  /// How long to wait for "ready" before treating the process as up.
+  std::chrono::milliseconds ready_timeout{std::chrono::seconds(30)};
+
   ProcessConfig() = default;
   ProcessConfig(const std::string& name, const std::string& executable);
 };

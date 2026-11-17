@@ -1,15 +1,16 @@
 /**
  * @file service-manager.cpp
  * @author Arian Ajdari
- * @brief ServiceManager implementation — pure coordinator.
- * @version 0.5
- * @date 2026-06-12
+ * @brief ServiceManager implementation (processes only).
+ * @version 0.6
+ * @date 2026-11-17
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
  */
 
 #include <aember-libs/service-manager/service-manager.h>
 
+#include <algorithm>
 #include <ranges>
 #include <thread>
 
@@ -17,50 +18,22 @@ namespace aember::service_manager {
 
 using ProcessState = aember::process_manager::ProcessManager::ProcessState;
 
-// Lookup table: ContainerState → ProcessState (avoids switch in constructor).
-static constexpr auto kContainerToProcess = [] {
-  using CS = aember::utils::container::ContainerState;
-  return std::array{
-      std::pair{CS::kStarting, ProcessState::Starting},
-      std::pair{CS::kRunning, ProcessState::Running},
-      std::pair{CS::kStopping, ProcessState::Stopping},
-      std::pair{CS::kStopped, ProcessState::Stopped},
-      std::pair{CS::kFailed, ProcessState::Failed},
-  };
-}();
-
 // ---------------------------------------------------------------------------
 // Ctor / Dtor
 // ---------------------------------------------------------------------------
 
 ServiceManager::ServiceManager(
     aember::process_manager::ProcessManager& process_manager,
-    aember::container_manager::ContainerManager& container_manager,
     DependencyResolver& dependency_resolver,
     aember::child_supervisor::ChildSupervisor& supervisor)
     : process_manager_(process_manager),
-      container_manager_(container_manager),
       dependency_resolver_(dependency_resolver),
       child_supervisor_(supervisor) {
   process_manager_.SetExitCallback([this](const std::string& name, pid_t, int) {
     std::lock_guard lock{mutex_};
-    MirrorState(name, process_manager_.GetState(name));
+    ready_deadline_.erase(name);
+    SetState(name, process_manager_.GetState(name));
   });
-
-  container_manager_.SetStateCallback(
-      [this](const std::string& name,
-             aember::utils::container::ContainerState,
-             aember::utils::container::ContainerState new_state) {
-        ProcessState ps = ProcessState::Stopped;
-        for (const auto& [cs, mapped] : kContainerToProcess) {
-          if (cs == new_state) {
-            ps = mapped;
-            break;
-          }
-        }
-        std::lock_guard lock{mutex_};
-        MirrorState(name, ps);
-      });
 
   log_.info("ServiceManager initialized");
 }
@@ -85,29 +58,6 @@ bool ServiceManager::AddProcess(std::string_view name) {
   return true;
 }
 
-bool ServiceManager::AddContainer(std::string_view name) {
-  if (!container_manager_.HasContainer(name)) {
-    log_.error("AddContainer: '{}' not registered in ContainerManager", name);
-    return false;
-  }
-
-  std::lock_guard lock{mutex_};
-  const std::string key{name};
-
-  // Guard against duplicate addition inside ServiceManager
-  if (containers_.contains(key)) {
-    log_.warn(
-        "AddContainer: Container '{}' already registered in ServiceManager",
-        name);
-    return false;
-  }
-
-  states_[key] = ProcessState::Stopped;
-  containers_.insert(key);
-  log_.info("Registered container '{}'", name);
-  return true;
-}
-
 bool ServiceManager::Remove(std::string_view name) {
   StopInternal(name);
 
@@ -119,13 +69,10 @@ bool ServiceManager::Remove(std::string_view name) {
     return false;
   }
 
-  if (containers_.contains(key)) {
-    containers_.erase(key);
-  } else {
-    process_manager_.RemoveProcess(name);
-  }
-
+  process_manager_.RemoveProcess(name);
   states_.erase(key);
+  waiting_.erase(key);
+  ready_deadline_.erase(key);
   log_.info("Removed '{}'", name);
   return true;
 }
@@ -138,10 +85,17 @@ bool ServiceManager::Start(std::string_view name) {
   return StartInternal(name, false);
 }
 
+DependencyResolver::DependencyGraph ServiceManager::Graph() const {
+  DependencyResolver::DependencyGraph graph;
+  for (const auto& cfg : process_manager_.GetConfigs()) {
+    graph[cfg.name] = cfg.dependencies;
+  }
+  return graph;
+}
+
 bool ServiceManager::StartInternal(std::string_view name, bool is_restart) {
   const std::string key{name};
 
-  bool is_container = false;
   {
     std::lock_guard lock{mutex_};
 
@@ -154,23 +108,20 @@ bool ServiceManager::StartInternal(std::string_view name, bool is_restart) {
     if (state == ProcessState::Running || state == ProcessState::Starting) {
       return true;
     }
-    is_container = containers_.contains(key);
   }
 
   // Without the lock: the resolver asks whether each dependency is running,
   // and that query (GetState) takes mutex_ (std::mutex, not recursive).
-  // Checking under the lock deadlocked every service with dependencies.
-  if (!is_container) {
-    DependencyResolver::DependencyGraph graph;
-    for (const auto& cfg : process_manager_.GetConfigs()) {
-      graph[cfg.name] = cfg.dependencies;
-    }
-    if (!dependency_resolver_.CheckDependencies(key, graph)) {
-      log_.error("Dependencies not met for '{}'", name);
-      return false;
-    }
+  if (!dependency_resolver_.CheckDependencies(key, Graph())) {
+    // Remembered: it starts as soon as its dependencies run (also for
+    // restarts, which happen while a dependency may itself be restarting).
+    log_.info("'{}' waits for its dependencies", name);
+    std::lock_guard lock{mutex_};
+    if (states_.contains(key)) { waiting_.insert(key); }
+    return false;
   }
 
+  const auto config = process_manager_.GetConfig(key);
   {
     std::lock_guard lock{mutex_};
     // Another thread may have started (or removed) it meanwhile.
@@ -180,27 +131,72 @@ bool ServiceManager::StartInternal(std::string_view name, bool is_restart) {
         it->second == ProcessState::Starting) {
       return true;
     }
-    MirrorState(key, ProcessState::Starting);
+    waiting_.erase(key);
+    SetState(key, ProcessState::Starting);
   }
 
   log_.info("Starting '{}'{}", name, is_restart ? " (restart)" : "");
 
-  bool success = false;
+  const auto pid = process_manager_.Start(name);
+  const bool success = pid.has_value();
+  if (success) { child_supervisor_.AddChild(*pid, key); }
 
-  if (is_container) {
-    success = container_manager_.StartContainer(name);
-  } else {
-    auto pid = process_manager_.Start(name);
-    success = pid.has_value();
-    if (success) { child_supervisor_.AddChild(*pid, key); }
-  }
-
+  const bool needs_ready = success && config && config->ipc;
   {
     std::lock_guard lock{mutex_};
-    MirrorState(key, success ? ProcessState::Running : ProcessState::Failed);
+    if (needs_ready) {
+      ready_deadline_[key] =
+          std::chrono::steady_clock::now() + config->ready_timeout;
+    } else {
+      SetState(key, success ? ProcessState::Running : ProcessState::Failed);
+    }
   }
 
+  if (success && !needs_ready) { StartWaiting(); }
   return success;
+}
+
+void ServiceManager::MarkReady(std::string_view name) {
+  {
+    std::lock_guard lock{mutex_};
+    const std::string key{name};
+    if (ready_deadline_.erase(key) == 0) {
+      log_.debug("'{}' ready, but no start was waiting for it", name);
+      return;
+    }
+    log_.info("'{}' is ready", name);
+    SetState(key, ProcessState::Running);
+  }
+  StartWaiting();
+}
+
+void ServiceManager::CheckReadyTimeouts() {
+  bool changed = false;
+  {
+    std::lock_guard lock{mutex_};
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = ready_deadline_.begin(); it != ready_deadline_.end();) {
+      if (now < it->second) {
+        ++it;
+        continue;
+      }
+      log_.warn("'{}' didn't report ready in time; treating it as up",
+                it->first);
+      SetState(it->first, ProcessState::Running);
+      it = ready_deadline_.erase(it);
+      changed = true;
+    }
+  }
+  if (changed) { StartWaiting(); }
+}
+
+void ServiceManager::StartWaiting() {
+  std::vector<std::string> candidates;
+  {
+    std::lock_guard lock{mutex_};
+    candidates.assign(waiting_.begin(), waiting_.end());
+  }
+  for (const auto& name : candidates) { StartInternal(name, false); }
 }
 
 bool ServiceManager::Stop(std::string_view name) {
@@ -209,8 +205,6 @@ bool ServiceManager::Stop(std::string_view name) {
 
 bool ServiceManager::StopInternal(std::string_view name) {
   const std::string key{name};
-  bool is_container = false;
-
   {
     std::lock_guard lock{mutex_};
 
@@ -219,24 +213,19 @@ bool ServiceManager::StopInternal(std::string_view name) {
       return false;
     }
 
+    waiting_.erase(key);
+    ready_deadline_.erase(key);
     const auto state = states_.at(key);
     if (state == ProcessState::Stopped || state == ProcessState::Stopping) {
       return true;
     }
 
-    MirrorState(key, ProcessState::Stopping);
-    is_container = containers_.contains(key);
+    SetState(key, ProcessState::Stopping);
   }
 
-  // Without the lock: both managers report state changes through callbacks
-  // that take mutex_ (std::mutex, not recursive). Holding it here deadlocked
-  // every container stop, so PID 1 hung at shutdown.
-  if (is_container) {
-    container_manager_.StopContainer(name);
-  } else {
-    process_manager_.Stop(name);
-  }
-
+  // Without the lock: ProcessManager reports the exit through a callback
+  // that takes mutex_ (std::mutex, not recursive).
+  process_manager_.Stop(name);
   return true;
 }
 
@@ -251,25 +240,35 @@ bool ServiceManager::Restart(std::string_view name) {
 // ---------------------------------------------------------------------------
 
 void ServiceManager::StartAll() {
-  const auto all_configs = process_manager_.GetConfigs();
-  DependencyResolver::DependencyGraph graph;
-  for (const auto& cfg : all_configs) { graph[cfg.name] = cfg.dependencies; }
-
-  for (const auto& name : dependency_resolver_.ResolveStartOrder(graph)) {
-    Start(name);
-  }
-
-  std::vector<std::string> container_names;
+  const auto order = dependency_resolver_.ResolveStartOrder(Graph());
   {
     std::lock_guard lock{mutex_};
-    container_names.assign(containers_.begin(), containers_.end());
+    for (const auto& name : order) {
+      if (states_.contains(name)) { waiting_.insert(name); }
+    }
   }
-  for (const auto& name : container_names) { Start(name); }
+  for (const auto& name : order) {
+    if (Has(name)) { StartInternal(name, false); }
+  }
 }
 
 void ServiceManager::StopAll() {
-  const auto names = GetNames();
-  for (const auto& name : names | std::views::reverse) { StopInternal(name); }
+  {
+    std::lock_guard lock{mutex_};
+    waiting_.clear();
+  }
+  // Dependents first: the reverse of the start order, then anything the
+  // resolver left out (cycles, unknown dependencies).
+  auto order = dependency_resolver_.ResolveStartOrder(Graph());
+  std::ranges::reverse(order);
+  for (const auto& name : GetNames()) {
+    if (std::ranges::find(order, name) == order.end()) {
+      order.push_back(name);
+    }
+  }
+  for (const auto& name : order) {
+    if (Has(name)) { StopInternal(name); }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -279,11 +278,6 @@ void ServiceManager::StopAll() {
 bool ServiceManager::Has(std::string_view name) const {
   std::lock_guard lock{mutex_};
   return states_.contains(std::string{name});
-}
-
-bool ServiceManager::IsContainer(std::string_view name) const {
-  std::lock_guard lock{mutex_};
-  return containers_.contains(std::string{name});
 }
 
 ServiceManager::ProcessState ServiceManager::GetState(
@@ -308,9 +302,7 @@ std::vector<std::string> ServiceManager::GetNames() const {
 // ---------------------------------------------------------------------------
 
 void ServiceManager::HandleExit(pid_t pid, int exit_code) {
-  if (!process_manager_.HandleExit(pid, exit_code)) {
-    container_manager_.HandleExit(pid, exit_code);
-  }
+  process_manager_.HandleExit(pid, exit_code);
 }
 
 // ---------------------------------------------------------------------------
@@ -322,12 +314,7 @@ void ServiceManager::SetStateChangeCallback(StateChangeCallback callback) {
   state_change_callback_ = std::move(callback);
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-void ServiceManager::MirrorState(const std::string& name,
-                                 ProcessState new_state) {
+void ServiceManager::SetState(const std::string& name, ProcessState new_state) {
   auto it = states_.find(name);
   if (it == states_.end()) { return; }
 

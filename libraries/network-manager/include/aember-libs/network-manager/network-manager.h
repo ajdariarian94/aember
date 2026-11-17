@@ -109,7 +109,6 @@ class NetworkManager {
 
   void CreateBridges();
   bool CreateBridge(const BridgeConfig& bridge);
-  bool InterfaceExists(std::string_view name);
 
   // ---------------------------------------------------------------------------
   // Connectivity monitor
@@ -125,7 +124,6 @@ class NetworkManager {
 
   [[nodiscard]] std::string FirstUpInterface() const;
   void UpdateStatus(bool online, int rtt_ms);
-  int GetInterfaceIndex(std::string_view iface_name);
 
   // ---------------------------------------------------------------------------
   // Members

@@ -15,9 +15,7 @@ target_link_libraries(
   service-manager-unittest
   PRIVATE aember-libs::service-manager
           aember-libs::process-manager
-          aember-libs::container-manager
           aember-libs::child-supervisor
-          aember-libs::mount-manager
           GTest::gtest_main
 )
 

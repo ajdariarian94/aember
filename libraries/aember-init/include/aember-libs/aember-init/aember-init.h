@@ -9,16 +9,15 @@
 
 #include <aember-libs/aember-init/pid1.h>
 #include <aember-libs/child-supervisor/child-supervisor.h>
-#include <aember-libs/container-manager/container-manager.h>
 #include <aember-libs/device-health/aember-monitor.h>
 #include <aember-libs/device-health/heartbeat.h>
 #include <aember-libs/module-loader/module-loader.h>
 #include <aember-libs/mount-manager/mount-manager.h>
-#include <aember-libs/network-manager/network-manager.h>
 #include <aember-libs/process-manager/process-manager.h>
 #include <aember-libs/root-manager/root-manager.h>
 #include <aember-libs/service-manager/dependency-resolver.h>
 #include <aember-libs/service-manager/service-manager.h>
+#include <aember-libs/utils/ipc/hub.h>
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/shell/debug-shell.h>
 #include <aember-libs/utils/signal/signal.h>
@@ -26,6 +25,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <expected>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -44,10 +44,13 @@ struct InitOptions {
   bool chroot = false;
 };
 
+/// Names of the built-in daemons (services in ServiceManager).
+inline constexpr std::string_view kNetd = "aember-netd";
+inline constexpr std::string_view kContainerd = "aember-containerd";
+
 class AemberInit {
  public:
   using DebugShell = aember::utils::shell::DebugShell;
-  using ContainerState = aember::utils::container::ContainerState;
   using ProcessState = aember::process_manager::ProcessManager::ProcessState;
   using Logger = aember::utils::logging::Logger;
   using ShutdownAction = pid1::ShutdownAction;
@@ -83,12 +86,15 @@ class AemberInit {
   // ---------------------------------------------------------------------------
 
   Result<> InitMounts();
-  Result<> InitNetwork();
   Result<> InitServiceStack();
+  /// `aember netd` and `aember containerd` as services (ipc, always
+  /// restarted, containerd after netd).
+  void RegisterDaemons();
+  /// A message from a daemon: readiness, network status, container state.
+  void OnDaemonMessage(const std::string& name, const nlohmann::json& message);
   Result<> InitSignals();
 
   Result<> LoadAndRegisterProcesses(std::string_view path);
-  Result<> LoadAndRegisterContainers(std::string_view path);
 
   void StartReaperThread();
   void StopReaperThread();
@@ -110,12 +116,6 @@ class AemberInit {
 
   void OnServiceStateChange(const std::string& name, ProcessState old_state,
                             ProcessState new_state);
-
-  void OnNetworkStatus(
-      const aember::utils::network::ConnectivityStatus& status);
-
-  void OnContainerStateChange(const std::string& name, ContainerState old_state,
-                              ContainerState new_state);
 
   // ---------------------------------------------------------------------------
   // State
@@ -146,10 +146,7 @@ class AemberInit {
   std::optional<aember::module_loader::ModuleLoader> module_loader_;
 
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
-  std::shared_ptr<aember::container_manager::ContainerManager>
-      container_manager_;
 
-  std::unique_ptr<aember::network::NetworkManager> network_manager_;
   std::unique_ptr<aember::root_manager::RootManager> root_manager_;
 
   std::unique_ptr<aember::device_health::AemberMonitor> monitor_;
@@ -164,6 +161,12 @@ class AemberInit {
   std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
 
   std::jthread reaper_thread_;
+
+  /// Daemon channels (netd, containerd) and what they last reported.
+  aember::utils::ipc::Hub hub_;
+  std::mutex status_mutex_;
+  nlohmann::json network_status_;
+  std::map<std::string, std::string> container_states_;
 
   Logger log_;
 };

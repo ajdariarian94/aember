@@ -33,11 +33,9 @@ target_include_directories(
 
 target_link_libraries(
   ${COMPONENT}
-  PUBLIC aember-libs::container-manager
-         aember-libs::process-manager
+  PUBLIC aember-libs::process-manager
          aember-libs::child-supervisor
          aember-libs::utils::config
-         aember-libs::utils::container
          aember-libs::utils::logging
          # aember-libs::utils::service
 )

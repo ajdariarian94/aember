@@ -34,16 +34,14 @@ target_include_directories(
 target_link_libraries(
   ${COMPONENT}
   PUBLIC aember-libs::child-supervisor
-         aember-libs::container-manager
          aember-libs::device-health
          aember-libs::module-loader
          aember-libs::mount-manager
-         aember-libs::network-manager
          aember-libs::process-manager
          aember-libs::root-manager
          aember-libs::service-manager
          aember-libs::utils::config
-         aember-libs::utils::container
+         aember-libs::utils::ipc
          aember-libs::utils::logging
          aember-libs::utils::shell
          aember-libs::utils::signal

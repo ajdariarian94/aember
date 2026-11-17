@@ -11,16 +11,16 @@
  */
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
-#include <aember-libs/container-manager/container-manager.h>
-#include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/process-manager/process-manager.h>
 #include <aember-libs/service-manager/dependency-resolver.h>
 #include <aember-libs/service-manager/service-manager.h>
+#include <aember-libs/utils/ipc/channel.h>
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -110,13 +110,15 @@ TEST(DependencyResolverTest, CheckDependencies) {
 class ServiceManagerTest : public ::testing::Test {
  protected:
   ServiceManagerTest()
-      : mounts_(std::make_shared<aember::mount_manager::MountManager>()),
-        containers_(mounts_),
-        resolver_([this](const std::string& name) {
+      : resolver_([this](const std::string& name) {
           return sm_ && sm_->GetState(name) == State::Running;
         }) {
-    sm_ = std::make_unique<ServiceManager>(
-        processes_, containers_, resolver_, supervisor_);
+    processes_.SetChannelCallback(
+        [this](const std::string& name, aember::utils::ipc::Channel ch) {
+          std::lock_guard lock{mutex_};
+          channels_[name] = std::move(ch);
+        });
+    sm_ = std::make_unique<ServiceManager>(processes_, resolver_, supervisor_);
     sm_->SetStateChangeCallback(
         [this](const std::string& name, State, State to) {
           std::lock_guard lock{mutex_};
@@ -158,9 +160,40 @@ class ServiceManagerTest : public ::testing::Test {
     return states;
   }
 
+  /// A process that reports ready over fd 3 when told to (or never).
+  void AddIpcService(const std::string& name, std::vector<std::string> deps,
+                     bool sends_ready,
+                     std::chrono::milliseconds ready_timeout = 30s) {
+    ProcessManager::ProcessConfig cfg;
+    cfg.name = name;
+    cfg.executable = "sh";
+    cfg.args = {"-c",
+                sends_ready ? R"(printf '{"type":"ready"}' >&3; sleep 30)"
+                            : "sleep 30"};
+    cfg.dependencies = std::move(deps);
+    cfg.restart_on_failure = false;
+    cfg.stop_timeout = 2s;
+    cfg.ipc = true;
+    cfg.ready_timeout = ready_timeout;
+    ASSERT_TRUE(processes_.AddProcess(cfg));
+    ASSERT_TRUE(sm_->AddProcess(name));
+  }
+
+  /// Wait for the service's "ready" on its channel (what PID 1's hub does).
+  bool ReceiveReady(const std::string& name) {
+    aember::utils::ipc::Channel* ch = nullptr;
+    {
+      std::lock_guard lock{mutex_};
+      const auto it = channels_.find(name);
+      if (it == channels_.end()) return false;
+      ch = &it->second;
+    }
+    const auto msg = ch->Receive(3s);
+    return msg && aember::utils::ipc::TypeOf(*msg) == "ready";
+  }
+
   ProcessManager processes_;
-  std::shared_ptr<aember::mount_manager::MountManager> mounts_;
-  aember::container_manager::ContainerManager containers_;
+  std::map<std::string, aember::utils::ipc::Channel> channels_;
   aember::child_supervisor::ChildSupervisor supervisor_;
   DependencyResolver resolver_;
   std::unique_ptr<ServiceManager> sm_;
@@ -169,13 +202,11 @@ class ServiceManagerTest : public ::testing::Test {
   std::vector<std::pair<std::string, State>> transitions_;
 };
 
-TEST_F(ServiceManagerTest, AddRequiresRegistrationInTheManagers) {
+TEST_F(ServiceManagerTest, AddRequiresRegistrationInProcessManager) {
   EXPECT_FALSE(sm_->AddProcess("unknown"));
-  EXPECT_FALSE(sm_->AddContainer("unknown"));
   EXPECT_FALSE(sm_->Has("unknown"));
   AddSleeper("known");
   EXPECT_TRUE(sm_->Has("known"));
-  EXPECT_FALSE(sm_->IsContainer("known"));
   EXPECT_EQ(sm_->GetState("known"), State::Stopped);
 }
 
@@ -302,6 +333,95 @@ TEST_F(ServiceManagerTest, StopAllStopsEverything) {
     EXPECT_EQ(sm_->GetState(name), State::Stopped) << name;
   }
   EXPECT_EQ(sm_->GetNames().size(), 3u);
+}
+
+// ---------------------------------------------------------------------------
+// Readiness (built-in daemons: netd, containerd)
+// ---------------------------------------------------------------------------
+
+TEST_F(ServiceManagerTest, IpcServiceRunsOnlyAfterReady) {
+  AddIpcService("netd", {}, /*sends_ready=*/true);
+  ASSERT_TRUE(sm_->Start("netd"));
+  EXPECT_EQ(sm_->GetState("netd"), State::Starting);
+  ASSERT_TRUE(ReceiveReady("netd")) << "no ready on fd 3";
+  sm_->MarkReady("netd");
+  EXPECT_EQ(sm_->GetState("netd"), State::Running);
+}
+
+TEST_F(ServiceManagerTest, DependentWaitsForReadyThenStarts) {
+  AddIpcService("netd", {}, /*sends_ready=*/true);
+  AddSleeper("containerd", {"netd"});
+  sm_->StartAll();
+  EXPECT_EQ(sm_->GetState("netd"), State::Starting);
+  EXPECT_EQ(sm_->GetState("containerd"), State::Stopped);  // waiting
+
+  ASSERT_TRUE(ReceiveReady("netd"));
+  sm_->MarkReady("netd");
+  EXPECT_EQ(sm_->GetState("netd"), State::Running);
+  EXPECT_EQ(sm_->GetState("containerd"), State::Running);  // started now
+}
+
+// Regression: a restart (or Start) while a dependency was still starting
+// was dropped, so containerd never came back after netd restarted.
+TEST_F(ServiceManagerTest, BlockedStartRunsWhenDependencyGetsReady) {
+  AddIpcService("netd", {}, /*sends_ready=*/true);
+  AddSleeper("containerd", {"netd"});
+  ASSERT_TRUE(sm_->Start("netd"));
+  EXPECT_FALSE(sm_->Start("containerd"));  // netd still starting
+  EXPECT_EQ(sm_->GetState("containerd"), State::Stopped);
+  ASSERT_TRUE(ReceiveReady("netd"));
+  sm_->MarkReady("netd");
+  EXPECT_EQ(sm_->GetState("containerd"), State::Running);
+}
+
+TEST_F(ServiceManagerTest, StopCancelsAWaitingStart) {
+  AddIpcService("netd", {}, /*sends_ready=*/true);
+  AddSleeper("containerd", {"netd"});
+  ASSERT_TRUE(sm_->Start("netd"));
+  EXPECT_FALSE(sm_->Start("containerd"));
+  sm_->Stop("containerd");
+  ASSERT_TRUE(ReceiveReady("netd"));
+  sm_->MarkReady("netd");
+  EXPECT_EQ(sm_->GetState("containerd"), State::Stopped);
+}
+
+TEST_F(ServiceManagerTest, ReadyTimeoutTreatsServiceAsUp) {
+  AddIpcService("silent", {}, /*sends_ready=*/false, 200ms);
+  AddSleeper("after", {"silent"});
+  sm_->StartAll();
+  sm_->CheckReadyTimeouts();  // not yet
+  EXPECT_EQ(sm_->GetState("silent"), State::Starting);
+  std::this_thread::sleep_for(300ms);
+  sm_->CheckReadyTimeouts();
+  EXPECT_EQ(sm_->GetState("silent"), State::Running);
+  EXPECT_EQ(sm_->GetState("after"), State::Running);
+}
+
+TEST_F(ServiceManagerTest, ReadyFromAStrangerIsIgnored) {
+  AddSleeper("plain");
+  sm_->MarkReady("plain");  // not waiting for ready
+  sm_->MarkReady("ghost");
+  EXPECT_EQ(sm_->GetState("plain"), State::Stopped);
+}
+
+TEST_F(ServiceManagerTest, StopAllStopsDependentsFirst) {
+  AddSleeper("netd");
+  AddSleeper("containerd", {"netd"});
+  AddSleeper("app", {"containerd"});
+  sm_->StartAll();
+  {
+    std::lock_guard lock{mutex_};
+    transitions_.clear();
+  }
+  sm_->StopAll();
+  std::vector<std::string> stopping;
+  {
+    std::lock_guard lock{mutex_};
+    for (const auto& [name, to] : transitions_) {
+      if (to == State::Stopping) stopping.push_back(name);
+    }
+  }
+  EXPECT_EQ(stopping, (std::vector<std::string>{"app", "containerd", "netd"}));
 }
 
 }  // namespace

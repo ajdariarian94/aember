@@ -16,6 +16,7 @@ add_library(
   ${COMPONENT}
   STATIC
   src/dhcp-client.cpp
+  src/netd.cpp
   src/netlink.cpp
   src/network-manager.cpp
 )
@@ -34,7 +35,8 @@ target_include_directories(
 
 target_link_libraries(
   ${COMPONENT}
-  PUBLIC aember-libs::utils::logging
+  PUBLIC aember-libs::utils::ipc
+         aember-libs::utils::logging
          aember-libs::utils::network
 )
 

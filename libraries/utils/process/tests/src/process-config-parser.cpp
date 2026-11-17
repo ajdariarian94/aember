@@ -64,7 +64,8 @@ TEST_F(ProcessConfigParserTest, FullEntry) {
     "description": "a demo", "args": ["-v", "--port", "80"],
     "working_directory": "/tmp", "environment": {"A": "1", "B": "two"},
     "dependencies": ["net", "db"], "restart_on_failure": false,
-    "max_restarts": 3, "restart_delay_ms": 6000, "stop_timeout_ms": 250
+    "max_restarts": 3, "restart_delay_ms": 6000, "stop_timeout_ms": 250,
+    "ipc": true, "ready_timeout_ms": 1500
   })"))
       << error_.message;
 
@@ -83,6 +84,8 @@ TEST_F(ProcessConfigParserTest, FullEntry) {
   EXPECT_EQ(p.max_restarts, 3u);
   EXPECT_EQ(p.restart_delay, std::chrono::milliseconds{6000});
   EXPECT_EQ(p.stop_timeout, std::chrono::milliseconds{250});
+  EXPECT_TRUE(p.ipc);
+  EXPECT_EQ(p.ready_timeout, std::chrono::milliseconds{1500});
 }
 
 TEST_F(ProcessConfigParserTest, MinimalEntryGetsDefaults) {
@@ -95,6 +98,8 @@ TEST_F(ProcessConfigParserTest, MinimalEntryGetsDefaults) {
   EXPECT_EQ(p.max_restarts, 0u);
   EXPECT_EQ(p.restart_delay, std::chrono::seconds{1});
   EXPECT_EQ(p.stop_timeout, std::chrono::seconds{5});
+  EXPECT_FALSE(p.ipc);
+  EXPECT_EQ(p.ready_timeout, std::chrono::seconds{30});
 }
 
 TEST_F(ProcessConfigParserTest, SeveralEntriesKeepOrder) {
@@ -157,6 +162,8 @@ TEST_F(ProcessConfigParserTest, RejectsWrongFieldTypes) {
            R"("max_restarts": "3")",
            R"("restart_delay_ms": -5)",
            R"("stop_timeout_ms": 1.5)",
+           R"("ipc": "yes")",
+           R"("ready_timeout_ms": -1)",
        }) {
     EXPECT_FALSE(ParseOne("{" + base + field + "}")) << field;
   }

@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <aember-libs/utils/ipc/channel.h>
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/process/process-config-parser.h>
 #include <aember-libs/utils/process/process-config.h>
@@ -51,6 +52,10 @@ class ProcessManager {
       const std::string& /*name*/, pid_t /*pid*/, int /*exit_code*/)>;
 
   using RestartCallback = std::move_only_function<void(const std::string&)>;
+  /// PID 1's end of the channel of a process started with `ipc` (one call
+  /// per start; a restart brings a new channel).
+  using ChannelCallback = std::move_only_function<void(
+      const std::string& /*name*/, aember::utils::ipc::Channel)>;
 
   explicit ProcessManager(ExitCallback on_exit = nullptr);
   ~ProcessManager();
@@ -97,8 +102,9 @@ class ProcessManager {
   [[nodiscard]] bool IsRunning(std::string_view name) const;
   [[nodiscard]] ProcessState GetState(std::string_view name) const;
   [[nodiscard]] std::optional<pid_t> GetPid(std::string_view name) const;
-  [[nodiscard]] std::vector<std::string> GetProcessNames() const;
   [[nodiscard]] std::vector<ProcessConfig> GetConfigs() const;
+  [[nodiscard]] std::optional<ProcessConfig> GetConfig(
+      std::string_view name) const;
 
   // ---------------------------------------------------------------------------
   // Callbacks
@@ -107,6 +113,7 @@ class ProcessManager {
   void SetExitCallback(ExitCallback callback);
 
   void SetRestartCallback(RestartCallback callback);
+  void SetChannelCallback(ChannelCallback callback);
 
   // ---------------------------------------------------------------------------
   // Config loading
@@ -128,6 +135,7 @@ class ProcessManager {
   ExitCallback on_exit_;
 
   RestartCallback on_restart_;
+  ChannelCallback on_channel_;
 
   ProcessConfigParser parser_{};
 

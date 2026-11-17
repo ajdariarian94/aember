@@ -76,10 +76,6 @@ void logging_level_info() {
   global_logger().set_level(spdlog::level::info);
 }
 
-void init_early_logging() {
-  GetState();
-}
-
 void flush() {
   global_logger().flush();
 }

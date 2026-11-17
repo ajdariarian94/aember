@@ -4,7 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from aember.config.libs import ARCH_CONFIG
+from aember.config.libs import ARCH_CONFIG, DLOPEN_LIBS
 from aember.config.resources import lxc_dir, sdk_dir
 from aember.config.sdk import SDK_SYSROOT_MAP
 
@@ -120,8 +120,16 @@ def copy_runtime_libs(
         poky_sysroot / "usr/local/lib",
     ]
 
-    log.info("Resolving dependencies for: %s", aember_bin)
-    all_libs = collect_all_libs([aember_bin], search_paths)
+    # liblxc isn't in aember's NEEDED: `aember containerd` loads it with
+    # dlopen (PID 1 never maps it). Pack it and its own dependencies.
+    dlopened = [virt_libs / name for name in DLOPEN_LIBS]
+    missing = [lib for lib in dlopened if not lib.exists()]
+    if missing:
+        raise FileNotFoundError(f"dlopen'ed libraries not found: {missing}")
+
+    log.info("Resolving dependencies for: %s (+ %s)", aember_bin, DLOPEN_LIBS)
+    all_libs = collect_all_libs([aember_bin, *dlopened], search_paths)
+    all_libs.update(dlopened)
 
     # Add the dynamic loader.
     loader_path = poky_sysroot / "lib" / loader_name

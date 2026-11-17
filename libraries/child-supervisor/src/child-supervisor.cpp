@@ -52,48 +52,6 @@ void ChildSupervisor::RemoveChild(pid_t pid) {
 // SIGCHLD integration
 // ---------------------------------------------------------------------------
 
-void ChildSupervisor::HandleSIGCHLD() {
-  log_.debug("SIGCHLD received");
-  ReapChildren();
-}
-
-void ChildSupervisor::ReapChildren() {
-  // Interpret waitpid status into a log-friendly string.
-  const auto describe_exit = [](int status) -> std::string {
-    if (WIFEXITED(status)) {
-      return std::format("exited with code {}", WEXITSTATUS(status));
-    }
-    if (WIFSIGNALED(status)) {
-      return std::format("killed by signal {}", WTERMSIG(status));
-    }
-    return "exited with unknown status";
-  };
-
-  while (true) {
-    int status = 0;
-    const pid_t pid = ::waitpid(-1, &status, WNOHANG);
-
-    if (pid == 0) { break; }  // no more exited children
-
-    if (pid < 0) {
-      if (errno != ECHILD) { log_.error("waitpid failed: errno={}", errno); }
-      break;
-    }
-
-    // Look up name and remove from tracking.
-    std::string name = "<unknown>";
-    {
-      std::lock_guard lock{children_mutex_};
-      if (auto it = children_.find(pid); it != children_.end()) {
-        name = std::move(it->second);
-        children_.erase(it);
-      }
-    }
-
-    log_.info("Child '{}' (pid={}) {}", name, pid, describe_exit(status));
-  }
-}
-
 // ---------------------------------------------------------------------------
 // ReapZombies (PID 1)
 // ---------------------------------------------------------------------------

@@ -21,6 +21,10 @@ ARCH_CONFIG = {
     },
 }
 
+# Libraries loaded with dlopen (not in aember's NEEDED), packed explicitly:
+# liblxc is only loaded by the `aember containerd` role.
+DLOPEN_LIBS: List[str] = ["liblxc.so.1"]
+
 # Modules always packed on all architectures
 BASE_MODULES: Dict[str, List[str]] = {
     "x64-poky-linux": ["llc", "stp", "bridge", "veth", "br_netfilter"],
