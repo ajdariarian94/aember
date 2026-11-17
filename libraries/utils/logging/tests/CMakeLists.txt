@@ -11,11 +11,6 @@ add_executable(
   src/logging/logging.cpp
 )
 
-target_include_directories(
-  logging-unittest
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
 target_link_libraries(
   logging-unittest
   PRIVATE aember-libs::utils::logging

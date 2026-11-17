@@ -147,10 +147,13 @@ bool ModuleLoader::IsLoaded(std::string_view name) const {
 
   const std::string normalized = Normalize(name);
 
-  // Read every first token (module name) per line and compare.
-  return std::ranges::any_of(
-      std::ranges::istream_view<std::string>(proc_modules),
-      [&](const std::string& token) { return token == normalized; });
+  // Compare the first token (module name) of each line only; the other
+  // columns ("Live", sizes, addresses) must not match.
+  std::string line;
+  while (std::getline(proc_modules, line)) {
+    if (line.substr(0, line.find(' ')) == normalized) { return true; }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

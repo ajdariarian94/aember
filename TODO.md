@@ -33,12 +33,13 @@ signals (reboot/poweroff/halt), one reaper that doesn't steal children
 other code waits for (this was the `RemoveChild: unknown pid` warning),
 signals blocked before any thread starts, the ServiceManager stop deadlock,
 `ProcessManager::Stop` racing the reaper, a rotating file log, and
-re-enabled tests. Left:
+re-enabled tests. 2026-11-17: tests for every library (154, `aember test`),
+which found and fixed a ServiceManager start deadlock (services with
+dependencies), StartAll starting nothing after one bad dependency,
+`AemberMonitor::Log` reading missing JSON keys (UB), `ModuleLoader::IsLoaded`
+matching any word of /proc/modules, and Debug rootfs images silently cut
+off by guestfish. Left:
 
-- [ ] Rewrite the service-manager tests for the current API (they still use
-  `ServiceConfig`/`AddService`, disabled in CMake).
-- [ ] Tests for container-manager, module-loader, network-manager,
-  root-manager and the remaining utils (no `tests/` dirs yet).
 - [ ] Containers ignore the graceful stop: `lxc shutdown` times out after
   5 s per container, then `stop` kills them. Set `lxc.signal.halt` to
   something the container init handles (SIGTERM for BusyBox init).

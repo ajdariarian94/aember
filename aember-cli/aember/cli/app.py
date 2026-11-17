@@ -14,6 +14,7 @@ from .base.pack import pack
 from .base.publish import publish
 from .base.release import release
 from .base.resources import fetch_resources
+from .base.test import test
 from .qemu.build import build_qemu
 from .qemu.launch import launch_qemu
 
@@ -56,6 +57,9 @@ aember.command(
 aember.command(help="Create a release archive")(release)
 aember.command(help="Upload build/release/ as GitHub release v<VERSION>")(publish)
 aember.command(help="Serve documentation locally")(view_docs)
+aember.command(help="Run the C++ unit tests (after `aember qemu build --with-tests`)")(
+    test
+)
 
 # ----------------------------
 # Aember commands

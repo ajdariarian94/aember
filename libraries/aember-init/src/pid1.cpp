@@ -9,14 +9,13 @@
  */
 
 #include <aember-libs/aember-init/pid1.h>
-
-#include <spdlog/spdlog.h>
+#include <aember-libs/utils/logging/logging.h>
 
 #include <cerrno>
-#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <string>
+#include <tuple>
 
 #include <pthread.h>
 #include <signal.h>
@@ -32,14 +31,16 @@ namespace {
 
 constexpr unsigned kTermGraceSeconds = 2;
 
-/// Log to the console directly and to spdlog if it still works.
+/// Log through the global logger. Only if logging itself fails (this runs
+/// from std::terminate) fall back to a raw write on stderr.
 void Critical(const std::string& msg) {
-  std::fprintf(stderr, "aember-init: %s\n", msg.c_str());
-  std::fflush(stderr);
   try {
-    spdlog::critical("{}", msg);
-    spdlog::apply_all([](const auto& l) { l->flush(); });
-  } catch (...) {}
+    aember::utils::logging::Logger{"pid1"}.critical("{}", msg);
+    aember::utils::logging::flush();
+  } catch (...) {
+    const std::string line = "aember-init: " + msg + "\n";
+    std::ignore = ::write(STDERR_FILENO, line.data(), line.size());
+  }
 }
 
 bool IsMainThread() {

@@ -31,3 +31,24 @@ install(
   TARGETS heartbeat-unittest
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
 )
+
+add_executable(
+  aember-monitor-unittest
+  src/aember-monitor.cpp
+)
+
+target_link_libraries(
+  aember-monitor-unittest
+  PRIVATE aember-libs::device-health
+          GTest::gtest_main
+)
+
+add_test(
+  NAME aember-monitor-unittest
+  COMMAND aember-monitor-unittest
+)
+
+install(
+  TARGETS aember-monitor-unittest
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
+)

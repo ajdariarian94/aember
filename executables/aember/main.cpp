@@ -1,14 +1,15 @@
 #include <aember-libs/aember-init/aember-init.h>
 #include <aember-libs/aember-init/pid1.h>
+#include <aember-libs/utils/logging/logging.h>
 
 #include <CLI/CLI.hpp>
 
-#include <cstdio>
 #include <exception>
 
 #include <unistd.h>
 
 namespace pid1 = aember::aember_init::pid1;
+using aember::utils::logging::Logger;
 
 int main(int argc, char** argv) {
   // Before anything can throw: an uncaught exception must not kill PID 1
@@ -26,7 +27,7 @@ int main(int argc, char** argv) {
     app.parse(argc, argv);
   } catch (const CLI::ParseError& e) {
     if (::getpid() != 1) { return app.exit(e); }
-    std::fprintf(stderr, "aember: ignoring bad arguments: %s\n", e.what());
+    Logger{"aember"}.warn("Ignoring bad arguments: {}", e.what());
   }
 
   auto action = pid1::ShutdownAction::kNone;
@@ -40,8 +41,8 @@ int main(int argc, char** argv) {
     }
     action = aember_init.RequestedShutdown();
   } catch (const std::exception& e) {
-    std::fprintf(stderr, "aember: init failed: %s\n", e.what());
-  } catch (...) { std::fprintf(stderr, "aember: init failed\n"); }
+    Logger{"aember"}.critical("Init failed: {}", e.what());
+  } catch (...) { Logger{"aember"}.critical("Init failed"); }
 
   if (::getpid() != 1) { return EXIT_SUCCESS; }
 

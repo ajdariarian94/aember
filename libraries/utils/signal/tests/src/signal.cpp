@@ -1,3 +1,7 @@
+#include <atomic>
+#include <stdexcept>
+#include <thread>
+
 #include <aember-libs-tests/utils/signal/signal.h>
 
 namespace aember_test::utils {
@@ -132,4 +136,28 @@ TEST_F(SignalHandlerTest, CallbackReceivesCorrectSignal) {
   EXPECT_EQ(usr1_count.load(std::memory_order_relaxed), 2);
   EXPECT_EQ(usr2_count.load(std::memory_order_relaxed), 1);
 }
+}  // namespace aember_test::utils
+
+namespace aember_test::utils {
+
+// Regression: an exception from a callback escaped the signal thread
+// (std::terminate, fatal in PID 1). Now it is logged and the next signal
+// is still handled.
+TEST_F(SignalHandlerTest, ThrowingCallbackKeepsTheHandlerAlive) {
+  std::atomic<int> calls{0};
+  handler_->Register(SIGUSR1, [&](int) {
+    ++calls;
+    throw std::runtime_error("boom");
+  });
+  handler_->Start();
+
+  for (int round = 1; round <= 2; ++round) {
+    ASSERT_EQ(kill(getpid(), SIGUSR1), 0);
+    for (int i = 0; i < 100 && calls.load() < round; ++i) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(calls.load(), round);
+  }
+}
+
 }  // namespace aember_test::utils
