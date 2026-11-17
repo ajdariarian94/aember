@@ -4,6 +4,7 @@ import typer  # type: ignore
 from aember.config.architecture import Architecture
 from aember.config.build_type import BuildType
 from aember.core.context import Context
+from aember.steps.launching.chroot import ChrootLaunchStep
 from aember.steps.launching.launch import LaunchStep
 
 
@@ -34,7 +35,13 @@ def launch(
         help="Open a debug shell on the console at boot (aember.shell=1); "
         "otherwise press 'd' on the console at any time",
     ),
+    chroot: bool = typer.Option(
+        False,
+        "--chroot",
+        help="Run without QEMU: aember as PID 1 in a chroot of the rootfs image "
+        "on the host kernel, containers on the host's X server",
+    ),
 ):
     ctx = Context(architecture=architecture.value, build_type=build_type.value)
     ctx.data.update(headless=headless, timeout=timeout, debug_shell=debug_shell)
-    LaunchStep().run(ctx)
+    (ChrootLaunchStep() if chroot else LaunchStep()).run(ctx)

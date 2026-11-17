@@ -251,6 +251,17 @@ TEST(NetlinkTest, InterfaceIndex) {
   EXPECT_EQ(netlink::InterfaceIndex("aember-nope0"), -1);
 }
 
+TEST(NetlinkTest, FirstIPv4Address) {
+  EXPECT_FALSE(netlink::FirstIPv4Address("aember-nope0").has_value());
+  const auto lo = netlink::FirstIPv4Address("lo");
+  if (kPrivateNet) {
+    EXPECT_FALSE(lo.has_value());  // fresh namespace: lo has no address
+  } else {
+    ASSERT_TRUE(lo.has_value());
+    EXPECT_EQ(Str(*lo), "127.0.0.1");
+  }
+}
+
 TEST(NetlinkTest, InvalidRequestsAreRefused) {
   EXPECT_EQ(netlink::CreateBridge(""), -EINVAL);
   EXPECT_EQ(netlink::CreateBridge("a-name-much-too-long-for-linux"), -EINVAL);

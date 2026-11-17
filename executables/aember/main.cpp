@@ -21,7 +21,13 @@ int main(int argc, char** argv) {
 
   bool root = false;
 
+  bool chroot = false;
+
   app.add_flag("--root", root, "Start in root mode");
+  app.add_flag("--chroot",
+               chroot,
+               "Root mode chrooted on a host: no kernel modules "
+               "(aember app launch --chroot)");
 
   try {
     app.parse(argc, argv);
@@ -32,8 +38,8 @@ int main(int argc, char** argv) {
 
   auto action = pid1::ShutdownAction::kNone;
   try {
-    aember::aember_init::AemberInit aember_init{root ? "aember"
-                                                     : "aember-init"};
+    aember::aember_init::AemberInit aember_init{root ? "aember" : "aember-init",
+                                                {.chroot = chroot}};
     if (root) {
       aember_init.StartRoot();
     } else {

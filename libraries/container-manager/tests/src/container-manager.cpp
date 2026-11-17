@@ -143,3 +143,40 @@ TEST_F(ContainerManagerTest, LoadContainersFromBadFileIsEmpty) {
 }
 
 }  // namespace
+
+namespace {
+
+using aember::container_manager::ContainerManager;
+
+TEST(ContainerExtraConfigTest, ParsesKeyValueLines) {
+  const auto items = ContainerManager::ParseExtraConfig(
+      "# comment\n"
+      "\n"
+      "lxc.environment = DISPLAY=:0\n"
+      "   lxc.mount.entry  =  /tmp/.X11-unix tmp/.X11-unix none bind 0 0  \r\n"
+      "no equals sign here\n"
+      " = value without key\n"
+      "lxc.environment=QT_QPA_PLATFORM=xcb");
+  ASSERT_EQ(items.size(), 3u);
+  EXPECT_EQ(items[0].first, "lxc.environment");
+  EXPECT_EQ(items[0].second, "DISPLAY=:0");  // only the first '=' splits
+  EXPECT_EQ(items[1].first, "lxc.mount.entry");
+  EXPECT_EQ(items[1].second, "/tmp/.X11-unix tmp/.X11-unix none bind 0 0");
+  EXPECT_EQ(items[2].second, "QT_QPA_PLATFORM=xcb");  // no trailing newline
+}
+
+TEST(ContainerExtraConfigTest, EmptyAndCommentOnly) {
+  EXPECT_TRUE(ContainerManager::ParseExtraConfig("").empty());
+  EXPECT_TRUE(ContainerManager::ParseExtraConfig("# a\n  # b\n\n").empty());
+}
+
+// A missing extra-config file is fine: nothing is added and containers
+// behave as before (the default path doesn't exist in the test env).
+TEST_F(ContainerManagerTest, MissingExtraConfigFileIsIgnored) {
+  cm_->SetExtraConfigPath((dir_ / "does-not-exist.conf").string());
+  ASSERT_TRUE(cm_->AddContainer(Config("plain")));
+  EXPECT_FALSE(cm_->StartContainer("plain"));  // fails on its own config
+  EXPECT_EQ(cm_->GetContainerState("plain"), State::kFailed);
+}
+
+}  // namespace

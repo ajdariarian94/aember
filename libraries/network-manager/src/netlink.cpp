@@ -17,6 +17,7 @@
 #include <string>
 
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <linux/if_link.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -103,6 +104,21 @@ int Transact(Request& req) {
 int InterfaceIndex(std::string_view name) {
   const unsigned idx = ::if_nametoindex(std::string{name}.c_str());
   return idx == 0 ? -1 : static_cast<int>(idx);
+}
+
+std::optional<in_addr> FirstIPv4Address(std::string_view name) {
+  ifaddrs* list = nullptr;
+  if (::getifaddrs(&list) != 0) return std::nullopt;
+  std::optional<in_addr> found;
+  for (const ifaddrs* a = list; a != nullptr; a = a->ifa_next) {
+    if (a->ifa_addr != nullptr && a->ifa_addr->sa_family == AF_INET &&
+        a->ifa_name != nullptr && name == a->ifa_name) {
+      found = reinterpret_cast<const sockaddr_in*>(a->ifa_addr)->sin_addr;
+      break;
+    }
+  }
+  ::freeifaddrs(list);
+  return found;
 }
 
 int SetLinkUp(int ifindex) {

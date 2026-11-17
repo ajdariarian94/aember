@@ -223,6 +223,16 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
     return false;
   }
 
+  // Already configured (a container runtime like Docker, the kernel's ip=
+  // parameter, a previous aember): keep it rather than running DHCP over it.
+  if (const auto existing = netlink::FirstIPv4Address(iface.name)) {
+    char ip[INET_ADDRSTRLEN] = {};
+    inet_ntop(AF_INET, &*existing, ip, sizeof(ip));
+    log_.info("{}: keeping existing address {}", iface.name, ip);
+    if (!iface.dns_servers.empty()) { WriteResolvConf(iface.dns_servers); }
+    return true;
+  }
+
   if (iface.mode == aember::utils::network::IpMode::kStatic) {
     return ConfigureStatic(iface, idx);
   }

@@ -36,6 +36,14 @@
 
 namespace aember::aember_init {
 
+/// How AemberInit runs.
+struct InitOptions {
+  /// Running chrooted on a host (`aember app launch --chroot`): no kernel
+  /// modules (they would go into the host kernel); everything else as on a
+  /// device.
+  bool chroot = false;
+};
+
 class AemberInit {
  public:
   using DebugShell = aember::utils::shell::DebugShell;
@@ -52,7 +60,9 @@ class AemberInit {
   template <typename T = void>
   using Result = std::expected<T, Error>;
 
-  explicit AemberInit(std::string_view logger_name);
+  using Options = InitOptions;
+
+  explicit AemberInit(std::string_view logger_name, Options options = {});
   ~AemberInit();
 
   AemberInit(const AemberInit&) = delete;
@@ -111,6 +121,7 @@ class AemberInit {
   // State
   // ---------------------------------------------------------------------------
 
+  Options options_;
   std::atomic<bool> running_{false};
   std::atomic<ShutdownAction> shutdown_{ShutdownAction::kNone};
   std::mutex mtx_;
