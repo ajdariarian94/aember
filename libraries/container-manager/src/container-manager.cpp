@@ -9,6 +9,7 @@
  */
 
 #include <aember-libs/container-manager/container-manager.h>
+#include <aember-libs/container-manager/lxc-api.h>
 
 #include <filesystem>
 #include <format>
@@ -132,8 +133,6 @@ bool ContainerManager::StartContainer(std::string_view name) {
     } else {
       log_.warn("Container '{}' started but init_pid() returned {}", name, pid);
     }
-
-    RenameMonitorProcess(*e, name);
   }
 
   SetState(*e, ContainerState::kRunning);
@@ -205,6 +204,46 @@ bool ContainerManager::HandleExit(pid_t pid, int exit_code) {
 }
 
 // ---------------------------------------------------------------------------
+// Adopt / StopAll (containerd)
+// ---------------------------------------------------------------------------
+
+bool ContainerManager::Adopt(std::string_view name) {
+  std::lock_guard lock{mutex_};
+  auto* e = Find(name);
+  const auto* lxc = Lxc();
+  if (e == nullptr || lxc == nullptr || e->lxc != nullptr) { return false; }
+
+  lxc_container* c = lxc->container_new(e->config.name.c_str(), kLxcPath);
+  if (c == nullptr) { return false; }
+  if (!c->is_running(c)) {
+    lxc->container_put(c);
+    return false;
+  }
+
+  e->lxc = c;
+  if (const pid_t pid = c->init_pid(c); pid > 0) {
+    pid_to_name_[pid] = e->config.name;
+  }
+  log_.info("Adopted running container '{}'", name);
+  SetState(*e, ContainerState::kRunning);
+  return true;
+}
+
+void ContainerManager::StopAll() {
+  std::vector<std::string> names;
+  {
+    std::lock_guard lock{mutex_};
+    for (const auto& e : containers_) {
+      if (e.state == ContainerState::kRunning ||
+          e.state == ContainerState::kStarting) {
+        names.push_back(e.config.name);
+      }
+    }
+  }
+  for (const auto& name : names) { StopContainer(name); }
+}
+
+// ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
 
@@ -270,8 +309,13 @@ bool ContainerManager::Create(ContainerEntry& e) {
              e.config.squashfs,
              e.config.rootfs);
 
-  // 1. Prepare and Mount OverlayFS over SquashFS
-  if (!e.config.squashfs.empty()) {
+  // 1. Prepare and Mount OverlayFS over SquashFS. A container that died
+  // while containerd was down still has its mounts: reuse them rather than
+  // stacking a second overlay on the same upper/work dirs.
+  if (!e.config.squashfs.empty() &&
+      mount_manager_->IsMounted(e.config.rootfs)) {
+    log_.info("Reusing the existing rootfs mount of '{}'", e.config.name);
+  } else if (!e.config.squashfs.empty()) {
     const std::string lower_dir = std::format("{}-lower", e.config.rootfs);
     const std::string overlay_base =
         std::format("/tmp/aember-overlay/{}", e.config.name);
@@ -342,8 +386,12 @@ bool ContainerManager::Create(ContainerEntry& e) {
   }
 
   // 2. Instantiate LXC handle AFTER OverlayFS and bind mounts are complete
-  e.lxc =
-      lxc_container_new(e.config.name.c_str(), "/var/lib/aember/containers");
+  const auto* lxc = Lxc();
+  if (lxc == nullptr) {
+    log_.error("liblxc not available: {}", LxcLoadError());
+    return false;
+  }
+  e.lxc = lxc->container_new(e.config.name.c_str(), kLxcPath);
   if (!e.lxc) {
     log_.error("lxc_container_new failed for '{}'", e.config.name);
     return false;
@@ -470,96 +518,8 @@ bool ContainerManager::Stop(ContainerEntry& e) {
 void ContainerManager::Release(ContainerEntry& e) {
   if (!e.lxc) return;
   log_.debug("Releasing LXC handle for '{}'", e.config.name);
-  lxc_container_put(e.lxc);
+  if (const auto* lxc = Lxc()) { lxc->container_put(e.lxc); }
   e.lxc = nullptr;
-}
-
-// ---------------------------------------------------------------------------
-// Monitor process renaming
-// ---------------------------------------------------------------------------
-
-void ContainerManager::RenameMonitorProcess(ContainerEntry& e,
-                                            std::string_view name) {
-  pid_t monitor_pid = -1;
-
-  char buf[32]{};
-  if (e.lxc &&
-      e.lxc->get_config_item(e.lxc, "lxc.monitor.pid", buf, sizeof(buf)) > 0) {
-    try {
-      monitor_pid = std::stoi(buf);
-    } catch (...) {}
-  }
-
-  if (monitor_pid <= 0) { monitor_pid = FindMonitorPid(e); }
-
-  if (monitor_pid <= 0) {
-    log_.warn("Could not find monitor PID for '{}' — skipping rename", name);
-    return;
-  }
-
-  const auto display_name =
-      std::format("{{aember}} [lxc monitor] /tmp {}", name);
-  const auto comm_path = std::format("/proc/{}/comm", monitor_pid);
-
-  if (std::ofstream f{comm_path}; f.is_open()) {
-    f << display_name;
-    log_.debug("Renamed monitor PID {} to '{}'", monitor_pid, display_name);
-  } else {
-    log_.warn("Failed to write to {} for monitor rename: errno={} ({})",
-              comm_path,
-              errno,
-              strerror(errno));
-  }
-}
-
-pid_t ContainerManager::FindMonitorPid(const ContainerEntry& e) const {
-  const pid_t our_pid = getpid();
-  const pid_t init_pid = e.lxc ? e.lxc->init_pid(e.lxc) : -1;
-
-  for (const auto& entry : std::filesystem::directory_iterator{
-           "/proc",
-           std::filesystem::directory_options::skip_permission_denied}) {
-    if (!entry.is_directory()) continue;
-
-    const auto name = entry.path().filename().string();
-    if (!std::ranges::all_of(name, ::isdigit)) continue;
-
-    pid_t pid = -1;
-    try {
-      pid = std::stoi(name);
-    } catch (...) { continue; }
-
-    if (pid == our_pid || pid == init_pid || pid <= 1) continue;
-
-    std::ifstream status{std::format("/proc/{}/status", pid)};
-    if (!status.is_open()) continue;
-
-    std::string line;
-    pid_t ppid = -1;
-    long vm_rss = -1;
-
-    while (std::getline(status, line)) {
-      if (line.starts_with("PPid:")) {
-        try {
-          ppid = std::stoi(line.substr(5));
-        } catch (...) {}
-      } else if (line.starts_with("VmRSS:")) {
-        try {
-          vm_rss = std::stol(line.substr(6));
-        } catch (...) {}
-      }
-    }
-
-    if (ppid != our_pid) continue;
-
-    if (vm_rss > 0 && vm_rss < 30000) {
-      log_.debug(
-          "Found monitor PID {} (PPid={} VmRSS={}kB)", pid, ppid, vm_rss);
-      return pid;
-    }
-  }
-
-  return -1;
 }
 
 // ---------------------------------------------------------------------------

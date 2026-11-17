@@ -25,13 +25,47 @@ prebuilt from the sibling repo **aember-resources**, see below.
 
 ```
 kernel ─► initramfs /init ─► usr/bin/aember            AemberInit::StartInitramfs()
-             mounts, loads modules, mounts the real root, pivot_root
-          ─► real root: aember --root                   AemberInit::StartRoot()
-             services (ProcessManager), LXC containers (ContainerManager),
-             network, heartbeat/monitor
+             mounts, loads modules, mounts the real root, switch_root
+          ─► real root: aember --root (PID 1)           AemberInit::StartRoot()
+             mounts, modules, reaping, signals, services, heartbeat
+             ├─ aember netd         network (NetworkManager), own process
+             ├─ aember containerd   LXC containers (ContainerManager), own process
+             └─ services.json processes
 ```
 
-`executables/aember/main.cpp` picks the mode with CLI11 (`--root`).
+`executables/aember/main.cpp` is multi-call: `aember netd` / `aember
+containerd` run a daemon role (before any PID 1 setup), otherwise CLI11
+picks the PID 1 mode (`--root`, `--chroot`).
+
+**Built-in daemons (network and containers out of PID 1).** A crash in
+network or container code no longer takes PID 1 down; PID 1 doesn't link
+liblxc (containerd `dlopen`s it) and uses ~1 MB less RSS.
+- `AemberInit::RegisterDaemons()` adds `aember-netd` and
+  `aember-containerd` (depends on netd) as services: same binary
+  (`/proc/self/exe`), `ipc`, always restarted (2 s), ready timeout 120 s.
+  They're not in services.json, so a config error can't remove them.
+- Channel: `utils/ipc` (`Channel`: SOCK_SEQPACKET socketpair, the daemon
+  gets its end as **fd 3**, one JSON message per packet; `Hub`: PID 1's
+  thread polling all channels). Messages: `{"type":"ready"}`,
+  `{"type":"event","name":"network"|"container","data":{...}}`. PID 1
+  keeps the last network status and container states for the heartbeat.
+- Readiness: a service with `ipc` stays Starting until "ready"
+  (`ServiceManager::MarkReady`) or its `ready_timeout`; services whose
+  dependencies aren't running wait and start as soon as they are (also on
+  restart). `StopAll` stops dependents first (containerd before netd).
+- netd: brings up interfaces/bridges (keeps existing addresses), reports
+  status on change and every 10 s; on SIGTERM it exits and leaves the
+  kernel's network configuration, so a restart doesn't drop the network.
+- containerd: starts the containers from containers.json, or **adopts**
+  the ones still running after a crash/restart (LXC keeps their state);
+  follows each container's init with a pidfd; SIGTERM stops all
+  containers. It is deliberately **not a subreaper**: the LXC monitors have
+  a parent-death signal, which also fires when a subreaper they were
+  reparented to dies; they stay PID 1's orphans.
+- LXC forks its monitors from containerd without exec, so they show
+  containerd's command line: `{aember-echo} /usr/bin/aember containerd`.
+  Match `{aember-ctrd}` (containerd's own name), not "aember containerd",
+  when you look for or kill containerd.
 
 ## aember-resources (kernel, BusyBox, LXC, SDK)
 
@@ -114,13 +148,13 @@ under `include/aember-libs/<lib>/`, CMake target `aember-libs::<lib>`.
 | `root-manager`      | Mounts the real root and does `pivot_root` |
 | `mount-manager`     | Mounts and tracks filesystems |
 | `module-loader`     | Loads kernel modules from `modules.json` |
-| `network-manager`   | Interfaces, bridge, connectivity monitoring (`network.json`) |
-| `process-manager`   | Spawns and tracks native processes |
-| `container-manager` | LXC container lifecycle (liblxc from `VIRT_ROOT`, set by the toolchain file) |
+| `network-manager`   | Interfaces, bridge, connectivity (`network.json`); `RunNetd()` = `aember netd` |
+| `process-manager`   | Spawns and tracks native processes (optionally with an ipc channel on fd 3) |
+| `container-manager` | LXC container lifecycle; `RunContainerd()` = `aember containerd`; liblxc via `dlopen` (`lxc-api.h`), headers from `VIRT_ROOT` |
 | `child-supervisor`  | Tracks service pids; `ReapZombies()` is PID 1's only reaper (see below) |
-| `service-manager`   | Coordinator over process/container managers, dependency order |
+| `service-manager`   | PID 1's service supervisor: dependency order, readiness, stop order |
 | `device-health`     | Heartbeat + `AemberMonitor` runtime stats |
-| `utils/*`           | config, container, logging (spdlog), module, mount, network, process, root, shell, signal (signalfd + epoll) |
+| `utils/*`           | config, container, ipc (daemon channels), logging (spdlog), module, mount, network, process, root, shell, signal (signalfd + epoll) |
 
 **Logging:** one spdlog logger for the whole process
 (`utils/logging`: `global_logger()`, the spdlog default logger). A
@@ -173,7 +207,8 @@ BusyBox stays in the image for the debug shell and interactive use.
   `StartInternal` (dependency check → `GetState`) deadlocked that way.
 - One bad `services.json` entry (dependency cycle, unknown dependency)
   only skips that entry; the rest still starts.
-  container stop that way).
+- The ipc hub catches handler exceptions per message (a throwing handler
+  once killed the hub thread, so readiness was never seen again).
 - The file log `/var/log/aember-init.log` rotates (1 MiB × 3).
 
 Runtime config lives in the overlay at
@@ -223,7 +258,8 @@ everyday build command.
 5. `PackStep` (`steps/packaging/`): initramfs tree + BusyBox (installed with
    `qemu-<arch>-static` when cross) + `aember` + examples/tests + `/init`
    symlink; runtime libs resolved with `readelf -d` (NEEDED; works for every
-   arch, unlike the host objdump) from the LXC
+   arch, unlike the host objdump), plus the `dlopen`ed liblxc
+   (`DLOPEN_LIBS` in `config/libs.py`) and its NEEDED, from the LXC
    libs and the SDK target sysroot; kernel modules from `modules.json` +
    `depmod`; `aember-initramfs.cpio.gz`; `aember-rootfs.img` built with
    guestfish in a `docker run` of the current dev image (bind mount via
@@ -344,8 +380,8 @@ C++:
 - Classes `PascalCase`, methods `PascalCase()`, members `snake_case_`.
 - A library dir has `CMakeLists.txt` (STATIC lib + `aember-libs::` alias +
   install/export), `Config.cmake.in`, `include/`, `src/`, optional `tests/`
-  (GTest, `<lib>-unittest`, `add_test`). Every library has tests (18
-  suites, ~150 tests); only what needs root, real interfaces or LXC
+  (GTest, `<lib>-unittest`, `add_test`). Every library has tests (21
+  suites, ~200 tests); only what needs root, real interfaces or LXC
   containers is left to the QEMU boots.
 - Tests build only with `--with-tests`, which forces x64 Debug; the test
   binaries are packed into the initramfs (run them in the VM from the debug

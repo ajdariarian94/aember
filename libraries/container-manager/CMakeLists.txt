@@ -50,18 +50,8 @@ if (NOT
   message(FATAL_ERROR "liblxc.so not found at ${LXC_LIBRARY}")
 endif ()
 
-add_library(
-  LXC::LXC
-  SHARED
-  IMPORTED
-)
-set_target_properties(
-  LXC::LXC
-  PROPERTIES IMPORTED_LOCATION
-             "${LXC_LIBRARY}"
-             INTERFACE_INCLUDE_DIRECTORIES
-             "${LXC_INCLUDE_DIR}"
-)
+# liblxc is not linked: `aember containerd` loads it with dlopen
+# (src/lxc-api.cpp), so PID 1 never maps it. Only its headers are needed.
 
 # ##############################################################################
 #
@@ -73,6 +63,8 @@ add_library(
   ${COMPONENT}
   STATIC
   src/container-manager.cpp
+  src/containerd.cpp
+  src/lxc-api.cpp
 )
 
 add_library(
@@ -89,10 +81,17 @@ target_include_directories(
 
 target_link_libraries(
   ${COMPONENT}
-  PUBLIC aember-libs::mount-manager
+  PUBLIC aember-libs::child-supervisor
+         aember-libs::mount-manager
          aember-libs::utils::container
+         aember-libs::utils::ipc
          aember-libs::utils::logging
-         LXC::LXC
+         ${CMAKE_DL_LIBS}
+)
+
+target_include_directories(
+  ${COMPONENT}
+  PRIVATE ${LXC_INCLUDE_DIR}
 )
 
 set_target_properties(

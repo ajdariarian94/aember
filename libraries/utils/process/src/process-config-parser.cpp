@@ -209,6 +209,27 @@ bool ProcessConfigParser::ParseProcess(const nlohmann::json& json,
         std::chrono::milliseconds(json["stop_timeout_ms"].get<unsigned int>());
   }
 
+  // -------------------------
+  // IPC channel + readiness (optional, default: off / 30000)
+  // -------------------------
+  if (json.contains("ipc")) {
+    if (!json["ipc"].is_boolean()) {
+      error = config::ConfigError("'ipc' must be a boolean");
+      return false;
+    }
+    cfg.ipc = json["ipc"].get<bool>();
+  }
+
+  if (json.contains("ready_timeout_ms")) {
+    if (!json["ready_timeout_ms"].is_number_unsigned()) {
+      error =
+          config::ConfigError("'ready_timeout_ms' must be an unsigned integer");
+      return false;
+    }
+    cfg.ready_timeout =
+        std::chrono::milliseconds(json["ready_timeout_ms"].get<unsigned int>());
+  }
+
   return true;
 }
 

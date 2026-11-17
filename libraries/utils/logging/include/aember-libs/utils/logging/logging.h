@@ -46,12 +46,6 @@ void enable_console_silence();
 void set_console_logging(bool enabled);
 
 /**
- * @brief Initialize early logging to stdout. Optional: the first log call
- *        does it too.
- */
-void init_early_logging();
-
-/**
  * @brief Also log to a file (rotating, 1 MiB x 3). Later calls are ignored.
  *        A file that can't be opened is reported and skipped, never thrown.
  *

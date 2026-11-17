@@ -14,6 +14,7 @@
 #include <thread>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/types.h>
@@ -294,16 +295,6 @@ std::optional<pid_t> ProcessManager::GetPid(std::string_view name) const {
                                   : std::nullopt;
 }
 
-std::vector<std::string> ProcessManager::GetProcessNames() const {
-  std::lock_guard lock{mutex_};
-  std::vector<std::string> names;
-  names.reserve(configs_.size());
-  std::ranges::transform(configs_,
-                         std::back_inserter(names),
-                         [](const auto& kv) { return kv.first; });
-  return names;
-}
-
 std::vector<ProcessManager::ProcessConfig> ProcessManager::GetConfigs() const {
   std::lock_guard lock{mutex_};
   std::vector<ProcessConfig> result;
@@ -325,6 +316,19 @@ void ProcessManager::SetExitCallback(ExitCallback callback) {
 
 void ProcessManager::SetRestartCallback(RestartCallback callback) {
   on_restart_ = std::move(callback);
+}
+
+void ProcessManager::SetChannelCallback(ChannelCallback callback) {
+  std::lock_guard lock{mutex_};
+  on_channel_ = std::move(callback);
+}
+
+std::optional<ProcessManager::ProcessConfig> ProcessManager::GetConfig(
+    std::string_view name) const {
+  std::lock_guard lock{mutex_};
+  const auto it = configs_.find(std::string{name});
+  return it == configs_.end() ? std::nullopt
+                              : std::optional<ProcessConfig>{it->second};
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +353,19 @@ std::vector<ProcessManager::ProcessConfig> ProcessManager::LoadProcesses(
 // ---------------------------------------------------------------------------
 
 pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
+  // `ipc`: a channel pair; the child gets its end as fd 3.
+  aember::utils::ipc::Channel mine;
+  aember::utils::ipc::Channel theirs;
+  if (config.ipc) {
+    auto pair = aember::utils::ipc::Channel::Pair();
+    if (!pair) {
+      log_.error("'{}': no channel: {}", config.name, pair.error());
+      return -1;
+    }
+    mine = std::move(pair->first);
+    theirs = std::move(pair->second);
+  }
+
   const pid_t pid = fork();
 
   if (pid < 0) {
@@ -362,6 +379,15 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
     sigset_t all_signals;
     sigfillset(&all_signals);
     sigprocmask(SIG_UNBLOCK, &all_signals, nullptr);
+
+    if (theirs.Valid()) {
+      const int kFd = aember::utils::ipc::kInheritedFd;
+      if (theirs.Fd() == kFd) {
+        fcntl(kFd, F_SETFD, 0);  // keep it across exec
+      } else {
+        dup2(theirs.Fd(), kFd);  // dup2 clears close-on-exec
+      }
+    }
 
     if (!config.working_directory.empty()) {
       chdir(config.working_directory.c_str());
@@ -384,6 +410,11 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
     _exit(1);
   }
 
+  // Parent: the child's end is closed here (theirs goes out of scope); ours
+  // goes to the owner (PID 1's hub). Called with mutex_ held (from Start).
+  if (pid > 0 && mine.Valid() && on_channel_) {
+    on_channel_(config.name, std::move(mine));
+  }
   return pid;
 }
 

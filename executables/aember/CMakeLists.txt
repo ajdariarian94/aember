@@ -23,7 +23,7 @@ find_package(
 find_package(
   aember-libs
   REQUIRED
-  COMPONENTS aember-init
+  COMPONENTS aember-init container-manager network-manager
 )
 
 set(CMAKE_EXE_LINKER_FLAGS
@@ -38,6 +38,8 @@ add_executable(
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE aember-libs::aember-init
+          aember-libs::container-manager
+          aember-libs::network-manager
           CLI11::CLI11
 )
 

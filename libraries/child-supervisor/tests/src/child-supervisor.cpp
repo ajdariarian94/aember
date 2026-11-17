@@ -51,101 +51,6 @@ TEST_F(ChildSupervisorTest, RemoveNonExistentChild) {
   supervisor_->RemoveChild(99999);
 }
 
-TEST_F(ChildSupervisorTest, HandleSIGCHLDWithMultipleExitedChildren) {
-  pid_t pid1 = SpawnQuickExitChild(0);
-  pid_t pid2 = SpawnQuickExitChild(0);
-  pid_t pid3 = SpawnQuickExitChild(0);
-
-  supervisor_->AddChild(pid1, "child-1");
-  supervisor_->AddChild(pid2, "child-2");
-  supervisor_->AddChild(pid3, "child-3");
-
-  // Wait for all children to become zombies
-  ASSERT_TRUE(WaitForZombie(pid1, std::chrono::seconds(2)));
-  ASSERT_TRUE(WaitForZombie(pid2, std::chrono::seconds(2)));
-  ASSERT_TRUE(WaitForZombie(pid3, std::chrono::seconds(2)));
-
-  // Handle SIGCHLD (should reap all children)
-  supervisor_->HandleSIGCHLD();
-
-  // Give it a moment to process
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  // Verify all have been reaped
-  EXPECT_FALSE(IsZombie(pid1));
-  EXPECT_FALSE(IsZombie(pid2));
-  EXPECT_FALSE(IsZombie(pid3));
-}
-
-TEST_F(ChildSupervisorTest, ReapChildrenWithDifferentExitCodes) {
-  pid_t pid1 = SpawnQuickExitChild(0);
-  pid_t pid2 = SpawnQuickExitChild(1);
-  pid_t pid3 = SpawnQuickExitChild(42);
-
-  supervisor_->AddChild(pid1, "success-child");
-  supervisor_->AddChild(pid2, "failure-child");
-  supervisor_->AddChild(pid3, "custom-exit-child");
-
-  // Wait for children to become zombies
-  ASSERT_TRUE(WaitForZombie(pid1, std::chrono::seconds(2)));
-  ASSERT_TRUE(WaitForZombie(pid2, std::chrono::seconds(2)));
-  ASSERT_TRUE(WaitForZombie(pid3, std::chrono::seconds(2)));
-
-  // Reap all children
-  supervisor_->ReapChildren();
-
-  // Give it a moment
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  // Verify all have been reaped
-  EXPECT_FALSE(IsZombie(pid1));
-  EXPECT_FALSE(IsZombie(pid2));
-  EXPECT_FALSE(IsZombie(pid3));
-}
-
-TEST_F(ChildSupervisorTest, ReapChildrenWithSignaledChild) {
-  pid_t pid = SpawnSleepingChild(10);
-
-  supervisor_->AddChild(pid, "signaled-child");
-
-  // Kill the child with a signal
-  KillChild(pid, SIGKILL);
-
-  // Wait for child to become a zombie
-  ASSERT_TRUE(WaitForZombie(pid, std::chrono::seconds(2)));
-
-  // Reap the child
-  supervisor_->ReapChildren();
-
-  // Give it a moment
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  // Verify it has been reaped
-  EXPECT_FALSE(IsZombie(pid));
-}
-
-TEST_F(ChildSupervisorTest, ReapChildrenWithNoChildren) {
-  // Should not crash when there are no children to reap
-  supervisor_->ReapChildren();
-}
-
-TEST_F(ChildSupervisorTest, ReapChildrenWithUnknownChild) {
-  // Spawn a child but don't add it to the supervisor
-  pid_t pid = SpawnQuickExitChild(0);
-
-  // Wait for it to become a zombie
-  ASSERT_TRUE(WaitForZombie(pid, std::chrono::seconds(2)));
-
-  // Reap should still work (it will log it as unknown)
-  supervisor_->ReapChildren();
-
-  // Give it a moment
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  // Verify it has been reaped
-  EXPECT_FALSE(IsZombie(pid));
-}
-
 TEST_F(ChildSupervisorTest, StopAllWithNoChildren) {
   // Should not crash when stopping with no children
   supervisor_->StopAll();
@@ -200,70 +105,9 @@ TEST_F(ChildSupervisorTest, ConcurrentAddRemove) {
   }
 }
 
-TEST_F(ChildSupervisorTest, ReapAfterRemove) {
-  pid_t pid = SpawnQuickExitChild(0);
-
-  supervisor_->AddChild(pid, "test-child");
-
-  // Wait for child to become a zombie
-  ASSERT_TRUE(WaitForZombie(pid, std::chrono::seconds(2)));
-
-  // Remove before reaping
-  supervisor_->RemoveChild(pid);
-
-  // Reap should still work (won't find it in the map)
-  supervisor_->ReapChildren();
-
-  // Give it a moment
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  // Verify it has been reaped
-  EXPECT_FALSE(IsZombie(pid));
-}
-
-TEST_F(ChildSupervisorTest, MultipleReapCalls) {
-  pid_t pid = SpawnQuickExitChild(0);
-
-  supervisor_->AddChild(pid, "test-child");
-
-  // Wait for child to become a zombie
-  ASSERT_TRUE(WaitForZombie(pid, std::chrono::seconds(2)));
-
-  // Multiple reap calls should be safe
-  supervisor_->ReapChildren();
-  supervisor_->ReapChildren();
-  supervisor_->ReapChildren();
-
-  // Give it a moment
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  // Verify it has been reaped
-  EXPECT_FALSE(IsZombie(pid));
-}
-
-TEST_F(ChildSupervisorTest, HandleSIGCHLDWithNoExitedChildren) {
-  pid_t pid = SpawnSleepingChild(1);
-
-  supervisor_->AddChild(pid, "sleeping-child");
-
-  // Call HandleSIGCHLD when child is still running
-  supervisor_->HandleSIGCHLD();
-
-  // Child should still be running
-  EXPECT_EQ(kill(pid, 0), 0);
-
-  // Clean up
-  KillChild(pid, SIGKILL);
-  waitpid(pid, nullptr, 0);
-}
-
-}  // namespace aember_test::child_supervisor
-
 // ---------------------------------------------------------------------------
 // ReapZombies — the PID 1 reaper
 // ---------------------------------------------------------------------------
-
-namespace aember_test::child_supervisor {
 
 namespace {
 
@@ -308,6 +152,17 @@ TEST_F(ChildSupervisorTest, ReapZombiesReapsTrackedAtOnce) {
   EXPECT_EQ(WEXITSTATUS(exits[0].status), 3);
   EXPECT_FALSE(IsZombie(pid));
   EXPECT_FALSE(supervisor_->IsTracked(pid));
+}
+
+TEST_F(ChildSupervisorTest, ReapZombiesReportsSignaledChild) {
+  const pid_t pid = SpawnSleepingChild(30);
+  supervisor_->AddChild(pid, "killed");
+  ASSERT_EQ(::kill(pid, SIGKILL), 0);
+  ASSERT_TRUE(WaitUntilZombie(pid, std::chrono::seconds(2)));
+  const auto exits = supervisor_->ReapZombies(std::chrono::hours{1});
+  ASSERT_EQ(exits.size(), 1u);
+  EXPECT_TRUE(WIFSIGNALED(exits[0].status));
+  EXPECT_EQ(WTERMSIG(exits[0].status), SIGKILL);
 }
 
 TEST_F(ChildSupervisorTest, ReapZombiesWaitsGraceForUntracked) {

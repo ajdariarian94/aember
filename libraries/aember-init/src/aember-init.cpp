@@ -9,6 +9,7 @@
 #include <aember-libs/device-health/aember-monitor.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <ranges>
@@ -134,13 +135,6 @@ void AemberInit::StartRoot() {
     });
   });
 
-  Guarded(log_, "Network phase", [this] {
-    InitNetwork().or_else([this](const Error& e) -> Result<> {
-      log_.warn("Network phase failed: {}", e.message);
-      return {};
-    });
-  });
-
   // Signals and the reaper come before any service starts, so exits during
   // StartAll are collected and a shutdown request works from here on.
   Guarded(log_, "Signal init", [this] { std::ignore = InitSignals(); });
@@ -167,18 +161,14 @@ void AemberInit::StartRoot() {
           });
     });
 
-    Guarded(log_, "Loading containers", [this] {
-      LoadAndRegisterContainers("/etc/aember/containers.json")
-          .or_else([this](const Error& e) -> Result<> {
-            log_.warn("{}", e.message);
-            return {};
-          });
-    });
+    // Network and containers run as built-in daemons (`aember netd`,
+    // `aember containerd`), supervised like any service.
+    Guarded(log_, "Built-in daemons", [this] { RegisterDaemons(); });
 
     Guarded(
         log_, "Starting services", [this] { service_manager_->StartAll(); });
   } else {
-    log_.error("No service manager: services and containers are not started");
+    log_.error("No service manager: no services, network or containers");
   }
 
   Guarded(log_, "Monitor and heartbeat", [this] {
@@ -213,6 +203,7 @@ void AemberInit::Stop() {
 
   // Join before the managers it calls into are destroyed below.
   StopReaperThread();
+  hub_.Stop();
 
   signal_handler_.Stop();
   child_supervisor_.StopAll();
@@ -222,18 +213,12 @@ void AemberInit::Stop() {
     heartbeat_->Stop();
     heartbeat_.reset();
   }
-  if (network_manager_) {
-    network_manager_->Stop();
-    network_manager_.reset();
-  }
-
   monitor_.reset();
 
   // Destroy in reverse construction order.
   service_manager_.reset();
   dependency_resolver_.reset();
   process_manager_.reset();
-  container_manager_.reset();
   mount_manager_.reset();
 
   log_.info("Aember Init System stopped");
@@ -264,57 +249,9 @@ AemberInit::Result<> AemberInit::InitMounts() {
   return {};
 }
 
-AemberInit::Result<> AemberInit::InitNetwork() {
-  std::ifstream net_file("/etc/aember/network.json");
-  if (!net_file.is_open()) {
-    return std::unexpected(
-        Error{"No network config found at /etc/aember/network.json"});
-  }
-
-  nlohmann::json net_cfg;
-  try {
-    net_file >> net_cfg;
-  } catch (const std::exception& e) {
-    return std::unexpected(
-        Error{std::format("Failed to parse network config: {}", e.what())});
-  }
-
-  // Throws on an invalid config or a required interface that stays down.
-  try {
-    network_manager_ = std::make_unique<aember::network::NetworkManager>(
-        net_cfg, [this](const aember::utils::network::ConnectivityStatus& s) {
-          OnNetworkStatus(s);
-        });
-    network_manager_->Start();
-  } catch (const std::exception& e) {
-    network_manager_.reset();
-    return std::unexpected(
-        Error{std::format("Network bring-up failed: {}", e.what())});
-  }
-
-  if (!network_manager_->WaitForConnectivity(std::chrono::seconds(30))) {
-    log_.warn("No internet connectivity after 30s, continuing anyway");
-  }
-
-  return {};
-}
-
 AemberInit::Result<> AemberInit::InitServiceStack() {
-  container_manager_ =
-      std::make_shared<aember::container_manager::ContainerManager>(
-          mount_manager_,
-          [this](const std::string& name,
-                 ContainerState old_state,
-                 ContainerState new_state) {
-            OnContainerStateChange(name, old_state, new_state);
-          });
-
-  process_manager_ = std::make_unique<aember::process_manager::ProcessManager>(
-      [this](const std::string& name, int pid, int exit_code) {
-        log_.info(
-            "Process '{}' (pid={}) exited (code={})", name, pid, exit_code);
-        service_manager_->MirrorState(name, ProcessState::Failed);
-      });
+  process_manager_ =
+      std::make_unique<aember::process_manager::ProcessManager>();
 
   dependency_resolver_ =
       std::make_unique<aember::service_manager::DependencyResolver>(
@@ -324,10 +261,7 @@ AemberInit::Result<> AemberInit::InitServiceStack() {
           });
 
   service_manager_ = std::make_unique<aember::service_manager::ServiceManager>(
-      *process_manager_,
-      *container_manager_,
-      *dependency_resolver_,
-      child_supervisor_);
+      *process_manager_, *dependency_resolver_, child_supervisor_);
 
   // Wire restart callback — ProcessManager calls this after restart delay
   // which triggers ServiceManager to re-launch the process.
@@ -342,7 +276,98 @@ AemberInit::Result<> AemberInit::InitServiceStack() {
     OnServiceStateChange(name, old_state, new_state);
   });
 
+  // Daemons started with `ipc` hand their channel to the hub, which turns
+  // their messages into readiness and status.
+  process_manager_->SetChannelCallback(
+      [this](const std::string& name, aember::utils::ipc::Channel channel) {
+        hub_.Add(name, std::move(channel));
+      });
+  hub_.Start([this](const std::string& name, const nlohmann::json& message) {
+    OnDaemonMessage(name, message);
+  });
+
   return {};
+}
+
+void AemberInit::RegisterDaemons() {
+  // Same binary, another role (multi-call): /proc/self/exe is this aember.
+  std::error_code ec;
+  auto self = std::filesystem::read_symlink("/proc/self/exe", ec);
+  if (ec) { self = "/usr/bin/aember"; }
+
+  const auto daemon = [&](std::string name,
+                          std::string role,
+                          std::vector<std::string>
+                              deps,
+                          std::chrono::milliseconds stop_timeout) {
+    aember::utils::process::ProcessConfig cfg;
+    cfg.name = std::move(name);
+    cfg.description = "built-in " + role + " daemon";
+    cfg.executable = self.string();
+    cfg.args = {std::move(role)};
+    cfg.dependencies = std::move(deps);
+    cfg.ipc = true;
+    cfg.ready_timeout = std::chrono::seconds{120};  // DHCP retries take time
+    cfg.restart_on_failure = true;
+    cfg.max_restarts = 0;  // always
+    cfg.restart_delay = std::chrono::seconds{2};
+    cfg.stop_timeout = stop_timeout;
+    if (!process_manager_->AddProcess(cfg) ||
+        !service_manager_->AddProcess(cfg.name)) {
+      log_.error("Could not register built-in daemon '{}'", cfg.name);
+    }
+  };
+
+  daemon(std::string{kNetd}, "netd", {}, std::chrono::seconds{10});
+  // Containers need the bridge; stopping them gracefully takes a while.
+  daemon(std::string{kContainerd},
+         "containerd",
+         {std::string{kNetd}},
+         std::chrono::seconds{60});
+}
+
+void AemberInit::OnDaemonMessage(const std::string& name,
+                                 const nlohmann::json& message) {
+  namespace ipc = aember::utils::ipc;
+  const auto type = ipc::TypeOf(message);
+  if (type == "ready") {
+    if (service_manager_) { service_manager_->MarkReady(name); }
+    return;
+  }
+  if (type != "event" || !message.contains("data")) { return; }
+
+  const auto& data = message["data"];
+  if (!data.is_object()) { return; }
+  const auto online = [](const nlohmann::json& j) {
+    const auto it = j.find("online");
+    return j.is_object() && it != j.end() && it->is_boolean() &&
+           it->get<bool>();
+  };
+  const auto text = [&](const char* key) {
+    const auto it = data.find(key);
+    return it != data.end() && it->is_string() ? it->get<std::string>()
+                                               : std::string{};
+  };
+
+  const auto name_it = message.find("name");
+  const std::string event = name_it != message.end() && name_it->is_string()
+                                ? name_it->get<std::string>()
+                                : "";
+  std::lock_guard lock{status_mutex_};
+  if (event == "network") {
+    const bool was_online = online(network_status_);
+    network_status_ = data;
+    if (was_online && !online(network_status_)) {
+      log_.warn("Network: internet connectivity lost");
+    }
+  } else if (event == "container") {
+    const auto container = text("name");
+    const auto state = text("state");
+    if (!container.empty()) {
+      log_.info("Container '{}': {}", container, state);
+      container_states_[container] = state;
+    }
+  }
 }
 
 AemberInit::Result<> AemberInit::InitSignals() {
@@ -399,34 +424,6 @@ AemberInit::Result<> AemberInit::LoadAndRegisterProcesses(
   return {};
 }
 
-AemberInit::Result<> AemberInit::LoadAndRegisterContainers(
-    std::string_view path) {
-  auto configs = container_manager_->LoadContainers(std::string{path});
-  log_.info("Loaded {} container config(s) from {}", configs.size(), path);
-
-  std::vector<std::string> registered;
-  for (const auto& cfg : configs) {
-    // Only call AddContainer if LoadContainers didn't already register it
-    if (!container_manager_->HasContainer(cfg.name)) {
-      if (!container_manager_->AddContainer(cfg)) {
-        log_.error("Failed to register container '{}'", cfg.name);
-        continue;
-      }
-    }
-    registered.push_back(cfg.name);
-  }
-
-  for (const auto& name : registered) {
-    if (!service_manager_->AddContainer(name)) {
-      log_.error("Failed to add container '{}' to service manager", name);
-    } else {
-      log_.info("Registered container '{}'", name);
-    }
-  }
-
-  return {};
-}
-
 void AemberInit::StartReaperThread() {
   if (reaper_thread_.joinable()) return;
 
@@ -439,7 +436,10 @@ void AemberInit::StartReaperThread() {
         });
         reap_pending_ = false;
       }
-      Guarded(log_, "Reaping", [this] { ReapOnce(); });
+      Guarded(log_, "Reaping", [this] {
+        ReapOnce();
+        if (service_manager_) { service_manager_->CheckReadyTimeouts(); }
+      });
     }
   }};
 }
@@ -507,16 +507,15 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
   // Collect PID1 stats via /proc.
   auto payload = monitor_->Snapshot();
 
-  // Enrich with network status.
-  if (network_manager_) {
-    const auto status = network_manager_->GetStatus();
-    const auto net_info = network_manager_->GetNetworkInfo();
-    payload["network"] = {
-        {"online", status.online},
-        {"interface", status.interface},
-        {"rtt_ms", status.rtt_ms},
-        {"ip", net_info.ip_address},
-    };
+  // Network status and container states as the daemons last reported them.
+  nlohmann::json containers = nlohmann::json::array();
+  {
+    std::lock_guard lock{status_mutex_};
+    if (!network_status_.is_null()) { payload["network"] = network_status_; }
+    for (const auto& [name, state] : container_states_) {
+      containers.push_back(
+          {{"name", name}, {"state", state}, {"type", "container"}});
+    }
   }
 
   // Enrich with service states.
@@ -524,14 +523,13 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
     auto services = nlohmann::json::array();
     for (const auto& name : service_manager_->GetNames()) {
       const auto state = service_manager_->GetState(name);
-      const auto type =
-          service_manager_->IsContainer(name) ? "container" : "process";
       services.push_back({
           {"name", name},
           {"state", aember::utils::process::ToString(state)},
-          {"type", type},
+          {"type", "process"},
       });
     }
+    for (auto& c : containers) { services.push_back(std::move(c)); }
     payload["services"] = services;
   }
 
@@ -550,20 +548,6 @@ void AemberInit::OnServiceStateChange(const std::string& name,
             name,
             aember::utils::process::ToString(old_state),
             aember::utils::process::ToString(new_state));
-}
-
-void AemberInit::OnNetworkStatus(
-    const aember::utils::network::ConnectivityStatus& status) {
-  if (!status.online) { log_.warn("Network: internet connectivity lost"); }
-}
-
-void AemberInit::OnContainerStateChange(const std::string& name,
-                                        ContainerState old_state,
-                                        ContainerState new_state) {
-  log_.info("Container '{}': {} -> {}",
-            name,
-            aember::utils::container::ContainerStateToString(old_state),
-            aember::utils::container::ContainerStateToString(new_state));
 }
 
 }  // namespace aember::aember_init

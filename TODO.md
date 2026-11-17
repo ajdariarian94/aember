@@ -65,23 +65,20 @@ off by guestfish. Left:
 
 ## Architecture
 
-- [ ] **Network and containers out of PID 1** — agreed 2026-11-17, to do
-  after the chroot launch (branch 3), each step on its own branch, tested on
-  all 3 architectures:
-  1. `utils/ipc`: socketpair (SOCK_SEQPACKET) inherited as fd 3, JSON
-     messages; "ready" notification in ProcessManager (a service stays
-     Starting until it reports ready or times out).
-  2. `aember netd`: NetworkManager in its own process (multi-call: same
-     `/usr/bin/aember` file, role from argv; fork+exec by PID 1, built in,
-     not in services.json). Status events feed the heartbeat; restart keeps
-     kernel net state; DHCP renewal becomes possible.
-  3. `aember containerd`: ContainerManager + liblxc, loaded with `dlopen`
-     only in this role so PID 1 never maps liblxc. Subreaper for the LXC
-     monitors; adopts running containers after a restart (pidfd for
-     non-children); graceful stop of all containers at shutdown.
-  ProcessManager/ServiceManager stay in PID 1 (supervision is init's job);
-  afterwards consider merging the two (they mirror each other's state), and
-  use posix_spawn + pidfd for services.
+- [x] **Network and containers out of PID 1** (2026-11-18): `aember
+  netd` / `aember containerd` (multi-call), `utils/ipc` channels on fd 3
+  with readiness, liblxc only `dlopen`ed by containerd, containerd adopts
+  running containers after a restart. PID 1 RSS 6.1 → 5.1 MB.
+- [ ] Merge ProcessManager into ServiceManager: with containers gone they
+  keep the same per-name state twice and mirror it through callbacks.
+- [ ] Container restart policy: containers.json has `restart_policy`,
+  `max_restart_attempts`, `restart_delay`, but nothing reads them (a
+  container whose init exits stays failed, as before the split).
+- [ ] netd: renew the DHCP lease (now possible: netd is a long-running
+  process).
+- [ ] Daemon output still goes to the console while a debug shell is open
+  (only PID 1's console logging is muted).
+- [ ] posix_spawn + pidfd for services (fork in a multi-threaded PID 1).
 - [x] **No BusyBox calls from PID 1** (2026-11-17): loop + `mount(2)`,
   `finit_module(2)` with `modules.dep`, rtnetlink, a built-in DHCP client
   (AF_PACKET), in-process switch_root.

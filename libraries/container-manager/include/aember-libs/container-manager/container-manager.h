@@ -28,6 +28,9 @@
 
 namespace aember::container_manager {
 
+/// LXC's config path for aember's containers.
+inline constexpr const char* kLxcPath = "/var/lib/aember/containers";
+
 /**
  * ContainerManager owns the full lifecycle of LXC containers.
  *
@@ -85,6 +88,14 @@ class ContainerManager {
    */
   bool HandleExit(pid_t pid, int exit_code);
 
+  /** Take over a container that is already running (left by a previous
+   *  containerd): LXC handle, state running, init pid tracked. False if
+   *  it isn't running (start it normally then). */
+  bool Adopt(std::string_view name);
+
+  /** Stop every running container (graceful, then forced). */
+  void StopAll();
+
   // ---------------------------------------------------------------------------
   // Queries
   // ---------------------------------------------------------------------------
@@ -136,17 +147,6 @@ class ContainerManager {
 
   ContainerEntry* Find(std::string_view name);
   const ContainerEntry* Find(std::string_view name) const;
-
-  // Add these to the private section of ContainerManager in
-  // container-manager.h:
-
-  /// Rename the LXC monitor process so it shows correctly in top/ps.
-  /// On aarch64, LXC does not call prctl(PR_SET_NAME) internally.
-  void RenameMonitorProcess(ContainerEntry& e, std::string_view name);
-
-  /// Scan /proc to find the LXC monitor PID — a direct child of aember
-  /// with a small RSS compared to the main process.
-  pid_t FindMonitorPid(const ContainerEntry& e) const;
 
   // ---------------------------------------------------------------------------
   // Members

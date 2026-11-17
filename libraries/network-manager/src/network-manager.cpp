@@ -413,10 +413,6 @@ bool NetworkManager::CreateBridge(const BridgeConfig& bridge) {
   return true;
 }
 
-bool NetworkManager::InterfaceExists(std::string_view name) {
-  return GetInterfaceIndex(name) >= 0;
-}
-
 // ---------------------------------------------------------------------------
 // Connectivity monitor
 // ---------------------------------------------------------------------------
@@ -652,18 +648,6 @@ std::string NetworkManager::FirstUpInterface() const {
     if (state == InterfaceState::kUp) { return config_.interfaces[i].name; }
   }
   return "";
-}
-
-int NetworkManager::GetInterfaceIndex(std::string_view iface_name) {
-  const int sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-  if (sock < 0) { return -1; }
-
-  struct ifreq ifr {};
-  strncpy(ifr.ifr_name, std::string{iface_name}.c_str(), IFNAMSIZ - 1);
-
-  const int ret = ioctl(sock, SIOCGIFINDEX, &ifr);
-  close(sock);
-  return ret < 0 ? -1 : ifr.ifr_ifindex;
 }
 
 }  // namespace aember::network

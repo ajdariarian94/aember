@@ -63,14 +63,6 @@ class ChildSupervisor {
   // SIGCHLD integration
   // ---------------------------------------------------------------------------
 
-  /** Call from the SIGCHLD handler — delegates to ReapChildren(). */
-  void HandleSIGCHLD();
-
-  /** Non-blocking waitpid(-1) loop — reaps all exited children.
-   *  Only safe when nothing else in the process waits for its own children;
-   *  PID 1 uses ReapZombies(). */
-  void ReapChildren();
-
   /** One collected child. */
   struct Exit {
     pid_t pid;
