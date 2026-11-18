@@ -56,6 +56,9 @@ struct Lease {
   std::vector<in_addr> dns;
   in_addr server{};
   std::uint32_t lease_seconds{0};
+  /// T1/T2 (options 58/59); 0 = not sent (then 50% / 87.5% of the lease).
+  std::uint32_t renew_seconds{0};
+  std::uint32_t rebind_seconds{0};
 
   /// Prefix length from the netmask; 24 if the server sent none.
   int PrefixLength() const;
@@ -76,6 +79,16 @@ std::vector<std::uint8_t> BuildDiscover(std::uint32_t xid, const Mac& mac);
 std::vector<std::uint8_t> BuildRequest(std::uint32_t xid, const Mac& mac,
                                        in_addr requested, in_addr server);
 
+/// DHCPREQUEST renewing/rebinding @p ciaddr (RFC 2131 4.3.2): ciaddr set,
+/// no requested-address or server-id option, no broadcast flag.
+std::vector<std::uint8_t> BuildRenew(std::uint32_t xid, const Mac& mac,
+                                     in_addr ciaddr);
+
+/// DHCPREQUEST in INIT-REBOOT state: "may I keep @p requested?" (after a
+/// netd restart found the address already on the interface).
+std::vector<std::uint8_t> BuildInitReboot(std::uint32_t xid, const Mac& mac,
+                                          in_addr requested);
+
 /// Parse a BOOTREPLY; nullopt if it isn't a valid DHCP reply.
 std::optional<Message> Parse(std::span<const std::uint8_t> packet);
 
@@ -91,6 +104,39 @@ std::vector<std::uint8_t> BuildUdpFrame(std::span<const std::uint8_t> payload,
 std::span<const std::uint8_t> ParseUdpFrame(std::span<const std::uint8_t> frame,
                                             std::uint16_t dst_port);
 
+/// When a lease must be renewed, rebound, or is gone (RFC 2131 4.4.5).
+class LeaseTimer {
+ public:
+  using Clock = std::chrono::steady_clock;
+  enum class Phase {
+    kBound,      ///< before T1
+    kRenewing,   ///< T1..T2: ask the server (unicast)
+    kRebinding,  ///< T2..expiry: ask any server (broadcast)
+    kExpired,    ///< the address must go: start over
+    kInfinite,   ///< lease without end (0xffffffff)
+  };
+
+  LeaseTimer() = default;
+  LeaseTimer(const Lease& lease, Clock::time_point acquired);
+
+  [[nodiscard]] Phase At(Clock::time_point now) const;
+  [[nodiscard]] Clock::time_point RenewAt() const { return renew_at_; }
+  [[nodiscard]] Clock::time_point RebindAt() const { return rebind_at_; }
+  [[nodiscard]] Clock::time_point ExpiresAt() const { return expires_at_; }
+
+ private:
+  bool infinite_{false};
+  Clock::time_point renew_at_{};
+  Clock::time_point rebind_at_{};
+  Clock::time_point expires_at_{};
+};
+
+/// Why a renewal failed: a NAK means the address must go now.
+struct RenewError {
+  bool nak{false};
+  std::string message;
+};
+
 class DhcpClient {
  public:
   explicit DhcpClient(std::string interface);
@@ -98,6 +144,17 @@ class DhcpClient {
   /// Run DISCOVER/OFFER/REQUEST/ACK; resends DISCOVER every 2 s within
   /// @p timeout. Error text on failure.
   std::expected<Lease, std::string> Acquire(std::chrono::milliseconds timeout);
+
+  /// Renew @p current (unicast to its server) or, with @p broadcast,
+  /// rebind it (any server). Uses a UDP socket: the interface has the
+  /// address by now. The new lease keeps fields the ACK left out.
+  std::expected<Lease, RenewError> Renew(const Lease& current, bool broadcast,
+                                         std::chrono::milliseconds timeout);
+
+  /// INIT-REBOOT: may we keep @p address? (no lease known, e.g. after a
+  /// netd restart). Broadcast from 0.0.0.0 like Acquire.
+  std::expected<Lease, RenewError> Confirm(in_addr address,
+                                           std::chrono::milliseconds timeout);
 
  private:
   std::string interface_;

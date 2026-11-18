@@ -118,6 +118,35 @@ TEST(NetlinkTest, VethPairAsRoot) {
   EXPECT_EQ(netlink::InterfaceIndex("aembervb0"), -1);  // peer goes too
 }
 
+TEST(NetlinkTest, DeleteAddressAsRoot) {
+  AEMBER_REQUIRE_PRIVATE_NET();
+  const char* name = "aembertest3";
+  ASSERT_EQ(netlink::CreateBridge(name), 0);
+  const int idx = netlink::InterfaceIndex(name);
+  ASSERT_EQ(netlink::AddAddress(idx, Ip("10.125.0.5"), 24), 0);
+  EXPECT_EQ(Str(*netlink::FirstIPv4Address(name)), "10.125.0.5");
+  EXPECT_EQ(netlink::DeleteAddress(idx, Ip("10.125.0.5"), 24), 0);
+  EXPECT_FALSE(netlink::FirstIPv4Address(name).has_value());
+  EXPECT_EQ(netlink::DeleteAddress(idx, Ip("10.125.0.5"), 24), -EADDRNOTAVAIL);
+  EXPECT_EQ(netlink::DeleteAddress(idx, Ip("10.125.0.5"), 40), -EINVAL);
+  EXPECT_EQ(netlink::DeleteLink(name), 0);
+}
+
+TEST(NetlinkTest, FirstIPv4Prefix) {
+  EXPECT_EQ(netlink::FirstIPv4Prefix("aember-nope0"), -1);
+}
+
+TEST(NetlinkTest, FirstIPv4PrefixAsRoot) {
+  AEMBER_REQUIRE_PRIVATE_NET();
+  const char* name = "aembertest4";
+  ASSERT_EQ(netlink::CreateBridge(name), 0);
+  const int idx = netlink::InterfaceIndex(name);
+  EXPECT_EQ(netlink::FirstIPv4Prefix(name), -1);
+  ASSERT_EQ(netlink::AddAddress(idx, Ip("10.126.0.5"), 20), 0);
+  EXPECT_EQ(netlink::FirstIPv4Prefix(name), 20);
+  EXPECT_EQ(netlink::DeleteLink(name), 0);
+}
+
 TEST(NetlinkTest, ParseCidr) {
   in_addr addr{};
   int prefix = -1;

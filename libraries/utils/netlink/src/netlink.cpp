@@ -122,6 +122,24 @@ std::optional<in_addr> FirstIPv4Address(std::string_view name) {
   return found;
 }
 
+int FirstIPv4Prefix(std::string_view name) {
+  ifaddrs* list = nullptr;
+  if (::getifaddrs(&list) != 0) return -1;
+  int prefix = -1;
+  for (auto* a = list; a != nullptr; a = a->ifa_next) {
+    if (a->ifa_addr == nullptr || a->ifa_netmask == nullptr ||
+        a->ifa_name == nullptr || a->ifa_addr->sa_family != AF_INET ||
+        name != a->ifa_name) {
+      continue;
+    }
+    prefix = NetmaskToPrefix(
+        reinterpret_cast<const sockaddr_in*>(a->ifa_netmask)->sin_addr);
+    break;
+  }
+  ::freeifaddrs(list);
+  return prefix;
+}
+
 int SetLinkUp(int ifindex) {
   Request req;
   auto* ifi = req.Init<ifinfomsg>(RTM_NEWLINK, 0);
@@ -146,6 +164,18 @@ int AddAddress(int ifindex, in_addr addr, int prefix_len) {
     brd.s_addr = addr.s_addr | ~PrefixToNetmask(prefix_len).s_addr;
     req.Add(IFA_BROADCAST, &brd, sizeof(brd));
   }
+  return Transact(req);
+}
+
+int DeleteAddress(int ifindex, in_addr addr, int prefix_len) {
+  if (prefix_len < 0 || prefix_len > 32) return -EINVAL;
+  Request req;
+  auto* ifa = req.Init<ifaddrmsg>(RTM_DELADDR, 0);
+  ifa->ifa_family = AF_INET;
+  ifa->ifa_prefixlen = static_cast<unsigned char>(prefix_len);
+  ifa->ifa_index = static_cast<unsigned>(ifindex);
+  req.Add(IFA_LOCAL, &addr, sizeof(addr));
+  req.Add(IFA_ADDRESS, &addr, sizeof(addr));
   return Transact(req);
 }
 

@@ -11,6 +11,7 @@
 #include <aember-libs/utils/netlink/netlink.h>
 #include <aember-services/netd/dhcp-client.h>
 
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <format>
@@ -20,6 +21,7 @@
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <net/if.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -48,6 +50,8 @@ constexpr std::uint8_t kOptLeaseTime = 51;
 constexpr std::uint8_t kOptMessageType = 53;
 constexpr std::uint8_t kOptServerId = 54;
 constexpr std::uint8_t kOptParamList = 55;
+constexpr std::uint8_t kOptRenewalTime = 58;
+constexpr std::uint8_t kOptRebindingTime = 59;
 constexpr std::uint8_t kOptEnd = 255;
 
 std::vector<std::uint8_t> Header(std::uint32_t xid, const Mac& mac) {
@@ -102,6 +106,51 @@ std::vector<std::uint8_t> BuildDiscover(std::uint32_t xid, const Mac& mac) {
   AddCommonOptions(p, MessageType::kDiscover);
   p.push_back(kOptEnd);
   return p;
+}
+
+std::vector<std::uint8_t> BuildRenew(std::uint32_t xid, const Mac& mac,
+                                     in_addr ciaddr) {
+  auto p = Header(xid, mac);
+  std::memset(&p[10], 0, 2);        // no broadcast flag: unicast reply
+  std::memcpy(&p[12], &ciaddr, 4);  // ciaddr
+  AddCommonOptions(p, MessageType::kRequest);
+  p.push_back(kOptEnd);
+  return p;
+}
+
+std::vector<std::uint8_t> BuildInitReboot(std::uint32_t xid, const Mac& mac,
+                                          in_addr requested) {
+  auto p = Header(xid, mac);
+  AddCommonOptions(p, MessageType::kRequest);
+  AddOption(p, kOptRequestedIp, &requested, 4);
+  p.push_back(kOptEnd);
+  return p;
+}
+
+LeaseTimer::LeaseTimer(const Lease& lease, Clock::time_point acquired) {
+  if (lease.lease_seconds == 0xFFFFFFFFu) {
+    infinite_ = true;
+    return;
+  }
+  const auto total = std::chrono::seconds{lease.lease_seconds};
+  auto t1 = lease.renew_seconds ? std::chrono::seconds{lease.renew_seconds}
+                                : total / 2;
+  auto t2 = lease.rebind_seconds ? std::chrono::seconds{lease.rebind_seconds}
+                                 : total * 7 / 8;
+  // A server that sends nonsense (T1 > T2 > lease) gets the defaults.
+  if (t2 > total) t2 = total * 7 / 8;
+  if (t1 > t2) t1 = std::min(total / 2, t2);
+  renew_at_ = acquired + t1;
+  rebind_at_ = acquired + t2;
+  expires_at_ = acquired + total;
+}
+
+LeaseTimer::Phase LeaseTimer::At(Clock::time_point now) const {
+  if (infinite_) return Phase::kInfinite;
+  if (now >= expires_at_) return Phase::kExpired;
+  if (now >= rebind_at_) return Phase::kRebinding;
+  if (now >= renew_at_) return Phase::kRenewing;
+  return Phase::kBound;
 }
 
 std::vector<std::uint8_t> BuildRequest(std::uint32_t xid, const Mac& mac,
@@ -171,6 +220,15 @@ std::optional<Message> Parse(std::span<const std::uint8_t> p) {
         break;
       case kOptServerId:
         if (len == 4) std::memcpy(&m.lease.server, v, 4);
+        break;
+      case kOptRenewalTime:
+      case kOptRebindingTime:
+        if (len == 4) {
+          std::uint32_t t = 0;
+          std::memcpy(&t, v, 4);
+          (code == kOptRenewalTime ? m.lease.renew_seconds
+                                   : m.lease.rebind_seconds) = ntohl(t);
+        }
         break;
       default:
         break;
@@ -318,91 +376,226 @@ std::optional<Message> Receive(int fd, std::uint32_t xid, const Mac& mac,
 
 }  // namespace
 
-std::expected<Lease, std::string> DhcpClient::Acquire(
-    std::chrono::milliseconds timeout) {
-  const int ifindex = static_cast<int>(::if_nametoindex(interface_.c_str()));
-  if (ifindex == 0) {
-    return std::unexpected(std::format("no interface {}", interface_));
+namespace {
+
+/// A broadcast DHCP conversation from 0.0.0.0 on an AF_PACKET socket
+/// (before the interface has an address): Acquire and Confirm.
+struct RawChannel {
+  int fd = -1;
+  Mac mac{};
+  sockaddr_ll broadcast{};
+
+  ~RawChannel() {
+    if (fd >= 0) ::close(fd);
   }
 
-  const int fd =
-      ::socket(AF_PACKET, SOCK_DGRAM | SOCK_CLOEXEC, htons(ETH_P_IP));
-  if (fd < 0) {
-    return std::unexpected(
-        std::format("packet socket: {}", std::strerror(errno)));
+  /// Error text, or "" when ready.
+  std::string Open(const std::string& interface) {
+    const int ifindex = static_cast<int>(::if_nametoindex(interface.c_str()));
+    if (ifindex == 0) return std::format("no interface {}", interface);
+    fd = ::socket(AF_PACKET, SOCK_DGRAM | SOCK_CLOEXEC, htons(ETH_P_IP));
+    if (fd < 0) return std::format("packet socket: {}", std::strerror(errno));
+    sockaddr_ll local{};
+    local.sll_family = AF_PACKET;
+    local.sll_protocol = htons(ETH_P_IP);
+    local.sll_ifindex = ifindex;
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
+      return std::format("bind {}: {}", interface, std::strerror(errno));
+    }
+    const auto m = InterfaceMac(fd, interface);
+    if (!m) {
+      return std::format(
+          "no MAC address for {}: {}", interface, std::strerror(errno));
+    }
+    mac = *m;
+    broadcast = local;
+    broadcast.sll_halen = 6;
+    std::memset(broadcast.sll_addr, 0xFF, 6);
+    return {};
   }
-  struct Closer {
-    int fd;
-    ~Closer() { ::close(fd); }
-  } closer{fd};
 
-  sockaddr_ll local{};
-  local.sll_family = AF_PACKET;
-  local.sll_protocol = htons(ETH_P_IP);
-  local.sll_ifindex = ifindex;
-  if (::bind(fd, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
-    return std::unexpected(
-        std::format("bind {}: {}", interface_, std::strerror(errno)));
-  }
-
-  const auto mac = InterfaceMac(fd, interface_);
-  if (!mac) {
-    return std::unexpected(std::format(
-        "no MAC address for {}: {}", interface_, std::strerror(errno)));
-  }
-
-  sockaddr_ll broadcast = local;
-  broadcast.sll_halen = 6;
-  std::memset(broadcast.sll_addr, 0xFF, 6);
-  in_addr any{};
-  in_addr all{};
-  all.s_addr = htonl(INADDR_BROADCAST);
-  const auto send = [&](const std::vector<std::uint8_t>& dhcp_packet) {
+  bool Send(const std::vector<std::uint8_t>& dhcp_packet) const {
+    in_addr any{};
+    in_addr all{};
+    all.s_addr = htonl(INADDR_BROADCAST);
     const auto frame =
         BuildUdpFrame(dhcp_packet, any, all, kClientPort, kServerPort);
     return ::sendto(fd,
                     frame.data(),
                     frame.size(),
                     0,
-                    reinterpret_cast<sockaddr*>(&broadcast),
+                    reinterpret_cast<const sockaddr*>(&broadcast),
                     sizeof(broadcast)) >= 0;
-  };
+  }
+};
+
+/// Fields an ACK may leave out come from the lease it extends.
+Lease Merge(Lease acked, const Lease& current) {
+  if (acked.address.s_addr == 0) acked.address = current.address;
+  if (acked.server.s_addr == 0) acked.server = current.server;
+  if (acked.netmask.s_addr == 0) acked.netmask = current.netmask;
+  if (!acked.router) acked.router = current.router;
+  if (acked.dns.empty()) acked.dns = current.dns;
+  return acked;
+}
+
+}  // namespace
+
+std::expected<Lease, std::string> DhcpClient::Acquire(
+    std::chrono::milliseconds timeout) {
+  RawChannel ch;
+  if (auto error = ch.Open(interface_); !error.empty()) {
+    return std::unexpected(error);
+  }
 
   std::mt19937 rng{std::random_device{}()};
   const auto deadline = std::chrono::steady_clock::now() + timeout;
 
   while (std::chrono::steady_clock::now() < deadline) {
     const std::uint32_t xid = rng();
-    if (!send(BuildDiscover(xid, *mac))) {
+    if (!ch.Send(BuildDiscover(xid, ch.mac))) {
       return std::unexpected(
           std::format("send DISCOVER: {}", std::strerror(errno)));
     }
     const auto round_end =
         std::min(deadline, std::chrono::steady_clock::now() + kResend);
-    const auto offer = Receive(fd, xid, *mac, {MessageType::kOffer}, round_end);
+    const auto offer =
+        Receive(ch.fd, xid, ch.mac, {MessageType::kOffer}, round_end);
     if (!offer) continue;
 
-    if (!send(BuildRequest(
-            xid, *mac, offer->lease.address, offer->lease.server))) {
+    if (!ch.Send(BuildRequest(
+            xid, ch.mac, offer->lease.address, offer->lease.server))) {
       return std::unexpected(
           std::format("send REQUEST: {}", std::strerror(errno)));
     }
     const auto ack =
-        Receive(fd,
+        Receive(ch.fd,
                 xid,
-                *mac,
+                ch.mac,
                 {MessageType::kAck, MessageType::kNak},
                 std::min(deadline, std::chrono::steady_clock::now() + kResend));
     if (!ack || ack->type == MessageType::kNak) continue;  // start over
 
-    Lease lease = ack->lease;
     // Some servers only put the address in yiaddr of the ACK.
-    if (lease.address.s_addr == 0) lease.address = offer->lease.address;
-    if (lease.server.s_addr == 0) lease.server = offer->lease.server;
-    return lease;
+    return Merge(ack->lease, offer->lease);
   }
   return std::unexpected(std::format(
       "no DHCP lease on {} within {} ms", interface_, timeout.count()));
+}
+
+std::expected<Lease, RenewError> DhcpClient::Confirm(
+    in_addr address, std::chrono::milliseconds timeout) {
+  RawChannel ch;
+  if (auto error = ch.Open(interface_); !error.empty()) {
+    return std::unexpected(RenewError{false, error});
+  }
+  std::mt19937 rng{std::random_device{}()};
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    const std::uint32_t xid = rng();
+    if (!ch.Send(BuildInitReboot(xid, ch.mac, address))) {
+      return std::unexpected(RenewError{
+          false, std::format("send REQUEST: {}", std::strerror(errno))});
+    }
+    const auto reply =
+        Receive(ch.fd,
+                xid,
+                ch.mac,
+                {MessageType::kAck, MessageType::kNak},
+                std::min(deadline, std::chrono::steady_clock::now() + kResend));
+    if (!reply) continue;
+    if (reply->type == MessageType::kNak) {
+      return std::unexpected(RenewError{true, "server refused the address"});
+    }
+    Lease current;
+    current.address = address;
+    return Merge(reply->lease, current);
+  }
+  return std::unexpected(RenewError{false, "no answer"});
+}
+
+std::expected<Lease, RenewError> DhcpClient::Renew(
+    const Lease& current, bool broadcast, std::chrono::milliseconds timeout) {
+  const auto fail = [](std::string text) {
+    return std::unexpected(RenewError{false, std::move(text)});
+  };
+  // The interface has its address: a plain UDP socket on port 68 of this
+  // interface; the kernel does ARP and routing.
+  const int fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) return fail(std::format("udp socket: {}", std::strerror(errno)));
+  struct Closer {
+    int fd;
+    ~Closer() { ::close(fd); }
+  } closer{fd};
+  const int one = 1;
+  ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+  ::setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one));
+  if (::setsockopt(fd,
+                   SOL_SOCKET,
+                   SO_BINDTODEVICE,
+                   interface_.c_str(),
+                   static_cast<socklen_t>(interface_.size())) != 0) {
+    return fail(
+        std::format("bind to {}: {}", interface_, std::strerror(errno)));
+  }
+  sockaddr_in local{};
+  local.sin_family = AF_INET;
+  local.sin_port = htons(kClientPort);
+  local.sin_addr.s_addr = htonl(INADDR_ANY);  // unicast and broadcast replies
+  if (::bind(fd, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
+    return fail(std::format("bind :{}: {}", kClientPort, std::strerror(errno)));
+  }
+
+  Mac mac{};
+  if (const auto m = InterfaceMac(fd, interface_)) {
+    mac = *m;
+  } else {
+    return fail(std::format("no MAC address for {}", interface_));
+  }
+
+  sockaddr_in server{};
+  server.sin_family = AF_INET;
+  server.sin_port = htons(kServerPort);
+  server.sin_addr = current.server;
+  if (broadcast || current.server.s_addr == 0) {
+    server.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+  }
+
+  std::mt19937 rng{std::random_device{}()};
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  std::array<std::uint8_t, 2048> buf{};
+  while (std::chrono::steady_clock::now() < deadline) {
+    const std::uint32_t xid = rng();
+    const auto packet = BuildRenew(xid, mac, current.address);
+    if (::sendto(fd,
+                 packet.data(),
+                 packet.size(),
+                 0,
+                 reinterpret_cast<sockaddr*>(&server),
+                 sizeof(server)) < 0) {
+      return fail(std::format("send REQUEST: {}", std::strerror(errno)));
+    }
+    const auto round_end =
+        std::min(deadline, std::chrono::steady_clock::now() + kResend);
+    while (true) {
+      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+          round_end - std::chrono::steady_clock::now());
+      if (left.count() <= 0) break;
+      pollfd pfd{fd, POLLIN, 0};
+      const int r = ::poll(&pfd, 1, static_cast<int>(left.count()));
+      if (r < 0 && errno == EINTR) continue;
+      if (r <= 0) break;
+      const ssize_t n = ::recv(fd, buf.data(), buf.size(), 0);
+      if (n <= 0) continue;
+      const auto msg = Parse({buf.data(), static_cast<std::size_t>(n)});
+      if (!msg || msg->xid != xid || msg->chaddr != mac) continue;
+      if (msg->type == MessageType::kNak) {
+        return std::unexpected(RenewError{true, "server refused the renewal"});
+      }
+      if (msg->type == MessageType::kAck) return Merge(msg->lease, current);
+    }
+  }
+  return fail("no answer");
 }
 
 }  // namespace aember::netd::dhcp

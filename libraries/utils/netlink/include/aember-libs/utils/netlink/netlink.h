@@ -28,11 +28,18 @@ int InterfaceIndex(std::string_view name);
 /// First IPv4 address of interface @p name, if it has one.
 std::optional<in_addr> FirstIPv4Address(std::string_view name);
 
+/// Prefix length of that first IPv4 address, -1 if there is none.
+int FirstIPv4Prefix(std::string_view name);
+
 /// `ip link set <idx> up`
 int SetLinkUp(int ifindex);
 
 /// `ip addr replace <addr>/<prefix> dev <idx>` (also sets the broadcast).
 int AddAddress(int ifindex, in_addr addr, int prefix_len);
+
+/// `ip addr del <addr>/<prefix> dev <idx>`; -EADDRNOTAVAIL if it isn't
+/// there.
+int DeleteAddress(int ifindex, in_addr addr, int prefix_len);
 
 /// `ip route replace default via <gw> dev <idx>`
 int AddDefaultRoute(int ifindex, in_addr gateway);

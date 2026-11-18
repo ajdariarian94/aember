@@ -12,6 +12,7 @@
 
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-services/netd/connectivity-status.h>
+#include <aember-services/netd/dhcp-client.h>
 #include <aember-services/netd/interface-config.h>
 #include <aember-services/netd/interface-state.h>
 #include <aember-services/netd/ip-mode.h>
@@ -22,7 +23,9 @@
 
 #include <chrono>
 #include <functional>
+#include <map>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -81,6 +84,12 @@ class NetworkManager {
   bool WaitForConnectivity(
       std::chrono::milliseconds timeout = std::chrono::seconds(60));
 
+  /// Keep the DHCP leases alive: renew after T1 (unicast), rebind after
+  /// T2 (broadcast), start over on a NAK or at expiry. Call it regularly
+  /// (netd: every status report); each call does at most one exchange per
+  /// interface, so it returns within a few seconds.
+  void MaintainLeases();
+
  private:
   // ---------------------------------------------------------------------------
   // Config parsing
@@ -97,7 +106,16 @@ class NetworkManager {
   /// Address (+ default route, DNS) from network.json, via rtnetlink.
   bool ConfigureStatic(const InterfaceConfig& iface, int ifindex);
   /// Address, default route and DNS from a DHCP lease (built-in client).
-  bool ConfigureDhcp(const InterfaceConfig& iface, int ifindex);
+  bool ConfigureDhcp(const InterfaceConfig& iface, int ifindex,
+                     int attempts = -1);
+  /// Address, default route and DNS from @p lease; replaces @p previous
+  /// when the server handed out another address. Remembers the lease.
+  bool ApplyLease(const InterfaceConfig& iface, int ifindex,
+                  const dhcp::Lease& lease,
+                  std::optional<dhcp::Lease> previous = std::nullopt);
+  /// A DHCP interface that already had an address (netd restarted): ask
+  /// the server about it to learn the lease, or start over on a NAK.
+  void AdoptAddress(const InterfaceConfig& iface, int ifindex, in_addr address);
   /// Write /etc/resolv.conf (8.8.8.8 + 1.1.1.1 if @p dns is empty).
   void WriteResolvConf(const std::vector<std::string>& dns);
 
@@ -122,6 +140,17 @@ class NetworkManager {
 
   NetworkConfig config_;
   std::vector<InterfaceState> iface_states_;
+
+  struct DhcpState {
+    InterfaceConfig iface;
+    int ifindex{-1};
+    dhcp::Lease lease;
+    dhcp::LeaseTimer timer;
+    std::chrono::steady_clock::time_point next_try{};
+  };
+  /// Leases of the DHCP interfaces (only touched by Start and
+  /// MaintainLeases, i.e. netd's main thread).
+  std::map<std::string, DhcpState> leases_;
 
   StatusCallback on_status_;
 
