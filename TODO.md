@@ -69,6 +69,22 @@ off by guestfish. Left:
   netd` / `aember containerd` (multi-call), `utils/ipc` channels on fd 3
   with readiness, liblxc only `dlopen`ed by containerd, containerd adopts
   running containers after a restart. PID 1 RSS 6.1 → 5.1 MB.
+- [x] **Services as their own programs** (2026-11-18): `services/netd`
+  → `aember-netd`, `services/containerd` → `aember-containerd`, built by a
+  `services` ExternalProject (every subdir is a service, `aember_service()`
+  helper, `services/README.md` for community services). PID 1 no longer
+  contains them; boards start them from services.json, and only listed
+  services are packed (rootfs only). Container bridges moved from netd
+  (network.json) to containerd (containers.json); rtnetlink is the public
+  `utils/netlink`. Follow-ups:
+  - [ ] Board profiles (`resources/boards/<board>/rootfs` over the arch
+    overlay), so QEMU and the Pi 4 can pick different services.
+  - [ ] ConnMan as an alternative network service (aember-resources:
+    connman + dbus + wpa_supplicant recipes, Pi Wi-Fi in the kernel).
+  - [ ] Heartbeat: say "network: external" instead of nothing when no
+    service reports network status.
+  - [ ] Measure shared vs static spdlog/fmt across aember and the services
+    (nlohmann is header-only); keep PID 1 static unless it pays off.
 - [ ] Merge ProcessManager into ServiceManager: with containers gone they
   keep the same per-name state twice and mirror it through callbacks.
 - [ ] Container restart policy: containers.json has `restart_policy`,

@@ -11,7 +11,9 @@ kernel modules, brings up the network and pivots from the initramfs to the
 real root filesystem. This repo holds:
 
 - the C++ code: `libraries/` (the init system as static libs), `executables/`
-  (the `aember` binary), `examples/`
+  (the `aember` binary, PID 1), `services/` (separate programs PID 1
+  starts from services.json: `aember-netd`, `aember-containerd`, and
+  whatever else you add), `examples/`
 - the `aember` CLI (`aember-cli/`, plain files in this repo), which fetches
   the prebuilt resources, configures, builds, packs, launches in QEMU and
   releases the system
@@ -28,22 +30,36 @@ kernel ─► initramfs /init ─► usr/bin/aember            AemberInit::Start
              mounts, loads modules, mounts the real root, switch_root
           ─► real root: aember --root (PID 1)           AemberInit::StartRoot()
              mounts, modules, reaping, signals, services, heartbeat
-             ├─ aember netd         network (NetworkManager), own process
-             ├─ aember containerd   LXC containers (ContainerManager), own process
-             └─ services.json processes
+             └─ services.json, e.g.
+                ├─ /usr/bin/aember-netd        network (services/netd)
+                ├─ /usr/bin/aember-containerd  LXC containers + bridges (services/containerd)
+                └─ /usr/bin/aember-child-demo  ...
 ```
 
-`executables/aember/main.cpp` is multi-call: `aember netd` / `aember
-containerd` run a daemon role (before any PID 1 setup), otherwise CLI11
-picks the PID 1 mode (`--root`, `--chroot`).
+`executables/aember/main.cpp` is PID 1 only: CLI11 picks the mode
+(`--root`, `--chroot`). It contains no network or container code.
 
-**Built-in daemons (network and containers out of PID 1).** A crash in
-network or container code no longer takes PID 1 down; PID 1 doesn't link
-liblxc (containerd `dlopen`s it) and uses ~1 MB less RSS.
-- `AemberInit::RegisterDaemons()` adds `aember-netd` and
-  `aember-containerd` (depends on netd) as services: same binary
-  (`/proc/self/exe`), `ipc`, always restarted (2 s), ready timeout 120 s.
-  They're not in services.json, so a config error can't remove them.
+**Services (`services/`, own programs).** Network and containers are
+ordinary services: a board lists them in its `services.json` or doesn't
+(e.g. ConnMan instead of `aember-netd`), and then their code isn't in the
+image at all. A crash in them never takes PID 1 down.
+- Build: `services/` is its own ExternalProject (after `libraries`); every
+  subdirectory with a CMakeLists.txt is a service, built against the
+  installed aember-libs with `aember_service()`
+  (`services/cmake/AemberService.cmake`: `<name>-core` static lib for the
+  tests + the executable, stripped in Release, installed to
+  `build/install/<arch>/<type>/services/`). How to write one:
+  `services/README.md`. Headers: `<aember-services/<name>/...>`,
+  namespaces `aember::netd`, `aember::containerd`.
+- Pack: only the services the overlay's `services.json` starts
+  (`/usr/bin/<name>` + a built `services/<name>`) go into `services_root`,
+  a rootfs-only tree (no initramfs RAM), with the libraries they need
+  that the initramfs doesn't have (NEEDED, plus `SERVICE_DLOPEN_LIBS` in
+  `config/libs.py`: liblxc for aember-containerd).
+- services.json entries for them: `"ipc": true`, `"ready_timeout_ms":
+  120000`, always restarted (`max_restarts` 0, 2 s), `stop_timeout_ms`
+  10 s (netd) / 60 s (containerd); containerd depends on netd in the
+  default configs (drop that when the board has no netd).
 - Channel: `utils/ipc` (`Channel`: SOCK_SEQPACKET socketpair, the daemon
   gets its end as **fd 3**, one JSON message per packet; `Hub`: PID 1's
   thread polling all channels). Messages: `{"type":"ready"}`,
@@ -59,18 +75,21 @@ liblxc (containerd `dlopen`s it) and uses ~1 MB less RSS.
   (`ServiceManager::MarkReady`) or its `ready_timeout`; services whose
   dependencies aren't running wait and start as soon as they are (also on
   restart). `StopAll` stops dependents first (containerd before netd).
-- netd: brings up interfaces/bridges (keeps existing addresses), reports
+- netd: brings up the interfaces (keeps existing addresses), reports
   status on change and every 10 s; on SIGTERM it exits and leaves the
   kernel's network configuration, so a restart doesn't drop the network.
-- containerd: starts the containers from containers.json, or **adopts**
+- containerd: creates the container bridges (`"bridges"` in
+  containers.json, `netlink::EnsureBridge`; network.json no longer has
+  them, so containers work with any network manager), starts the
+  containers from containers.json, or **adopts**
   the ones still running after a crash/restart (LXC keeps their state);
   follows each container's init with a pidfd; SIGTERM stops all
   containers. It is deliberately **not a subreaper**: the LXC monitors have
   a parent-death signal, which also fires when a subreaper they were
   reparented to dies; they stay PID 1's orphans.
 - LXC forks its monitors from containerd without exec, so they show
-  containerd's command line: `{aember-echo} /usr/bin/aember containerd`.
-  Match `{aember-ctrd}` (containerd's own name), not "aember containerd",
+  containerd's command line: `{aember-echo} /usr/bin/aember-containerd`.
+  Match `{aember-ctrd}` (containerd's own name), not the command line,
   when you look for or kill containerd.
 
 ## aember-resources (kernel, BusyBox, LXC, SDK)
@@ -119,10 +138,11 @@ x64, aarch64 and arm32).
 ```
 .devcontainer/          Ubuntu 24.04 dev image (prebuilt ghcr.io/ajdariarian94/aember-dev)
 aember-cli/             the `aember` CLI (Python, Typer): cli/, steps/, config/, utils/
-CMakeLists.txt          Superbuild: ExternalProject libraries → executables, examples
+CMakeLists.txt          Superbuild: ExternalProject libraries → executables, services, examples
                         project VERSION here is the app version (CLI reads it)
 libraries/              aember-libs: one static lib per dir, + utils/<x>
 executables/aember/     main.cpp → the `aember` binary (PID 1)
+services/               one dir per service program (netd, containerd), README.md
 examples/               demo binaries packed into the initramfs
 resources/<arch>/rootfs rootfs overlay: configs tracked, *.squashfs images from the release
 tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (SDK compilers, sysroot, flags)
@@ -154,13 +174,16 @@ under `include/aember-libs/<lib>/`, CMake target `aember-libs::<lib>`.
 | `root-manager`      | Mounts the real root and does `pivot_root` |
 | `mount-manager`     | Mounts and tracks filesystems |
 | `module-loader`     | Loads kernel modules from `modules.json` |
-| `network-manager`   | Interfaces, bridge, connectivity (`network.json`); `RunNetd()` = `aember netd` |
 | `process-manager`   | Spawns and tracks native processes (optionally with an ipc channel on fd 3) |
-| `container-manager` | LXC container lifecycle; `RunContainerd()` = `aember containerd`; liblxc via `dlopen` (`lxc-api.h`), headers from `VIRT_ROOT` |
 | `child-supervisor`  | Tracks service pids; `ReapZombies()` is PID 1's only reaper (see below) |
 | `service-manager`   | PID 1's service supervisor: dependency order, readiness, stop order |
 | `device-health`     | Heartbeat + `AemberMonitor` runtime stats |
-| `utils/*`           | config, container, ipc (daemon channels), logging (spdlog), module, mount, network, process, root, shell, signal (signalfd + epoll) |
+| `utils/*`           | config, ipc (service channels), logging (spdlog), module, mount, netlink (rtnetlink), process, root, shell, signal (signalfd + epoll) |
+
+Services (`services/<name>/`, not libraries): `netd` (interfaces, DHCP,
+DNS, connectivity; `network.json`), `containerd` (LXC lifecycle, bridges;
+`containers.json`; liblxc via `dlopen` in `lxc-api.h`, headers from
+`VIRT_ROOT`).
 
 **Logging:** one spdlog logger for the whole process
 (`utils/logging`: `global_logger()`, the spdlog default logger). A
@@ -178,8 +201,8 @@ a syscall now:
   autoclear the device detaches when the last fd closes.
 - Modules: `ModuleLoader` walks `modules.dep` (dependencies first) and
   calls `finit_module(2)`; built-ins from `modules.builtin`.
-- Network: `network-manager/netlink.{h,cpp}` (rtnetlink: link up, address,
-  default route, bridge, veth, delete) instead of `ip`; DHCP is
+- Network: `utils/netlink` (rtnetlink: link up, address, default route,
+  bridge, veth, delete) instead of `ip`; DHCP is netd's
   `dhcp-client.{h,cpp}` (DISCOVER/OFFER/REQUEST/ACK on an `AF_PACKET`
   socket with self-built IPv4/UDP headers, source 0.0.0.0, like udhcpc;
   one lease, no renewal, like the `udhcpc -q` it replaced).
@@ -265,9 +288,10 @@ everyday build command.
 5. `PackStep` (`steps/packaging/`): initramfs tree + BusyBox (installed with
    `qemu-<arch>-static` when cross) + `aember` + examples/tests + `/init`
    symlink; runtime libs resolved with `readelf -d` (NEEDED; works for every
-   arch, unlike the host objdump), plus the `dlopen`ed liblxc
-   (`DLOPEN_LIBS` in `config/libs.py`) and its NEEDED, from the LXC
-   libs and the SDK target sysroot; kernel modules from `modules.json` +
+   arch, unlike the host objdump), from the LXC libs and the SDK target
+   sysroot; the services listed in services.json into `services_root`
+   (rootfs only) with what they need beyond the initramfs (liblxc for
+   containerd, `SERVICE_DLOPEN_LIBS`); kernel modules from `modules.json` +
    `depmod`; `aember-initramfs.cpio.gz`; `aember-rootfs.img` built with
    guestfish in a `docker run` of the current dev image (bind mount via
    `HOST_ROOT_PATH`)
@@ -416,8 +440,8 @@ C++:
 - Classes `PascalCase`, methods `PascalCase()`, members `snake_case_`.
 - A library dir has `CMakeLists.txt` (STATIC lib + `aember-libs::` alias +
   install/export), `Config.cmake.in`, `include/`, `src/`, optional `tests/`
-  (GTest, `<lib>-unittest`, `add_test`). Every library has tests (21
-  suites, ~200 tests); only what needs root, real interfaces or LXC
+  (GTest, `<lib>-unittest`, `add_test`). Every library and service has
+  tests (22 suites, ~210 tests); only what needs root, real interfaces or LXC
   containers is left to the QEMU boots.
 - Tests build only with `--with-tests`, which forces x64 Debug; the test
   binaries are packed into the initramfs (run them in the VM from the debug

@@ -12,12 +12,11 @@ set(${COMPONENT}_${PROJECT_NAME}_VERSION
 # -----------------------------------------------------------------------------
 set(SUBCOMPONENTS
     config
-    container
     ipc
     logging
     module
     mount
-    network
+    netlink
     process
     root
     shell

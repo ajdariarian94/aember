@@ -1,9 +1,0 @@
-@PACKAGE_INIT@
-
-include(CMakeFindDependencyMacro)
-find_dependency(aember-libs REQUIRED COMPONENTS child-supervisor mount-manager utils)
-
-# Reconstruct LXC imported target for consumers
-# liblxc is loaded with dlopen at run time (not linked).
-
-include(${CMAKE_CURRENT_LIST_DIR}/${COMPONENT}Targets.cmake)

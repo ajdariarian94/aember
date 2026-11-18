@@ -4,7 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from aember.config.libs import ARCH_CONFIG, DLOPEN_LIBS
+from aember.config.libs import ARCH_CONFIG
 from aember.config.resources import lxc_dir, sdk_dir
 from aember.config.sdk import SDK_SYSROOT_MAP
 
@@ -88,25 +88,32 @@ def collect_all_libs(
 def copy_runtime_libs(
     architecture: str,
     root: Path,
-    initramfs_root: Path,
-    build_type: str,
+    dest_root: Path,
+    binaries: list[Path],
+    dlopen: list[str] | None = None,
+    present_in: Path | None = None,
 ) -> None:
+    """
+    Copy what @p binaries need at run time (their NEEDED, recursively, plus
+    the @p dlopen libraries and theirs) into dest_root/lib, and the dynamic
+    loader where the binaries ask for it. With @p present_in (the initramfs
+    tree, when packing services into the rootfs-only tree), libraries that
+    tree already has are skipped, and so is the loader.
+    """
     cfg = ARCH_CONFIG.get(architecture)
     if not cfg:
         raise ValueError(
             f"Dynamic resolution not configured for '{architecture}'. "
             f"Known: {list(ARCH_CONFIG)}"
         )
+    if not binaries:
+        return
 
     poky_sysroot = (
         sdk_dir(root, architecture) / "sysroots" / SDK_SYSROOT_MAP[architecture]
     )
     virt_libs = lxc_dir(root, architecture) / "libs"
     loader_name = cfg["loader_name"]
-
-    aember_bin = (
-        root / "build" / "install" / architecture / build_type / "bin" / "aember"
-    )
 
     # ---------------------------------------------------------------------------
     # Search order:
@@ -120,41 +127,48 @@ def copy_runtime_libs(
         poky_sysroot / "usr/local/lib",
     ]
 
-    # liblxc isn't in aember's NEEDED: `aember containerd` loads it with
-    # dlopen (PID 1 never maps it). Pack it and its own dependencies.
-    dlopened = [virt_libs / name for name in DLOPEN_LIBS]
-    missing = [lib for lib in dlopened if not lib.exists()]
-    if missing:
-        raise FileNotFoundError(f"dlopen'ed libraries not found: {missing}")
+    # Libraries loaded with dlopen aren't in anyone's NEEDED (liblxc, which
+    # aember-containerd loads): pack them and their own dependencies.
+    dlopened = [resolve_library_path(name, search_paths) for name in dlopen or []]
 
-    log.info("Resolving dependencies for: %s (+ %s)", aember_bin, DLOPEN_LIBS)
-    all_libs = collect_all_libs([aember_bin, *dlopened], search_paths)
+    log.info(
+        "Resolving dependencies for: %s (+ %s)",
+        ", ".join(b.name for b in binaries),
+        dlopen or "no dlopen libraries",
+    )
+    all_libs = collect_all_libs([*binaries, *dlopened], search_paths)
     all_libs.update(dlopened)
 
-    # Add the dynamic loader.
-    loader_path = poky_sysroot / "lib" / loader_name
-    if not loader_path.exists():
-        loader_path = poky_sysroot / "lib64" / loader_name
-    if not loader_path.exists():
-        raise FileNotFoundError(
-            f"Could not find loader '{loader_name}' in {poky_sysroot}"
-        )
-    all_libs.add(loader_path)
-
-    # The loader goes where the binary asks for it (PT_INTERP): Poky puts it
+    # The loader goes where the binaries ask for it (PT_INTERP): Poky puts it
     # in /lib on x86-64 and aarch64, unlike host toolchains (/lib64).
-    interpreter = get_interpreter(aember_bin)
-    if Path(interpreter).name != loader_name:
-        raise RuntimeError(
-            f"{aember_bin} wants interpreter {interpreter}, expected {loader_name}"
-        )
-    loader_dir = Path(interpreter).parent.relative_to("/")
-    log.info("Program interpreter: %s", interpreter)
+    for binary in binaries:
+        interpreter = get_interpreter(binary)
+        if Path(interpreter).name != loader_name:
+            raise RuntimeError(
+                f"{binary} wants interpreter {interpreter}, expected {loader_name}"
+            )
+    loader_dir = Path(get_interpreter(binaries[0])).parent.relative_to("/")
 
-    log.info("Copying %d libraries to %s", len(all_libs), initramfs_root)
+    if present_in is None:
+        loader_path = poky_sysroot / "lib" / loader_name
+        if not loader_path.exists():
+            loader_path = poky_sysroot / "lib64" / loader_name
+        if not loader_path.exists():
+            raise FileNotFoundError(
+                f"Could not find loader '{loader_name}' in {poky_sysroot}"
+            )
+        all_libs.add(loader_path)
+        log.info("Program interpreter: /%s/%s", loader_dir, loader_name)
+    else:
+        have = {
+            p.name for d in ("lib", str(loader_dir)) for p in (present_in / d).glob("*")
+        }
+        all_libs = {lib for lib in all_libs if lib.name not in have}
+
+    log.info("Copying %d libraries to %s", len(all_libs), dest_root)
 
     for lib in sorted(all_libs, key=lambda p: p.name):
-        dst_dir = initramfs_root / (loader_dir if lib.name == loader_name else "lib")
+        dst_dir = dest_root / (loader_dir if lib.name == loader_name else "lib")
         dst_dir.mkdir(parents=True, exist_ok=True)
 
         if lib.is_symlink():

@@ -1,13 +1,10 @@
 #include <aember-libs/aember-init/aember-init.h>
 #include <aember-libs/aember-init/pid1.h>
-#include <aember-libs/container-manager/containerd.h>
-#include <aember-libs/network-manager/netd.h>
 #include <aember-libs/utils/logging/logging.h>
 
 #include <CLI/CLI.hpp>
 
 #include <exception>
-#include <string_view>
 
 #include <unistd.h>
 
@@ -15,16 +12,6 @@ namespace pid1 = aember::aember_init::pid1;
 using aember::utils::logging::Logger;
 
 int main(int argc, char** argv) {
-  // Multi-call: PID 1 starts its built-in daemons as `aember <role>` (same
-  // file, so the code exists once and its pages are shared).
-  if (argc > 1) {
-    const std::string_view role{argv[1]};
-    if (role == "netd") { return aember::network::RunNetd(); }
-    if (role == "containerd") {
-      return aember::container_manager::RunContainerd();
-    }
-  }
-
   // Before anything can throw: an uncaught exception must not kill PID 1
   // (the kernel panics when init exits).
   pid1::BlockInitSignals();

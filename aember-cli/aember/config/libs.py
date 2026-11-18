@@ -21,9 +21,11 @@ ARCH_CONFIG = {
     },
 }
 
-# Libraries loaded with dlopen (not in aember's NEEDED), packed explicitly:
-# liblxc is only loaded by the `aember containerd` role.
-DLOPEN_LIBS: List[str] = ["liblxc.so.1"]
+# Libraries a service loads with dlopen (so not in its NEEDED), packed
+# together with that service: aember-containerd loads liblxc.
+SERVICE_DLOPEN_LIBS: Dict[str, List[str]] = {
+    "aember-containerd": ["liblxc.so.1"],
+}
 
 # Modules always packed on all architectures
 BASE_MODULES: Dict[str, List[str]] = {

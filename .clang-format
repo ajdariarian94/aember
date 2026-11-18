@@ -11,13 +11,13 @@ PointerAlignment: Left
 
 # ---------------------------------------------------------------------------
 # Include ordering:
-#   1. aember-libs headers
+#   1. aember-libs and aember-services headers
 #   2. third-party headers (nlohmann, spdlog, etc.)
 #   3. C++ standard library headers
 #   4. C system headers
 # ---------------------------------------------------------------------------
 IncludeCategories:
-  - Regex:    '^<aember-libs/'
+  - Regex:    '^<aember-(libs|services)/'
     Priority: 1
     SortPriority: 1
   - Regex:    '^<(nlohmann|spdlog|CLI|meta|gtest)/'
