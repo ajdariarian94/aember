@@ -21,6 +21,7 @@ set(SUBCOMPONENTS
     root
     shell
     signal
+    watchdog
 )
 
 # Set up variables that subcomponents expect (preserving original naming)

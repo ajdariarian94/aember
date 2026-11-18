@@ -238,6 +238,19 @@ BusyBox stays in the image for the debug shell and interactive use.
   only skips that entry; the rest still starts.
 - The ipc hub catches handler exceptions per message (a throwing handler
   once killed the hub thread, so readiness was never seen again).
+- **Hardware watchdog** (`utils/watchdog`, root mode, never with
+  `--chroot`): PID 1 opens `/dev/watchdog` after the mount phase (15 s;
+  `aember.watchdog=<s>` sets it, `aember.watchdog=0` turns it off). A
+  thread feeds it every timeout/3, **but only while the run loop and the
+  reaper ticked in the last 10 s** (before the run loop starts, boot gets
+  2 min), so a hung PID 1 really resets the board. `Stop()` feeds
+  unconditionally while services stop and disarms it (magic close) for a
+  requested reboot/poweroff/halt; stopping without a request leaves it
+  armed, so the board resets instead of reaping forever. x64's kernel has
+  no watchdog driver ("No watchdog", carries on); the Pi has
+  `bcm2835_wdt`. **QEMU's raspi machines reset the instant the BCM2835
+  watchdog starts** (no countdown), so `aember rpi launch` boots with
+  `aember.watchdog=0`; only a real Pi tests it.
 - The file logs `/var/log/aember-{init,netd,containerd}.log` rotate
   (1 MiB × 3 each).
 

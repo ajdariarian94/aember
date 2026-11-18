@@ -45,6 +45,7 @@ target_link_libraries(
          aember-libs::utils::logging
          aember-libs::utils::shell
          aember-libs::utils::signal
+         aember-libs::utils::watchdog
 )
 
 set_target_properties(

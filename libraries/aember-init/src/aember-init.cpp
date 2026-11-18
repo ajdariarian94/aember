@@ -148,6 +148,12 @@ void AemberInit::StartRoot() {
 
   StartReaperThread();
 
+  // Drivers are loaded by now (mount phase). Never on a chroot: that would
+  // be the host's watchdog.
+  if (!options_.chroot) {
+    Guarded(log_, "Watchdog", [this] { StartWatchdog(); });
+  }
+
   // From here on 'd' on the console opens a shell at any time; boot does not
   // wait for it. aember.shell=1 on the kernel command line opens one now.
   StartDebugShell(DebugShell::RequestedOnCmdline());
@@ -189,6 +195,10 @@ void AemberInit::Stop() {
 
   log_.info("Stopping Aember Init System...");
 
+  // The run loop has ended and the reaper stops below: keep the watchdog
+  // fed while services stop (containerd may take a minute).
+  if (watchdog_) { watchdog_->SetUnconditional(true); }
+
   // Gives the console back; a running shell is killed with everything else.
   if (debug_shell_) { debug_shell_->Stop(); }
 
@@ -216,6 +226,21 @@ void AemberInit::Stop() {
   dependency_resolver_.reset();
   process_manager_.reset();
   mount_manager_.reset();
+
+  // A requested reboot/poweroff/halt: turn the watchdog off so it can't
+  // reset the board halfway (pid1::Finish does the rest). Without a request
+  // PID 1 is about to reap forever; then the watchdog stays armed and
+  // resets the board, which is what a broken init should get.
+  if (watchdog_) {
+    if (shutdown_.load() != ShutdownAction::kNone) {
+      if (!watchdog_->Disarm()) {
+        log_.warn("Watchdog can't be stopped; the reset may come first");
+      }
+    } else {
+      log_.critical("Stopping without a shutdown request: watchdog left armed");
+    }
+    watchdog_.reset();
+  }
 
   log_.info("Aember Init System stopped");
 }
@@ -392,6 +417,7 @@ void AemberInit::StartReaperThread() {
         });
         reap_pending_ = false;
       }
+      reap_tick_ms_ = NowMs();
       Guarded(log_, "Reaping", [this] {
         ReapOnce();
         if (service_manager_) { service_manager_->CheckReadyTimeouts(); }
@@ -414,6 +440,37 @@ void AemberInit::StartDebugShell(bool shell_now) {
         [this](pid_t pid) { return child_supervisor_.IsTracked(pid); },
         shell_now);
   });
+}
+
+std::int64_t AemberInit::NowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+bool AemberInit::Alive() const {
+  // Both tick at least once a second; 10 s without a tick means stuck.
+  // Until the run loop starts (services still starting), boot gets 2 min.
+  constexpr std::int64_t kStaleMs = 10'000;
+  constexpr std::int64_t kBootMs = 120'000;
+  const auto now = NowMs();
+  const bool loop_ok = loop_started_.load()
+                           ? now - loop_tick_ms_.load() < kStaleMs
+                           : now - watchdog_armed_ms_.load() < kBootMs;
+  return loop_ok && now - reap_tick_ms_.load() < kStaleMs;
+}
+
+void AemberInit::StartWatchdog() {
+  const auto options = aember::utils::watchdog::OptionsFromCmdline();
+  if (!options) {
+    log_.warn("Watchdog disabled (aember.watchdog=0)");
+    return;
+  }
+  watchdog_ = aember::utils::watchdog::Watchdog::Open(*options);
+  if (!watchdog_) return;
+  watchdog_armed_ms_ = NowMs();
+  reap_tick_ms_ = NowMs();
+  watchdog_->Start([this] { return Alive(); });
 }
 
 void AemberInit::StopReaperThread() {
@@ -452,7 +509,9 @@ void AemberInit::RequestShutdown(ShutdownAction action) {
 void AemberInit::RunLoop() {
   log_.info("Aember Init run loop started");
   std::unique_lock lock{mtx_};
+  loop_started_ = true;
   while (running_.load() && shutdown_.load() == ShutdownAction::kNone) {
+    loop_tick_ms_ = NowMs();
     cv_.wait_for(lock, std::chrono::seconds(1));
   }
   log_.info("Aember Init run loop exiting");
