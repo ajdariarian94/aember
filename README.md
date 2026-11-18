@@ -101,6 +101,17 @@ aember rpi launch --timeout 60       # smoke test in QEMU (raspi3b)
 The serial console is on GPIO 14/15 (115200 8N1); press `d` there for a
 shell. On WSL, attach the card reader first with `usbipd attach --wsl`.
 
+### Try it on your Linux desktop
+
+```sh
+aember appimage                      # build/appimage/aember-x86_64-v<version>.AppImage
+```
+
+Double-click the AppImage: it opens a window, asks for your password and
+runs aember there as PID 1 in its own process, mount and network
+namespaces (with a private, NATed network). It never touches your
+machine's network; closing the window ends it and cleans up.
+
 ## Commands
 
 | Command | What it does |
@@ -114,6 +125,7 @@ shell. On WSL, attach the card reader first with `usbipd attach --wsl`.
 | `aember fetch-resources` | Download kernel, BusyBox, LXC and SDK only |
 | `aember lint` | ruff, black, clang-format, cmake-format, cmakelint |
 | `aember generate-docs` / `view-docs` | Doxygen documentation |
+| `aember appimage` | x86-64 AppImage: aember isolated on a Linux desktop |
 | `aember changelog` / `release` / `publish` | Version bump, release archives, GitHub release |
 
 `aember --help` and `aember <command> --help` list every option.

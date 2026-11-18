@@ -3,6 +3,7 @@
 import typer  # type: ignore
 from aember.utils.logging import setup_logging
 
+from .base.appimage import appimage
 from .base.build import build
 from .base.changelog import changelog
 from .base.clean import clean
@@ -56,11 +57,12 @@ aember.command(
     help="Download kernel, BusyBox, LXC and SDK from aember-resources",
 )(fetch_resources)
 aember.command(help="Create a release archive")(release)
+aember.command(help="x86-64 AppImage: aember isolated on a Linux desktop")(appimage)
 aember.command(help="Upload build/release/ as GitHub release v<VERSION>")(publish)
 aember.command(help="Serve documentation locally")(view_docs)
-aember.command(help="Run the C++ unit tests (after `aember qemu build --with-tests`)")(
-    test
-)
+aember.command(
+    help="Run the CLI and C++ unit tests (C++: after `aember qemu build --with-tests`)"
+)(test)
 
 # ----------------------------
 # Aember commands

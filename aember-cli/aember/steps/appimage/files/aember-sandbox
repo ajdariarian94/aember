@@ -1,0 +1,187 @@
+#!/bin/sh
+# aember-sandbox: runs as root (started by the AppImage's AppRun through
+# pkexec or sudo). Starts aember as PID 1 in new PID, mount, network,
+# cgroup, UTS and IPC namespaces:
+#
+#   - the root file system: the AppImage's rootfs/ (read-only, mounted from
+#     the AppImage file by offset, or an unpacked AppDir) under a tmpfs
+#     overlay: nothing aember writes survives the run;
+#   - its own /dev (this terminal as /dev/console), /proc, /sys, cgroup2;
+#   - the network: slirp4netns NATs the namespace's eth0 in user space;
+#     the host's interfaces, routes and firewall are never touched, and the
+#     host's own 127.0.0.1 is unreachable from inside;
+#   - aember's power-off ends its PID namespace, not this machine.
+#
+# Closing the window (SIGHUP) or any exit kills the namespace's PID 1: the
+# kernel stops everything in it and drops its mounts and network.
+#
+# Usage: aember-sandbox <appimage|""> <offset|""> <appdir> <display|""> <slirp4netns>
+set -eu
+
+if [ "${AEMBER_SANDBOX_STAGE:-1}" = 2 ]; then
+  # ---- Stage 2: PID 1 of the new namespaces, until it execs aember ----
+  IMAGE=$1 OFFSET=$2 APPDIR=$3 DISPLAY_NAME=$4 CONSOLE=$5
+  B=/mnt  # private mount namespace: a tmpfs here is invisible outside
+  mount -t tmpfs -o mode=0755 tmpfs $B
+  mkdir -p $B/payload $B/rw $B/root
+  if [ -n "$IMAGE" ]; then
+    mount -t squashfs -o ro,loop,offset="$OFFSET" "$IMAGE" $B/payload
+    LOWER=$B/payload/rootfs
+  else
+    LOWER=$APPDIR/rootfs
+  fi
+  mount -t tmpfs -o mode=0755 tmpfs $B/rw
+  mkdir -p $B/rw/upper $B/rw/work
+  mount -t overlay overlay \
+    -o lowerdir=$LOWER,upperdir=$B/rw/upper,workdir=$B/rw/work $B/root
+  R=$B/root
+
+  mkdir -p $R/proc $R/sys $R/dev $R/tmp $R/run $R/etc/aember
+  mount -t proc proc $R/proc
+  mount -t sysfs sysfs $R/sys
+  mount -t cgroup2 cgroup2 $R/sys/fs/cgroup 2>/dev/null || true
+  mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs $R/tmp
+  mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs $R/run
+
+  # /dev: only what aember needs; this terminal is the console.
+  mount -t tmpfs -o mode=0755,nosuid tmpfs $R/dev
+  mknod -m 666 $R/dev/null c 1 3
+  mknod -m 666 $R/dev/zero c 1 5
+  mknod -m 666 $R/dev/full c 1 7
+  mknod -m 666 $R/dev/random c 1 8
+  mknod -m 666 $R/dev/urandom c 1 9
+  mknod -m 666 $R/dev/tty c 5 0
+  mknod -m 660 $R/dev/loop-control c 10 237
+  i=0
+  while [ $i -lt 64 ]; do  # container images are loop-mounted SquashFS
+    mknod -m 660 $R/dev/loop$i b 7 $i
+    i=$((i + 1))
+  done
+  mkdir -p $R/dev/pts $R/dev/shm
+  mount -t devpts -o newinstance,ptmxmode=0666,mode=0620 devpts $R/dev/pts
+  ln -s pts/ptmx $R/dev/ptmx
+  mount -t tmpfs -o mode=1777 tmpfs $R/dev/shm
+  if [ -n "$CONSOLE" ] && [ -c "$CONSOLE" ]; then
+    touch $R/dev/console
+    mount --bind "$CONSOLE" $R/dev/console
+  fi
+
+  echo "nameserver 10.0.2.3" >$R/etc/resolv.conf  # slirp4netns' DNS
+  hostname aember
+
+  if [ -n "$DISPLAY_NAME" ] && [ -d /tmp/.X11-unix ]; then
+    mkdir -p $R/tmp/.X11-unix
+    mount --bind /tmp/.X11-unix $R/tmp/.X11-unix
+    cat >$R/etc/aember/lxc-extra.conf <<EOF
+# Written by the aember AppImage: containers draw on your display.
+lxc.mount.entry = /tmp/.X11-unix tmp/.X11-unix none bind,create=dir,optional 0 0
+lxc.environment = DISPLAY=$DISPLAY_NAME
+lxc.environment = QT_QPA_PLATFORM=xcb
+lxc.environment = QT_XCB_GL_INTEGRATION=none
+lxc.environment = QT_QUICK_BACKEND=software
+lxc.environment = LIBGL_ALWAYS_SOFTWARE=1
+EOF
+  fi
+
+  # slirp4netns adds eth0 from outside; aember's network service wants it.
+  i=0
+  while [ ! -e /sys/class/net/eth0 ] && [ $i -lt 50 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ -e /sys/class/net/eth0 ] || echo "aember-sandbox: no network (eth0 missing)" >&2
+
+  exec chroot $R /usr/bin/aember --root --chroot
+fi
+
+# ---- Stage 1: on the host, as root ----
+IMAGE=$1 OFFSET=$2 APPDIR=$3 DISPLAY_NAME=$4 SLIRP=$5
+# The terminal (the window): aember's /dev/console. Determined here: the
+# background job below would get /dev/null as stdin otherwise.
+CONSOLE=$(tty 2>/dev/null || true)
+
+for tool in unshare mount chroot mknod; do
+  command -v $tool >/dev/null 2>&1 || {
+    echo "aember-sandbox: '$tool' not found" >&2
+    exit 1
+  }
+done
+
+# A cgroup of our own: LXC creates the containers' cgroups below it (cgroup
+# namespace), and cleanup removes the whole subtree.
+CG=""
+SELF_CG=$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)
+if [ -n "$SELF_CG" ] && [ -d "/sys/fs/cgroup$SELF_CG" ]; then
+  CG="/sys/fs/cgroup$SELF_CG/aember-sandbox-$$"
+  if mkdir "$CG" 2>/dev/null && echo $$ >"$CG/cgroup.procs" 2>/dev/null; then
+    :
+  else
+    rmdir "$CG" 2>/dev/null || true
+    CG=""
+  fi
+fi
+
+UPID="" CPID="" SPID=""
+cleanup() {
+  trap - EXIT HUP INT TERM
+  [ -n "$CPID" ] && kill -KILL "$CPID" 2>/dev/null || true
+  [ -n "$UPID" ] && wait "$UPID" 2>/dev/null || true
+  if [ -n "$SPID" ]; then
+    kill "$SPID" 2>/dev/null || true
+    wait "$SPID" 2>/dev/null || true  # out of the cgroup before rmdir
+  fi
+  if [ -n "$CG" ]; then
+    # Leave our cgroup first, then remove it with what LXC made below it.
+    echo $$ >"/sys/fs/cgroup$SELF_CG/cgroup.procs" 2>/dev/null || true
+    find "$CG" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
+
+export AEMBER_SANDBOX_STAGE=2
+
+# One aember run; sets STATUS to unshare's exit status.
+run_once() {
+  unshare --mount --propagation private --pid --net --cgroup --uts --ipc \
+    --fork --kill-child=SIGKILL \
+    "$0" "$IMAGE" "$OFFSET" "$APPDIR" "$DISPLAY_NAME" "$CONSOLE" <&0 &
+  UPID=$!
+
+  # The namespace's PID 1, as the host sees it.
+  CPID=""
+  i=0
+  while [ -z "$CPID" ] && [ $i -lt 100 ]; do
+    CPID=$(cat "/proc/$UPID/task/$UPID/children" 2>/dev/null | awk '{print $1}')
+    [ -n "$CPID" ] || sleep 0.05
+    i=$((i + 1))
+  done
+  if [ -z "$CPID" ]; then
+    echo "aember-sandbox: the namespace did not start" >&2
+    exit 1
+  fi
+
+  # User-mode NAT for the namespace: 10.0.2.100/24, gateway 10.0.2.2, DNS
+  # 10.0.2.3; no way to the host's loopback.
+  "$SLIRP" --configure --mtu=65520 --disable-host-loopback "$CPID" eth0 \
+    >/dev/null 2>&1 &
+  SPID=$!
+
+  STATUS=0
+  wait "$UPID" || STATUS=$?
+  UPID="" CPID=""
+  kill "$SPID" 2>/dev/null || true
+  wait "$SPID" 2>/dev/null || true
+  SPID=""
+}
+
+# aember's reboot(2) in its PID namespace ends the namespace: power-off and
+# halt as SIGINT (130), reboot as SIGHUP (129). Reboot starts it again.
+while :; do
+  run_once
+  case $STATUS in
+    129) echo "aember-sandbox: aember rebooted, starting it again" ;;
+    130) echo "aember-sandbox: aember powered off"; exit 0 ;;
+    *) exit "$STATUS" ;;
+  esac
+done
