@@ -11,8 +11,12 @@
 #include <aember-libs/root-manager/root-manager.h>
 
 #include <array>
+#include <chrono>
+#include <filesystem>
 #include <format>
 #include <fstream>
+#include <optional>
+#include <thread>
 
 #include <dirent.h>
 #include <errno.h>
@@ -289,39 +293,68 @@ bool RootManager::UnmountOldRoot() {
 // ---------------------------------------------------------------------------
 
 std::string RootManager::ResolveDevice(std::string_view device) {
-  if (device.starts_with("UUID=")) {
-    return FindDeviceByUUID(device.substr(5));
+  // rootwait: the root device (an SD card on a Raspberry Pi) shows up
+  // asynchronously after the kernel started init. Poll for it.
+  const auto deadline = std::chrono::steady_clock::now() + root_wait_;
+  const bool by_uuid = device.starts_with("UUID=");
+  const bool by_label = device.starts_with("LABEL=");
+  bool logged = false;
+  while (true) {
+    std::string found;
+    if (by_uuid) {
+      found = FindBlockDevice("UUID", device.substr(5));
+    } else if (by_label) {
+      found = FindBlockDevice("LABEL", device.substr(6));
+    } else if (::access(std::string{device}.c_str(), F_OK) == 0) {
+      found = device;
+    }
+    if (!found.empty()) { return found; }
+    if (std::chrono::steady_clock::now() >= deadline) { return {}; }
+    if (!logged) {
+      log_.info("Waiting for root device {}", device);
+      logged = true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds{250});
   }
-  if (device.starts_with("LABEL=")) {
-    return FindDeviceByLabel(device.substr(6));
+}
+
+std::optional<RootManager::Ext4Id> RootManager::ReadExt4Id(
+    const std::string& path) {
+  std::ifstream dev{path, std::ios::binary};
+  if (!dev) { return std::nullopt; }
+  // The superblock starts at byte 1024: s_magic at 0x38, s_uuid at 0x68,
+  // s_volume_name at 0x78 (16 bytes each, label NUL-padded).
+  std::array<unsigned char, 1024> sb{};
+  dev.seekg(1024);
+  if (!dev.read(reinterpret_cast<char*>(sb.data()), sb.size())) {
+    return std::nullopt;
   }
-  return std::string{device};
+  if (sb[0x38] != 0x53 || sb[0x39] != 0xEF) { return std::nullopt; }
+
+  Ext4Id id;
+  for (int i = 0; i < 16; ++i) {
+    if (i == 4 || i == 6 || i == 8 || i == 10) { id.uuid += '-'; }
+    id.uuid += std::format("{:02x}", sb[0x68 + i]);
+  }
+  const auto* label = reinterpret_cast<const char*>(&sb[0x78]);
+  id.label.assign(label, strnlen(label, 16));
+  return id;
 }
 
-std::string RootManager::FindDeviceByUUID(std::string_view uuid) {
-  log_.debug("Searching device by UUID={}", uuid);
-  return ResolveSymlink(std::format("/dev/disk/by-uuid/{}", uuid));
-}
-
-std::string RootManager::FindDeviceByLabel(std::string_view label) {
-  log_.debug("Searching device by LABEL={}", label);
-  return ResolveSymlink(std::format("/dev/disk/by-label/{}", label));
-}
-
-std::string RootManager::ResolveSymlink(std::string_view path) {
-  const std::string path_str{path};
-
-  struct stat st {};
-  if (lstat(path_str.c_str(), &st) != 0 || !S_ISLNK(st.st_mode)) { return {}; }
-
-  char link[PATH_MAX];
-  const ssize_t len = readlink(path_str.c_str(), link, sizeof(link) - 1);
-  if (len <= 0) { return {}; }
-  link[len] = '\0';
-
-  char real[PATH_MAX];
-  if (realpath(path_str.c_str(), real)) { return real; }
-
+std::string RootManager::FindBlockDevice(std::string_view key,
+                                         std::string_view value,
+                                         const std::string& sys_block,
+                                         const std::string& dev_dir) {
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator{sys_block, ec}) {
+    const auto path = dev_dir + "/" + entry.path().filename().string();
+    const auto id = ReadExt4Id(path);
+    if (!id) { continue; }
+    if ((key == "LABEL" && id->label == value) ||
+        (key == "UUID" && id->uuid == value)) {
+      return path;
+    }
+  }
   return {};
 }
 

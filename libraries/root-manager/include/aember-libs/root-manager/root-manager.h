@@ -14,7 +14,9 @@
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/root/root-config.h>
 
+#include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -59,6 +61,26 @@ class RootManager {
   /** Returns true if running inside initramfs (no services.json present). */
   [[nodiscard]] static bool IsInInitramfs();
 
+  /// Label and UUID of an ext2/3/4 filesystem, read from its superblock.
+  struct Ext4Id {
+    std::string label;
+    std::string uuid;  ///< lower case, 8-4-4-4-12
+  };
+  /// nullopt if @p path holds no ext2/3/4 filesystem.
+  static std::optional<Ext4Id> ReadExt4Id(const std::string& path);
+
+  /// Block device whose ext4 LABEL or UUID (@p key) is @p value, by reading
+  /// the superblocks of every device in @p sys_block (no udev needed: aember
+  /// has no /dev/disk/by-label). "" if none.
+  static std::string FindBlockDevice(
+      std::string_view key, std::string_view value,
+      const std::string& sys_block = "/sys/class/block",
+      const std::string& dev_dir = "/dev");
+
+  /// How long ResolveDevice waits for the root device (rootwait).
+  static constexpr std::chrono::seconds kRootWait{30};
+  void SetRootWait(std::chrono::milliseconds wait) { root_wait_ = wait; }
+
   /// Delete everything under @p dir_fd that lives on @p root_dev (the
   /// initramfs); other filesystems (mount points) and symlink targets are
   /// left alone. Used by SwitchRoot to free the initramfs RAM.
@@ -72,9 +94,6 @@ class RootManager {
   /** Dump /proc/self/mountinfo to the log for diagnostics. */
   void DumpMountInfo(std::string_view reason);
 
-  /** Resolve a symlink to its real device path. */
-  [[nodiscard]] std::string ResolveSymlink(std::string_view path);
-
  private:
   bool PrepareNewRoot();
   bool MountEssentialFilesystems();
@@ -82,13 +101,12 @@ class RootManager {
   bool UnmountOldRoot();
 
   [[nodiscard]] std::string ResolveDevice(std::string_view device);
-  [[nodiscard]] std::string FindDeviceByUUID(std::string_view uuid);
-  [[nodiscard]] std::string FindDeviceByLabel(std::string_view label);
 
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
 
   std::string new_root_path_;
   bool pivoted_{false};
+  std::chrono::milliseconds root_wait_{kRootWait};
 
   mutable Logger log_{"root-manager"};
 };

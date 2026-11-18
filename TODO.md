@@ -100,8 +100,12 @@ BusyBox init / s6 / runit / dinit.
 - [ ] **OTA updates with rollback** (A/B rootfs). Most important for fleets.
 - [ ] Signed images; seccomp/AppArmor profiles for containers; dropping
   privileges where possible.
-- [ ] **aarch64 / Raspberry Pi** on real hardware. Builds, packs and boots in
-  QEMU (`virt`, Cortex-A72) since 0.10.0 with aember-resources v0.1.2.
+- [ ] **Raspberry Pi 4 on real hardware**: `aember rpi image|flash|launch`
+  (2026-11-18) build and write an SD image; tested in QEMU raspi3b only
+  (no raspi4b in QEMU 8.2). Not yet on the board. Follow-ups: grow the root
+  partition to the card size on first boot; HDMI console (vc4 DRM, not in
+  the kernel yet); Wi-Fi/Bluetooth (trimmed); config.txt overlays (the
+  firmware's .dtbo files are for the downstream device tree).
 - [ ] **arm32 (ARMv7-A hf NEON, `arm-poky-linux`)** on real boards (i.MX6,
   STM32MP1, Raspberry Pi 2). Builds, packs and boots in QEMU (`virt`,
   Cortex-A15) since 0.11.0 with aember-resources v0.1.3.
