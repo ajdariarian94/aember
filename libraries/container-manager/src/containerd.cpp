@@ -64,6 +64,9 @@ int RunContainerd(const ContainerdOptions& options) {
   if (!channel.Valid()) {
     log.warn("no channel to PID 1 on fd 3; running standalone");
   }
+  ipc::ReceiveControl(channel);  // muted if a debug shell is open
+  // Keeps what the console doesn't show while a debug shell is open.
+  aember::utils::logging::enable_file_logging("/var/log/aember-containerd.log");
 
   if (Lxc() == nullptr) {
     log.critical("cannot load liblxc: {}", LxcLoadError());
@@ -108,7 +111,9 @@ int RunContainerd(const ContainerdOptions& options) {
   aember::child_supervisor::ChildSupervisor reaper;
   bool stop = false;
   while (!stop) {
-    std::vector<pollfd> fds{{sigfd, POLLIN, 0}};
+    // fds[1]: PID 1's channel (console mute); negative = ignored by poll.
+    std::vector<pollfd> fds{{sigfd, POLLIN, 0},
+                            {channel.Closed() ? -1 : channel.Fd(), POLLIN, 0}};
     std::vector<std::string> names;
     for (const auto& [name, w] : watched) {
       fds.push_back({w.second, POLLIN, 0});
@@ -123,9 +128,11 @@ int RunContainerd(const ContainerdOptions& options) {
       }
     }
 
-    for (std::size_t i = 1; i < fds.size(); ++i) {
+    if (fds[1].revents != 0) ipc::ReceiveControl(channel);
+
+    for (std::size_t i = 2; i < fds.size(); ++i) {
       if (fds[i].revents == 0) continue;
-      const auto it = watched.find(names[i - 1]);
+      const auto it = watched.find(names[i - 2]);
       log.info(
           "container '{}' init (pid {}) exited", it->first, it->second.first);
       containers.HandleExit(it->second.first, 1);

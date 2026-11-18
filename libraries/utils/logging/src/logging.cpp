@@ -95,6 +95,10 @@ void set_console_logging(bool enabled) {
   s.console->set_level(enabled ? spdlog::level::trace : spdlog::level::off);
 }
 
+bool console_logging_enabled() {
+  return GetState().console->level() != spdlog::level::off;
+}
+
 void enable_file_logging(const std::filesystem::path& path) {
   auto& s = GetState();
   {

@@ -178,7 +178,7 @@ void DebugShell::Listen(std::stop_token st, const std::string& console,
 pid_t DebugShell::SpawnShell(const std::string& console) {
   // PID 1's log lines would interleave with the shell; the file log keeps
   // everything.
-  aember::utils::logging::set_console_logging(false);
+  ShellOwnsConsole(true);
 
   const pid_t pid = ::fork();
   if (pid == 0) {
@@ -203,7 +203,7 @@ pid_t DebugShell::SpawnShell(const std::string& console) {
 
   if (pid < 0) {
     log_.error("fork() failed: {}", strerror(errno));
-    aember::utils::logging::set_console_logging(true);
+    ShellOwnsConsole(false);
     return -1;
   }
 
@@ -224,8 +224,18 @@ void DebugShell::WaitForShell(std::stop_token st, pid_t pid) {
   }
   if (st.stop_requested()) return;
 
-  aember::utils::logging::set_console_logging(true);
+  ShellOwnsConsole(false);
   log_.info("Debug shell exited");
+}
+
+void DebugShell::ShellOwnsConsole(bool owns) {
+  aember::utils::logging::set_console_logging(!owns);
+  if (!on_console_) return;
+  try {
+    on_console_(owns);
+  } catch (const std::exception& e) {
+    log_.error("console callback: {}", e.what());
+  } catch (...) { log_.error("console callback failed"); }
 }
 
 }  // namespace aember::utils::shell

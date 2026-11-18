@@ -45,6 +45,9 @@ void enable_console_silence();
  */
 void set_console_logging(bool enabled);
 
+/// False while console output is muted by set_console_logging(false).
+[[nodiscard]] bool console_logging_enabled();
+
 /**
  * @brief Also log to a file (rotating, 1 MiB x 3). Later calls are ignored.
  *        A file that can't be opened is reported and skipped, never thrown.

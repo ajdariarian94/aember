@@ -9,6 +9,7 @@
  */
 
 #include <aember-libs/utils/ipc/channel.h>
+#include <aember-libs/utils/logging/logging.h>
 
 #include <array>
 #include <cerrno>
@@ -57,12 +58,13 @@ Channel Channel::Inherited() {
   return Channel{kInheritedFd};
 }
 
-bool Channel::Send(const nlohmann::json& message) const {
+bool Channel::Send(const nlohmann::json& message, bool wait) const {
   if (fd_ < 0) return false;
   const std::string text = message.dump();
   if (text.size() > kMaxMessage) return false;
   // MSG_NOSIGNAL: a dead peer is EPIPE, not a SIGPIPE that kills us.
-  return ::send(fd_, text.data(), text.size(), MSG_NOSIGNAL) ==
+  const int flags = MSG_NOSIGNAL | (wait ? 0 : MSG_DONTWAIT);
+  return ::send(fd_, text.data(), text.size(), flags) ==
          static_cast<ssize_t>(text.size());
 }
 
@@ -105,6 +107,25 @@ std::string TypeOf(const nlohmann::json& message) {
   if (!message.is_object()) return {};
   const auto it = message.find("type");
   return it != message.end() && it->is_string() ? it->get<std::string>() : "";
+}
+
+nlohmann::json Console(bool enabled) {
+  return {{"type", "console"}, {"enabled", enabled}};
+}
+
+bool ApplyControl(const nlohmann::json& message) {
+  if (TypeOf(message) != "console") return false;
+  const auto it = message.find("enabled");
+  if (it == message.end() || !it->is_boolean()) return false;
+  aember::utils::logging::set_console_logging(it->get<bool>());
+  return true;
+}
+
+void ReceiveControl(Channel& channel) {
+  if (!channel.Valid()) return;
+  while (auto message = channel.Receive(std::chrono::milliseconds{0})) {
+    ApplyControl(*message);
+  }
 }
 
 }  // namespace aember::utils::ipc

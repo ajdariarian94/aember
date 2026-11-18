@@ -53,7 +53,8 @@ class ProcessManager {
 
   using RestartCallback = std::move_only_function<void(const std::string&)>;
   /// PID 1's end of the channel of a process started with `ipc` (one call
-  /// per start; a restart brings a new channel).
+  /// per start; a restart brings a new channel). Called before the fork, so
+  /// what the owner sends right away is waiting when the process starts.
   using ChannelCallback = std::move_only_function<void(
       const std::string& /*name*/, aember::utils::ipc::Channel)>;
 

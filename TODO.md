@@ -76,8 +76,12 @@ off by guestfish. Left:
   container whose init exits stays failed, as before the split).
 - [ ] netd: renew the DHCP lease (now possible: netd is a long-running
   process).
-- [ ] Daemon output still goes to the console while a debug shell is open
-  (only PID 1's console logging is muted).
+- [x] **Daemons quiet while a debug shell is open** (2026-11-18): PID 1
+  publishes `{"type":"console","enabled":false|true}` to its daemons
+  (`Hub::Publish`, also to ones (re)started meanwhile; the channel goes
+  to the hub before the fork, so a new daemon is muted before its first
+  line). Left: output that bypasses spdlog (liblxc's own stderr, services
+  from services.json, container consoles) still reaches the console.
 - [ ] posix_spawn + pidfd for services (fork in a multi-threaded PID 1).
 - [x] **No BusyBox calls from PID 1** (2026-11-17): loop + `mount(2)`,
   `finit_module(2)` with `modules.dep`, rtnetlink, a built-in DHCP client
