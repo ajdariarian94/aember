@@ -118,7 +118,7 @@ aember-resources (`../aember-resources`,
 <https://github.com/ajdariarian94/aember-resources>) builds the low-level
 pieces with kas/Yocto and publishes them as assets of the GitHub release
 `v<version>`. The version aember uses is pinned in
-`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.5`;
+`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.6`;
 x64, aarch64 and arm32).
 
 `aember fetch-resources` (also the first step of `aember qemu build`,
@@ -274,11 +274,14 @@ BusyBox stays in the image for the debug shell and interactive use.
   2 min), so a hung PID 1 really resets the board. `Stop()` feeds
   unconditionally while services stop and disarms it (magic close) for a
   requested reboot/poweroff/halt; stopping without a request leaves it
-  armed, so the board resets instead of reaping forever. x64's kernel has
-  no watchdog driver ("No watchdog", carries on); the Pi has
-  `bcm2835_wdt`. **QEMU's raspi machines reset the instant the BCM2835
-  watchdog starts** (no countdown), so `aember rpi launch` boots with
-  `aember.watchdog=0`; only a real Pi tests it.
+  armed, so the board resets instead of reaping forever. The kernels have
+  `i6300esb` (aember-resources v0.1.6) and `aember app launch` adds QEMU's
+  `-device i6300esb` (a real countdown, reset on expiry), so QEMU tests
+  the watchdog on every architecture; the Pi has `bcm2835_wdt`. **QEMU's
+  raspi machines reset the instant the BCM2835 watchdog starts** (no
+  countdown), so `aember rpi launch` boots with `aember.watchdog=0`.
+  Reset check: `aember app launch --headless --append aember.watchdog=0`,
+  then `echo 1 > /dev/watchdog` from the debug shell: the VM reboots.
 - The file logs `/var/log/aember-{init,netd,containerd}.log` rotate
   (1 MiB × 3 each).
 
@@ -489,6 +492,12 @@ C++:
   shell) and run in the dev container with **`aember test`**
   (`-k <name>` to filter, `-n <N>` to repeat): it starts each binary through
   the SDK sysroot's loader with the SDK and LXC libs on the library path.
+  It first runs the CLI's own tests (`aember-cli/tests`, stdlib
+  `unittest`, no extra packages; `--no-cli` skips them, `-k cli` runs
+  only them): pure logic of the CLI (QEMU command lines, which services
+  get packed, Pi boot config). Add one for every CLI change.
+- `aember app launch --append "<kernel args>"` adds to the kernel command
+  line (e.g. `aember.watchdog=0`, `aember.shell=1`).
 - Test binaries go into the rootfs image only (`tests_root`), not the
   initramfs: 20 Debug suites (~300 MB) would not fit the VM's 512 MB RAM.
   Tests that need root (loop devices, veth/bridges, the DHCP exchange,
