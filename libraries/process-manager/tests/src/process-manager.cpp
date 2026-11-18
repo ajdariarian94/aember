@@ -15,9 +15,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <optional>
 #include <thread>
 
 #include <signal.h>
+#include <sys/wait.h>
 
 namespace {
 
@@ -91,6 +93,57 @@ TEST(ProcessManagerTest, StopWithReaperReturnsPromptly) {
   EXPECT_FALSE(pm.GetPid("sleeper").has_value());
   EXPECT_EQ(pm.GetState("sleeper"), State::Stopped);
   EXPECT_FALSE(supervisor.IsTracked(*pid));
+}
+
+// A restart pending at shutdown: the manager used to detach the restart
+// thread, which then ran on a destroyed manager. Now the destructor stops
+// it at once and the restart never happens.
+TEST(ProcessManagerTest, DestructorCancelsPendingRestart) {
+  std::atomic<int> restarts{0};
+  std::optional<ProcessManager> pm{std::in_place};
+  pm->SetRestartCallback([&](const std::string&) { ++restarts; });
+  ProcessManager::ProcessConfig cfg;
+  cfg.name = "quitter";
+  cfg.executable = "false";
+  cfg.restart_on_failure = true;
+  cfg.restart_delay = 30s;
+  ASSERT_TRUE(pm->AddProcess(cfg));
+
+  const auto pid = pm->Start("quitter");
+  ASSERT_TRUE(pid.has_value());
+  int status = 0;
+  ASSERT_EQ(::waitpid(*pid, &status, 0), *pid);
+  pm->HandleExit(*pid, status);  // schedules the restart in 30 s
+  EXPECT_EQ(pm->GetState("quitter"), State::Restarting);
+
+  const auto t0 = std::chrono::steady_clock::now();
+  pm.reset();
+  EXPECT_LT(std::chrono::steady_clock::now() - t0, 2s);
+  EXPECT_EQ(restarts.load(), 0);
+}
+
+// A due restart still happens (and its thread is cleaned up later).
+TEST(ProcessManagerTest, ScheduledRestartRuns) {
+  std::atomic<int> restarts{0};
+  ProcessManager pm;
+  pm.SetRestartCallback([&](const std::string&) { ++restarts; });
+  ProcessManager::ProcessConfig cfg;
+  cfg.name = "quitter";
+  cfg.executable = "false";
+  cfg.restart_on_failure = true;
+  cfg.restart_delay = 50ms;
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  for (int round = 1; round <= 2; ++round) {
+    const auto pid = pm.Start("quitter");
+    ASSERT_TRUE(pid.has_value());
+    int status = 0;
+    ASSERT_EQ(::waitpid(*pid, &status, 0), *pid);
+    pm.HandleExit(*pid, status);
+    for (int i = 0; i < 100 && restarts.load() < round; ++i) {
+      std::this_thread::sleep_for(10ms);
+    }
+    EXPECT_EQ(restarts.load(), round);
+  }
 }
 
 }  // namespace

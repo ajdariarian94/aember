@@ -19,8 +19,10 @@ class CompileCommandsMerger:
         """
         build_dir = ctx.root / "build" / "configure" / ctx.architecture / ctx.build_type
 
-        sources = CompileCommandsMerger._find(build_dir)
         output = build_dir / "compile_commands.json"
+        # The output sits where the superbuild's own file is: never merge it
+        # back in (each build used to add another copy of every entry).
+        sources = [s for s in CompileCommandsMerger._find(build_dir) if s != output]
 
         if not sources:
             log.warning("No compile_commands.json files found under %s", build_dir)
@@ -49,9 +51,12 @@ class CompileCommandsMerger:
 
     @staticmethod
     def _merge_entries(sources: list[Path]) -> list[dict]:
-        merged: list[dict] = []
+        """One entry per (directory, file); a later source wins."""
+        merged: dict[tuple[str, str], dict] = {}
         for src in sources:
             entries = json.loads(src.read_text())
-            merged.extend(entries)
+            for entry in entries:
+                key = (entry.get("directory", ""), entry.get("file", ""))
+                merged[key] = entry
             log.debug("Merged %d entries from %s", len(entries), src)
-        return merged
+        return list(merged.values())

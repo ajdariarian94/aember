@@ -544,8 +544,6 @@ CLI's history up to `af5bc15`). It's regular files here: edit it directly.
 
 ## Known issues (don't fix unless asked)
 
-- `cli/qemu/build.py`: `if build_tests or BuildType.debug:` is always true,
-  so every `aember qemu build` starts with `CleanStep`.
 - The dev Dockerfile still has Yocto-era leftovers (GNU tar 1.34
   downgrade, gcc-12/14 PPA). Harmless, but can go on the next image rebuild.
 
