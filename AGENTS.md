@@ -414,6 +414,33 @@ privileged helper container of the dev image (`steps/launching/chroot.py`).
   (`-snapshot`, the image stays untouched). It tests the Pi boot path (DT,
   SD driver, root by label, serial), not the GPU firmware step.
 
+**AppImage: `aember appimage`** (`steps/appimage/`, `config/appimage.py`)
+builds `build/appimage/aember-x86_64-v<V>.AppImage` from the packed x64
+Release system: aember on a Linux desktop, isolated.
+- Layout: `AppRun` (launcher, as the user), `libexec/aember-sandbox` (root
+  helper), `usr/bin/xterm` + its libraries from the dev image (not glibc),
+  `usr/bin/slirp4netns` (static, pinned), `rootfs/` (initramfs tree +
+  services + overlay). Runtime: uruntime (pinned), which falls back to
+  extract-and-run without FUSE; payload SquashFS xz.
+- Flow: double-click → AppRun opens its own xterm window → root via
+  pkexec (falls back to sudo in the window when pkexec isn't authorized,
+  e.g. no polkit agent) → `aember-sandbox`: `unshare` (mount with private
+  propagation, pid, net, cgroup, uts, ipc; `--kill-child`), tmpfs overlay
+  over the read-only rootfs (mounted from the AppImage by
+  `--appimage-offset`, as root can't read the user's FUSE mount), own
+  `/dev` (window pty = /dev/console, devpts, 64 loop nodes), slirp4netns
+  NAT with `--disable-host-loopback`, then `chroot … aember --root
+  --chroot`. Containers get the display through `xhost
+  +si:localuser:root` (revoked at exit).
+- aember's power-off ends its PID namespace (status 0), reboot starts it
+  again; closing the window kills the namespace's PID 1 and the cgroup
+  subtree is removed.
+- Tested on a clean Ubuntu 24.04 VM: `tools/tests/appimage-vm-test.sh`
+  (QEMU + KVM in the dev container, run as root for /dev/kvm; cloud image
+  pinned; Xvfb + xdotool type the password). pkexec there needs a logind
+  session; its text agent still fails headless ("No session for cookie"),
+  so the test exercises the sudo fallback after it.
+
 Debug shell: boot never waits for it. Press `d` on the console at any time
 (a listener thread in `utils/shell/debug-shell.cpp` watches it; after the
 shell exits, `d` opens a new one). `aember.shell=1` on the kernel command

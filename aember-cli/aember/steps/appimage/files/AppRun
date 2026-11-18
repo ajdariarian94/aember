@@ -1,0 +1,105 @@
+#!/bin/sh
+# aember AppImage launcher. Runs as you: opens a window, asks for root
+# (pkexec, or sudo in the window) and starts aember as PID 1 in its own
+# PID, mount, network, cgroup, UTS and IPC namespaces (libexec/aember-sandbox).
+# Closing the window ends aember and cleans everything up.
+set -eu
+
+HERE=$(dirname "$(readlink -f "$0")")
+APPDIR=${APPDIR:-$HERE}
+export APPDIR
+
+if [ "${1:-}" = "--help" ]; then
+  cat <<'HELP'
+aember AppImage: runs the aember init system isolated on this machine.
+
+  ./aember-x86_64.AppImage            open a window and start aember
+  ./aember-x86_64.AppImage --here     run in this terminal (no window)
+
+Needs root for the namespaces (asked with pkexec, or sudo). aember gets
+its own process, mount and network namespaces with a private, NATed
+network (slirp4netns): it is PID 1 there, its power-off only ends the
+demo, and it never touches this machine's network. In the window, press
+d for aember's debug shell; `kill -USR2 1` there powers aember off.
+HELP
+  exit 0
+fi
+
+# 1. A window of our own, unless we are in it already (or asked not to).
+if [ "${1:-}" = "--in-window" ]; then
+  shift
+elif [ "${1:-}" = "--here" ]; then
+  shift
+elif [ -n "${DISPLAY:-}" ] && [ -z "${AEMBER_NO_WINDOW:-}" ]; then
+  LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    exec "$APPDIR/usr/bin/xterm" -title "aember" -class aember \
+    -fa Monospace -fs 11 -bg '#0d1117' -fg '#d1d7e0' -geometry 140x42 \
+    -e "$APPDIR/AppRun" --in-window "$@"
+elif [ ! -t 0 ]; then
+  echo "aember: no display and no terminal to run in" >&2
+  exit 1
+fi
+
+# 2. What the root helper needs, outside the FUSE mount (root can't read a
+#    FUSE mount of another user): the helper and slirp4netns in a private
+#    temp dir, the payload by its offset in the AppImage file.
+W=$(mktemp -d "${TMPDIR:-/tmp}/aember-appimage.XXXXXX")
+GRANTED=""
+cleanup() {
+  [ -n "$GRANTED" ] && xhost -si:localuser:root >/dev/null 2>&1 || true
+  rm -rf "$W"
+}
+trap cleanup EXIT
+trap 'exit 130' INT HUP TERM
+cp "$APPDIR/libexec/aember-sandbox" "$APPDIR/usr/bin/slirp4netns" "$W/"
+chmod 755 "$W" "$W/aember-sandbox" "$W/slirp4netns"
+
+IMAGE=${APPIMAGE:-}
+OFFSET=""
+if [ -n "$IMAGE" ] && [ -f "$IMAGE" ]; then
+  OFFSET=$("$IMAGE" --appimage-offset 2>/dev/null || true)
+fi
+if [ -z "$OFFSET" ]; then
+  IMAGE=""  # an unpacked AppDir: the helper uses it directly
+fi
+
+# 3. Containers draw on this display (the Qt monitor), if we may grant it.
+DISPLAY_NAME=${DISPLAY:-}
+if [ -n "$DISPLAY_NAME" ] && command -v xhost >/dev/null 2>&1; then
+  xhost +si:localuser:root >/dev/null 2>&1 && GRANTED=1 || true
+fi
+[ -n "$GRANTED" ] || DISPLAY_NAME=""
+
+echo "aember: starting the init system in its own namespaces (needs root)"
+set -- "$W/aember-sandbox" "$IMAGE" "$OFFSET" "$APPDIR" "$DISPLAY_NAME" "$W/slirp4netns"
+STATUS=0
+if [ "$(id -u)" -eq 0 ]; then
+  "$@" || STATUS=$?
+elif command -v pkexec >/dev/null 2>&1; then
+  pkexec "$@" || STATUS=$?
+  case $STATUS in
+    126) echo "aember: the password dialog was dismissed" >&2 ;;
+    127)
+      echo "aember: pkexec did not authorize (wrong password, not an administrator," >&2
+      echo "        or no working polkit agent in this session)" >&2
+      # Desktops without a polkit agent (tiling WMs, minimal installs): the
+      # text agent can fail with "No session for cookie". sudo asks here.
+      if command -v sudo >/dev/null 2>&1; then
+        echo "aember: asking with sudo instead" >&2
+        STATUS=0
+        sudo -- "$@" || STATUS=$?
+      fi
+      ;;
+  esac
+elif command -v sudo >/dev/null 2>&1; then
+  sudo -- "$@" || STATUS=$?
+else
+  echo "aember: needs root, but there is neither pkexec nor sudo" >&2
+  STATUS=1
+fi
+
+if [ "${AEMBER_WAIT_AT_END:-1}" = 1 ] && [ -t 0 ]; then
+  printf '\naember ended (status %s). Press Enter to close.' "$STATUS"
+  read -r _ || true
+fi
+exit "$STATUS"

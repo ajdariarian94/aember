@@ -153,6 +153,18 @@ BusyBox init / s6 / runit / dinit.
 - [ ] Docs and a small example appliance, so others can try it in an
   afternoon.
 
+## AppImage
+
+- [x] **`aember appimage`** (2026-11-19): x86-64 AppImage, aember in its
+  own namespaces with slirp4netns NAT, own window, pkexec/sudo, FUSE or
+  extract fallback; tested on a clean Ubuntu 24.04 VM.
+- [ ] pkexec's text agent fails without a desktop session agent ("No
+  session for cookie"); the launcher falls back to sudo. Test with a real
+  desktop agent (GNOME) once.
+- [ ] uruntime leaves an empty `/tmp/.mount_aember*.lock` file.
+- [ ] Older hosts: xterm and its libraries come from Ubuntu 24.04
+  (glibc 2.39); older distributions would need them built elsewhere.
+
 ## Smaller cleanups / known issues
 
 - [x] `aember qemu build` cleans only with `--with-tests` (the condition
