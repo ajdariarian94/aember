@@ -50,12 +50,27 @@ class QemuProfile:
             "user,id=net0",
             "-device",
             "virtio-net-pci,netdev=net0",
+            # QEMU's PCI watchdog (a real countdown, default action reset):
+            # PID 1 feeds it like a board's /dev/watchdog (kernel driver
+            # i6300esb from aember-resources v0.1.6).
+            "-device",
+            "i6300esb",
         ]
         if self.display:
             cmd += list(self.display)
         else:
             cmd += ["-display", "none", "-vga", "none"]
         return cmd
+
+
+def extra_kernel_args(debug_shell: bool, append: str) -> str:
+    """
+    What `aember app launch` adds to the kernel command line: aember.shell=1
+    (PID 1 opens a debug shell at boot) and the user's --append text.
+    """
+    args = ["aember.shell=1"] if debug_shell else []
+    args += append.split()
+    return " ".join(args)
 
 
 QEMU_PROFILES: dict[str, QemuProfile] = {
@@ -203,8 +218,9 @@ class LaunchStep(Step):
         raw_log_path = str(log_dir / f"qemu-serial-{ts}.log.raw")
         serial_log_path = str(log_dir / f"qemu-serial-{ts}.log")
 
-        # aember.shell=1: PID 1 opens a debug shell on the console at boot
-        kernel_args = "aember.shell=1" if ctx.data.get("debug_shell") else ""
+        kernel_args = extra_kernel_args(
+            ctx.data.get("debug_shell", False), ctx.data.get("append", "")
+        )
         base_cmd = profile.base_cmd(kernel_path, initrd_path, rootfs_img, kernel_args)
         serial_chardevs = [
             "-chardev",

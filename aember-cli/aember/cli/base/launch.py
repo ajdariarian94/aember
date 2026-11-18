@@ -35,6 +35,11 @@ def launch(
         help="Open a debug shell on the console at boot (aember.shell=1); "
         "otherwise press 'd' on the console at any time",
     ),
+    append: str = typer.Option(
+        "",
+        "--append",
+        help='Extra kernel command line, e.g. "aember.watchdog=0" (QEMU only)',
+    ),
     chroot: bool = typer.Option(
         False,
         "--chroot",
@@ -43,5 +48,7 @@ def launch(
     ),
 ):
     ctx = Context(architecture=architecture.value, build_type=build_type.value)
-    ctx.data.update(headless=headless, timeout=timeout, debug_shell=debug_shell)
+    ctx.data.update(
+        headless=headless, timeout=timeout, debug_shell=debug_shell, append=append
+    )
     (ChrootLaunchStep() if chroot else LaunchStep()).run(ctx)
