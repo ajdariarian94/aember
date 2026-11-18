@@ -18,6 +18,9 @@
         "--net=host",
         "--privileged",
 
+        // No core dumps: crashing Pylance once filled ~560 GB with core.* files
+        "--ulimit", "core=0",
+
         // Docker socket
         "-v", "/var/run/docker.sock:/var/run/docker.sock",
 
@@ -53,6 +56,17 @@
             "settings": {
                 "terminal.integrated.defaultProfile.linux": "bash",
                 "python.languageServer": "Pylance",
+
+                // Keep Pylance out of the huge build/vcpkg trees
+                "python.analysis.exclude": [
+                    "**/build/**",
+                    "**/vcpkg/**",
+                    "**/.git/**"
+                ],
+                "files.watcherExclude": {
+                    "**/build/**": true,
+                    "**/vcpkg/**": true
+                },
 
                 // Disable cpptools IntelliSense — clangd takes over instead.
                 "C_Cpp.intelliSenseEngine": "disabled",

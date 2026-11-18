@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -112,11 +114,80 @@ TEST_F(DeleteInitramfsTest, KeepsMountPointsAsRoot) {
 
 TEST(RootManagerTest, PivotWithoutRootDeviceFails) {
   RootManager rm{std::make_shared<aember::mount_manager::MountManager>()};
+  rm.SetRootWait(std::chrono::milliseconds{300});
   aember::utils::root::RootConfig cfg;  // no device
   EXPECT_FALSE(rm.MountRealRoot(cfg));
   cfg.device = "/dev/aember-no-such-disk";
   cfg.fstype = "";
   EXPECT_FALSE(rm.MountRealRoot(cfg));
+}
+
+// ---------------------------------------------------------------------------
+// Root device by LABEL/UUID without udev (Raspberry Pi: root=LABEL=...)
+// ---------------------------------------------------------------------------
+
+/// An ext4 image made with mkfs.ext4 (skips if the tool isn't there, e.g.
+/// in the VM).
+class Ext4ImageTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    dir_ = fs::temp_directory_path() /
+           ("aember-ext4-test-" + std::to_string(::getpid()));
+    fs::create_directories(dir_ / "sys");
+    fs::create_directories(dir_ / "dev");
+    image_ = dir_ / "dev" / "mmcblk0p2";
+    { std::ofstream{image_} << std::string(8 << 20, '\0'); }
+    const auto cmd = "mkfs.ext4 -q -F -L aember-root -U " + std::string{kUuid} +
+                     " " + image_.string() + " >/dev/null 2>&1";
+    if (std::system(cmd.c_str()) != 0) GTEST_SKIP() << "no mkfs.ext4";
+    // /sys/class/block lists device names; contents don't matter here.
+    fs::create_directories(dir_ / "sys" / "mmcblk0p2");
+    fs::create_directories(dir_ / "sys" / "mmcblk0p1");
+    { std::ofstream{dir_ / "dev" / "mmcblk0p1"} << std::string(4096, 'x'); }
+  }
+  void TearDown() override { fs::remove_all(dir_); }
+
+  static constexpr const char* kUuid = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+  fs::path dir_;
+  fs::path image_;
+};
+
+TEST_F(Ext4ImageTest, ReadsLabelAndUuid) {
+  const auto id = RootManager::ReadExt4Id(image_.string());
+  ASSERT_TRUE(id.has_value());
+  EXPECT_EQ(id->label, "aember-root");
+  EXPECT_EQ(id->uuid, kUuid);
+}
+
+TEST_F(Ext4ImageTest, FindsDeviceByLabelAndUuid) {
+  const auto sys = (dir_ / "sys").string();
+  const auto dev = (dir_ / "dev").string();
+  EXPECT_EQ(RootManager::FindBlockDevice("LABEL", "aember-root", sys, dev),
+            image_.string());
+  EXPECT_EQ(RootManager::FindBlockDevice("UUID", kUuid, sys, dev),
+            image_.string());
+  EXPECT_EQ(RootManager::FindBlockDevice("LABEL", "other", sys, dev), "");
+}
+
+TEST(Ext4IdTest, NotExt4) {
+  const auto path = fs::temp_directory_path() /
+                    ("aember-notext4-" + std::to_string(::getpid()));
+  { std::ofstream{path} << std::string(4096, 'x'); }
+  EXPECT_FALSE(RootManager::ReadExt4Id(path.string()).has_value());
+  EXPECT_FALSE(RootManager::ReadExt4Id("/nonexistent").has_value());
+  fs::remove(path);
+}
+
+TEST(RootManagerTest, WaitsForTheRootDevice) {
+  RootManager rm{std::make_shared<aember::mount_manager::MountManager>()};
+  rm.SetRootWait(std::chrono::milliseconds{400});
+  aember::utils::root::RootConfig cfg;
+  cfg.device = "LABEL=aember-no-such-label";
+  cfg.fstype = "ext4";
+  const auto t0 = std::chrono::steady_clock::now();
+  EXPECT_FALSE(rm.MountRealRoot(cfg));
+  EXPECT_GE(std::chrono::steady_clock::now() - t0,
+            std::chrono::milliseconds{350});
 }
 
 }  // namespace

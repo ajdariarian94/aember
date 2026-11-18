@@ -29,6 +29,44 @@ def _tree_size(path: Path) -> int:
     return total
 
 
+def run_guestfish(script: list[str], what: str) -> None:
+    """
+    Run a guestfish script as root in a `docker run` of the dev image (the
+    repo bind-mounted at the same path). Raises on any libguestfs error.
+    """
+    docker_cmd = [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "--privileged",
+        "-u",
+        "root",
+        "-v",
+        f"{HOST_ROOT_PATH}:/aember_ws/aember",
+        get_running_container_image(),
+        "guestfish",
+        "--rw",
+    ]
+    # subprocess.run used directly (not CommandRunner): the script goes in
+    # through stdin.
+    result = subprocess.run(
+        docker_cmd,
+        input="\n".join(script).encode(),
+        stderr=subprocess.PIPE,
+    )
+    stderr = result.stderr.decode(errors="replace")
+    sys.stderr.write(stderr)
+    # guestfish reading a script from stdin can exit 0 after a failed command
+    # (e.g. copy-in hitting "No space left on device"): treat any libguestfs
+    # error as a failure, never ship a half-written image.
+    if result.returncode != 0 or "libguestfs: error" in stderr:
+        raise RuntimeError(
+            f"guestfish failed building {what} "
+            f"(exit {result.returncode}): {stderr.strip()[-500:]}"
+        )
+
+
 def rootfs_size_mb(ctx: Context, *trees: Path) -> int:
     """ctx.rootfs_size, or more if the trees wouldn't fit (Debug + tests)."""
     needed = sum(_tree_size(t) for t in trees) / (1024 * 1024)
@@ -82,42 +120,8 @@ def create_rootfs_image(
 
     guestfish_script += ["umount /", "exit"]
 
-    image = get_running_container_image()
-
-    docker_cmd = [
-        "docker",
-        "run",
-        "-i",
-        "--rm",
-        "--privileged",
-        "-u",
-        "root",
-        "-v",
-        f"{HOST_ROOT_PATH}:/aember_ws/aember",
-        image,
-        "guestfish",
-        "--rw",
-    ]
-
     log.info("Building rootfs image (%d MB) at %s", size_mb, rootfs_img)
-
-    # subprocess.run used directly (not CommandRunner) because we need to
-    # pipe the guestfish script via stdin, which CommandRunner doesn't support.
-    result = subprocess.run(
-        docker_cmd,
-        input="\n".join(guestfish_script).encode(),
-        stderr=subprocess.PIPE,
-    )
-    stderr = result.stderr.decode(errors="replace")
-    sys.stderr.write(stderr)
-    # guestfish reading a script from stdin can exit 0 after a failed command
-    # (e.g. copy-in hitting "No space left on device"): treat any libguestfs
-    # error as a failure, never ship a half-written image.
-    if result.returncode != 0 or "libguestfs: error" in stderr:
-        raise RuntimeError(
-            f"guestfish failed building {rootfs_img} "
-            f"(exit {result.returncode}): {stderr.strip()[-500:]}"
-        )
+    run_guestfish(guestfish_script, what=str(rootfs_img))
 
     log.info("Rootfs image created successfully: %s", rootfs_img)
     return rootfs_img

@@ -17,6 +17,7 @@ from .base.resources import fetch_resources
 from .base.test import test
 from .qemu.build import build_qemu
 from .qemu.launch import launch_qemu
+from .rpi import commands as rpi_commands
 
 aember = typer.Typer(help="Aember build system")
 
@@ -80,3 +81,12 @@ qemu_app.command("launch", help="Boot the packed system in QEMU")(launch_qemu)
 
 aember.add_typer(aember_app, name="app")
 aember.add_typer(qemu_app, name="qemu")
+
+# ----------------------------
+# Raspberry Pi 4
+# ----------------------------
+rpi_app = typer.Typer(help="Raspberry Pi 4: SD card image, flashing, QEMU test")
+rpi_app.command("image")(rpi_commands.image)
+rpi_app.command("flash")(rpi_commands.flash)
+rpi_app.command("launch")(rpi_commands.launch)
+aember.add_typer(rpi_app, name="rpi")

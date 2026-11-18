@@ -73,7 +73,7 @@ aember-resources (`../aember-resources`,
 <https://github.com/ajdariarian94/aember-resources>) builds the low-level
 pieces with kas/Yocto and publishes them as assets of the GitHub release
 `v<version>`. The version aember uses is pinned in
-`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.3`;
+`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.5`;
 x64, aarch64 and arm32).
 
 `aember fetch-resources` (also the first step of `aember qemu build`,
@@ -311,6 +311,33 @@ privileged helper container of the dev image (`steps/launching/chroot.py`).
   (qemu-user can't create namespaces): use the QEMU boot or the board.
 - Ctrl-C/timeout = `docker stop` = SIGTERM to aember = clean shutdown; from
   the debug shell `kill -USR2 1` ends the run (exit 130; 129 for reboot).
+
+**Raspberry Pi 4: `aember rpi image | flash | launch`** (`steps/rpi/`,
+`config/rpi.py`). The aarch64 build boots on a Pi 4 from an SD card:
+- `aember rpi image` (after `aember app build`/`pack` for
+  aarch64-poky-linux) writes `build/rpi/aember-rpi4-v<V>.img`: p1 FAT32
+  (type 0x0c, `AEMBERBOOT`) with the pinned Raspberry Pi firmware
+  (`start4.elf`, `fixup4.dat`, tag `FIRMWARE_TAG`, sha256-checked,
+  cached in `build/downloads/rpi-firmware/`), `config.txt`, `cmdline.txt`,
+  `kernel8.img`, the initramfs and the device trees from the kernel asset
+  (`kernel/dtb/`, aember-resources v0.1.5+); p2 ext4 `aember-root` with the
+  same tree as the QEMU rootfs. Size: a power of two (QEMU's -sd needs it).
+- Boot: firmware → kernel8.img + initramfs + bcm2711-rpi-4-b.dtb;
+  `root=LABEL=aember-root rootwait`. aember has no udev, so
+  `RootManager::FindBlockDevice` reads the ext4 superblocks of
+  /sys/class/block devices, and `ResolveDevice` waits up to 30 s for the
+  card. Serial console: GPIO 14/15 (mini UART, `ttyS1`), 115200 8N1;
+  that is /dev/console, so `d` there opens the debug shell.
+- `aember rpi flash --device /dev/sdX`: on WSL first attach the card
+  reader with usbipd-win (`usbipd attach --wsl`). Refuses virtual disks
+  (always), non-removable or >256 GiB devices (unless `--force`), devices
+  smaller than the image and mounted ones; asks before writing (`dd` via
+  sudo). Or write the image from Windows with Raspberry Pi Imager
+  ("Use custom", path `\\wsl.localhost\<distro>\...\build\rpi\`).
+- `aember rpi launch [--timeout N]`: QEMU 8.2 has no raspi4b; this boots
+  the image in `raspi3b` with the Pi 3 device tree from the same kernel
+  (`-snapshot`, the image stays untouched). It tests the Pi boot path (DT,
+  SD driver, root by label, serial), not the GPU firmware step.
 
 Debug shell: boot never waits for it. Press `d` on the console at any time
 (a listener thread in `utils/shell/debug-shell.cpp` watches it; after the
