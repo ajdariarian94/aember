@@ -5,7 +5,7 @@ set -e
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║           Aember Development Environment Setup               ║"
-echo "║                 C++26 PID1 Init System                       ║"
+echo "║                 C++23 PID1 Init System                       ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
