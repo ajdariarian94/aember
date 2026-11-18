@@ -103,8 +103,6 @@ off by guestfish. Left:
 - [ ] Container restart policy: containers.json has `restart_policy`,
   `max_restart_attempts`, `restart_delay`, but nothing reads them (a
   container whose init exits stays failed, as before the split).
-- [ ] netd: renew the DHCP lease (now possible: netd is a long-running
-  process).
 - [x] **Daemons quiet while a debug shell is open** (2026-11-18): PID 1
   publishes `{"type":"console","enabled":false|true}` to its daemons
   (`Hub::Publish`, also to ones (re)started meanwhile; the channel goes
@@ -115,8 +113,14 @@ off by guestfish. Left:
 - [x] **No BusyBox calls from PID 1** (2026-11-17): loop + `mount(2)`,
   `finit_module(2)` with `modules.dep`, rtnetlink, a built-in DHCP client
   (AF_PACKET), in-process switch_root.
-- [ ] DHCP lease renewal (T1/T2) and release on shutdown; today, like
-  `udhcpc -q` before, the first lease is kept forever.
+- [x] **DHCP lease renewal** (2026-11-18): T1/T2 (options 58/59 or
+  50%/87.5%), renew unicast / rebind broadcast over UDP, NAK or expiry
+  starts over, a restarted netd confirms its address (INIT-REBOOT).
+  No DHCPRELEASE on purpose: netd can't tell its own restart (network
+  must stay) from a shutdown.
+- [ ] Renewing (unicast) is only tested against QEMU's server in a 24 h
+  lease, i.e. not in practice; the root tests cover rebinding (the fake
+  server has no IP stack to answer ARP).
 - [ ] **Simplify the CMake superbuild.** ExternalProject per subtree plus
   install/export/`Config.cmake` for every internal library is heavy and caused
   the stale-cache problem during the migration (a full configure-dir delete

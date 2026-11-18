@@ -216,6 +216,9 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
     inet_ntop(AF_INET, &*existing, ip, sizeof(ip));
     log_.info("{}: keeping existing address {}", iface.name, ip);
     if (!iface.dns_servers.empty()) { WriteResolvConf(iface.dns_servers); }
+    if (iface.mode == aember::netd::IpMode::kDhcp) {
+      AdoptAddress(iface, idx, *existing);
+    }
     return true;
   }
 
@@ -257,67 +260,168 @@ bool NetworkManager::ConfigureStatic(const InterfaceConfig& iface, int idx) {
   return true;
 }
 
-bool NetworkManager::ConfigureDhcp(const InterfaceConfig& iface, int idx) {
+bool NetworkManager::ConfigureDhcp(const InterfaceConfig& iface, int idx,
+                                   int attempts) {
+  if (attempts < 0) attempts = config_.dhcp_retries;
   dhcp::DhcpClient client{iface.name};
-  for (int attempt = 1; attempt <= config_.dhcp_retries; ++attempt) {
-    log_.info(
-        "{}: DHCP attempt {}/{}", iface.name, attempt, config_.dhcp_retries);
-
+  for (int attempt = 1; attempt <= attempts; ++attempt) {
+    log_.info("{}: DHCP attempt {}/{}", iface.name, attempt, attempts);
     auto lease = client.Acquire(config_.dhcp_timeout);
     if (!lease) {
       log_.warn("{}: {}", iface.name, lease.error());
       continue;
     }
-
-    char ip[INET_ADDRSTRLEN] = {};
-    inet_ntop(AF_INET, &lease->address, ip, sizeof(ip));
-    const int prefix = lease->PrefixLength();
-    if (const int rc = netlink::AddAddress(idx, lease->address, prefix);
-        rc != 0) {
-      log_.error("{}: could not assign {}/{}: {}",
-                 iface.name,
-                 ip,
-                 prefix,
-                 strerror(-rc));
-      continue;
-    }
-
-    std::string router = "none";
-    if (lease->router) {
-      char gw[INET_ADDRSTRLEN] = {};
-      inet_ntop(AF_INET, &*lease->router, gw, sizeof(gw));
-      router = gw;
-      if (const int rc = netlink::AddDefaultRoute(idx, *lease->router);
-          rc != 0) {
-        log_.warn("{}: default route via {} failed: {}",
-                  iface.name,
-                  router,
-                  strerror(-rc));
-      }
-    }
-
-    // Configured DNS servers win over the ones the lease offers.
-    std::vector<std::string> dns = iface.dns_servers;
-    if (dns.empty()) {
-      for (const auto& d : lease->dns) {
-        char buf[INET_ADDRSTRLEN] = {};
-        inet_ntop(AF_INET, &d, buf, sizeof(buf));
-        dns.emplace_back(buf);
-      }
-    }
-    WriteResolvConf(dns);
-
-    log_.info("{}: DHCP lease {}/{} router={} lease={}s",
-              iface.name,
-              ip,
-              prefix,
-              router,
-              lease->lease_seconds);
-    return true;
+    if (ApplyLease(iface, idx, *lease)) return true;
   }
-
   log_.error("{}: all DHCP attempts exhausted", iface.name);
   return false;
+}
+
+namespace {
+
+std::string IpString(in_addr a) {
+  char buf[INET_ADDRSTRLEN] = {};
+  inet_ntop(AF_INET, &a, buf, sizeof(buf));
+  return buf;
+}
+
+}  // namespace
+
+bool NetworkManager::ApplyLease(const InterfaceConfig& iface, int idx,
+                                const dhcp::Lease& lease,
+                                std::optional<dhcp::Lease> previous) {
+  const auto ip = IpString(lease.address);
+  const int prefix = lease.PrefixLength();
+  if (previous && previous->address.s_addr != lease.address.s_addr) {
+    log_.warn("{}: address changes {} -> {}",
+              iface.name,
+              IpString(previous->address),
+              ip);
+    netlink::DeleteAddress(idx, previous->address, previous->PrefixLength());
+  }
+  if (const int rc = netlink::AddAddress(idx, lease.address, prefix); rc != 0) {
+    log_.error("{}: could not assign {}/{}: {}",
+               iface.name,
+               ip,
+               prefix,
+               strerror(-rc));
+    return false;
+  }
+
+  std::string router = "none";
+  if (lease.router) {
+    router = IpString(*lease.router);
+    if (const int rc = netlink::AddDefaultRoute(idx, *lease.router); rc != 0) {
+      log_.warn("{}: default route via {} failed: {}",
+                iface.name,
+                router,
+                strerror(-rc));
+    }
+  }
+
+  // Configured DNS servers win over the ones the lease offers.
+  std::vector<std::string> dns = iface.dns_servers;
+  if (dns.empty()) {
+    for (const auto& d : lease.dns) dns.push_back(IpString(d));
+  }
+  if (!dns.empty() || !previous) WriteResolvConf(dns);
+
+  auto& state = leases_[iface.name];
+  state.iface = iface;
+  state.ifindex = idx;
+  state.lease = lease;
+  state.timer = dhcp::LeaseTimer{lease, std::chrono::steady_clock::now()};
+  state.next_try = {};
+
+  log_.info("{}: DHCP lease {}/{} router={} lease={}s{}",
+            iface.name,
+            ip,
+            prefix,
+            router,
+            lease.lease_seconds,
+            previous ? " (renewed)" : "");
+  return true;
+}
+
+void NetworkManager::AdoptAddress(const InterfaceConfig& iface, int idx,
+                                  in_addr address) {
+  dhcp::DhcpClient client{iface.name};
+  auto lease = client.Confirm(address, std::chrono::seconds{4});
+  if (lease) {
+    ApplyLease(iface, idx, *lease, dhcp::Lease{.address = address});
+    return;
+  }
+  if (lease.error().nak) {
+    log_.warn("{}: DHCP server refused {}: getting a new lease",
+              iface.name,
+              IpString(address));
+    const int prefix = netlink::FirstIPv4Prefix(iface.name);
+    netlink::DeleteAddress(idx, address, prefix < 0 ? 32 : prefix);
+    ConfigureDhcp(iface, idx);
+    return;
+  }
+  // No DHCP server (a container runtime set the address, ip=, ...): keep
+  // it as it is, without a lease to renew.
+  log_.info("{}: no DHCP answer for {} ({}): keeping it without a lease",
+            iface.name,
+            IpString(address),
+            lease.error().message);
+}
+
+void NetworkManager::MaintainLeases() {
+  using Phase = dhcp::LeaseTimer::Phase;
+  const auto now = std::chrono::steady_clock::now();
+  for (auto& [name, state] : leases_) {
+    const auto phase = state.timer.At(now);
+    if (phase == Phase::kBound || phase == Phase::kInfinite) continue;
+    if (now < state.next_try) continue;
+
+    if (phase == Phase::kExpired) {
+      log_.warn("{}: lease expired: dropping {} and starting over",
+                name,
+                IpString(state.lease.address));
+      netlink::DeleteAddress(
+          state.ifindex, state.lease.address, state.lease.PrefixLength());
+      const auto iface = state.iface;
+      const int idx = state.ifindex;
+      state.next_try = now + std::chrono::seconds{30};
+      ConfigureDhcp(iface, idx, 1);  // ApplyLease resets the state
+      return;  // leases_ may have changed; the rest waits for the next call
+    }
+
+    const bool rebinding = phase == Phase::kRebinding;
+    dhcp::DhcpClient client{name};
+    auto renewed =
+        client.Renew(state.lease, rebinding, std::chrono::seconds{4});
+    if (renewed) {
+      const auto previous = state.lease;
+      const auto iface = state.iface;
+      ApplyLease(iface, state.ifindex, *renewed, previous);
+      continue;
+    }
+    if (renewed.error().nak) {
+      log_.warn("{}: lease refused (NAK): starting over", name);
+      netlink::DeleteAddress(
+          state.ifindex, state.lease.address, state.lease.PrefixLength());
+      const auto iface = state.iface;
+      const int idx = state.ifindex;
+      state.next_try = now + std::chrono::seconds{30};
+      ConfigureDhcp(iface, idx, 1);
+      return;
+    }
+    // RFC 2131: retry at half the remaining time (at least a minute).
+    const auto until =
+        rebinding ? state.timer.ExpiresAt() : state.timer.RebindAt();
+    state.next_try = now + std::max<std::chrono::steady_clock::duration>(
+                               std::chrono::seconds{60}, (until - now) / 2);
+    log_.warn(
+        "{}: {} failed ({}), next try in {} s",
+        name,
+        rebinding ? "rebinding" : "renewal",
+        renewed.error().message,
+        std::chrono::duration_cast<std::chrono::seconds>(state.next_try - now)
+            .count());
+  }
 }
 
 // ---------------------------------------------------------------------------

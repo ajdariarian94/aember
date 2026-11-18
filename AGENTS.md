@@ -224,8 +224,16 @@ a syscall now:
 - Network: `utils/netlink` (rtnetlink: link up, address, default route,
   bridge, veth, delete) instead of `ip`; DHCP is netd's
   `dhcp-client.{h,cpp}` (DISCOVER/OFFER/REQUEST/ACK on an `AF_PACKET`
-  socket with self-built IPv4/UDP headers, source 0.0.0.0, like udhcpc;
-  one lease, no renewal, like the `udhcpc -q` it replaced).
+  socket with self-built IPv4/UDP headers, source 0.0.0.0, like udhcpc).
+  `NetworkManager::MaintainLeases` (netd calls it every 10 s) renews
+  after T1 (unicast) and rebinds after T2 (broadcast) over a UDP socket,
+  starts over on a NAK or at expiry; a restarted netd that finds the
+  address already up confirms it (INIT-REBOOT), and keeps it without a
+  lease when no server answers (chroot under Docker). No DHCPRELEASE:
+  netd restarts must not drop the network. Root tests use a raw-frame
+  fake server on a veth pair in a private net + mount namespace (a temp
+  file over /etc/resolv.conf); the stack's UDP checksums are still
+  partial (offload) when the peer's AF_PACKET socket sees them.
 - Root switch: `RootManager::SwitchRoot` frees the initramfs (only if `/`
   is ramfs/tmpfs; never crosses mounts or follows symlinks), `MS_MOVE`s the
   new root onto `/`, `chroot`s and execs `/usr/bin/aember --root`.

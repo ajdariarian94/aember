@@ -105,6 +105,7 @@ int RunNetd(const NetdOptions& options) {
       }
       continue;
     }
+    network->MaintainLeases();  // renew/rebind DHCP leases when due
     report(network->GetStatus());
   }
 
