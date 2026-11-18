@@ -84,7 +84,27 @@ image at all. A crash in them never takes PID 1 down.
   containers from containers.json, or **adopts**
   the ones still running after a crash/restart (LXC keeps their state);
   follows each container's init with a pidfd; SIGTERM stops all
-  containers. It is deliberately **not a subreaper**: the LXC monitors have
+  containers.
+  - **Init wrapper** (containers.json `"init"`, default true): the app
+    runs under `/busybox.aember-init sh -c <trap script>` (the host's
+    static `/bin/busybox` bind mounted into the rootfs; the name must
+    start with "busybox" or BusyBox looks for an applet of that name).
+    The wrapper is the namespace init and passes SIGTERM/INT/HUP on; an
+    app that is init itself never gets SIGTERM. `lxc.signal.halt` =
+    SIGTERM, graceful stop waits `"stop_timeout"` (10 s).
+  - containerd's `pthread_atfork` child handler unblocks all signals:
+    liblxc forks without exec and gives the container init the caller's
+    mask, so with containerd's signalfd mask nothing in a container got
+    SIGTERM and shells there never saw SIGCHLD.
+  - **Restarts:** `"restart_policy"` `no` (default) / `on-failure` /
+    `always`, `"max_restart_attempts"` (0 = no limit; reset after 60 s of
+    running), `"restart_delay"` (s). `ContainerManager::NextRestart`
+    decides, containerd's loop schedules; a requested stop never
+    restarts. containerd can't see the exit status (not the parent), so
+    every unrequested exit is a failure.
+  - Stop unmounts innermost first (`busybox.aember-init`, `host-logs`,
+    the overlay), then the SquashFS lowerdir (1 s retry, then lazy
+    detach). It is deliberately **not a subreaper**: the LXC monitors have
   a parent-death signal, which also fires when a subreaper they were
   reparented to dies; they stay PID 1's orphans.
 - LXC forks its monitors from containerd without exec, so they show

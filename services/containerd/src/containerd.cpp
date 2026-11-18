@@ -20,6 +20,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -30,6 +31,7 @@
 #include <vector>
 
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/prctl.h>
 #include <sys/signalfd.h>
@@ -97,6 +99,15 @@ int RunContainerd(const ContainerdOptions& options) {
   sigemptyset(&signals);
   for (const int s : {SIGTERM, SIGINT, SIGHUP, SIGCHLD}) sigaddset(&signals, s);
   pthread_sigmask(SIG_BLOCK, &signals, nullptr);
+  // liblxc forks its monitor from us without exec and gives the container
+  // init the caller's signal mask: with ours (TERM/INT/HUP/CHLD blocked)
+  // nothing in a container could be stopped gracefully, and a shell there
+  // never saw its children exit. Children start with nothing blocked.
+  pthread_atfork(nullptr, nullptr, [] {
+    sigset_t none;
+    sigemptyset(&none);
+    sigprocmask(SIG_SETMASK, &none, nullptr);  // async-signal-safe
+  });
   const int sigfd = ::signalfd(-1, &signals, SFD_CLOEXEC | SFD_NONBLOCK);
 
   auto channel = ipc::Channel::Inherited();
@@ -151,9 +162,28 @@ int RunContainerd(const ContainerdOptions& options) {
   };
   watch_running();
 
+  // Restarts (restart_policy): name -> when to start it again.
+  using Clock = std::chrono::steady_clock;
+  std::map<std::string, Clock::time_point> restart_at;
+  const auto schedule_restart = [&](const std::string& name) {
+    if (const auto delay = containers.NextRestart(name)) {
+      restart_at[name] = Clock::now() + *delay;
+    }
+  };
+  for (const auto& cfg : configs) {
+    if (!containers.IsRunning(cfg.name)) schedule_restart(cfg.name);
+  }
+
   aember::child_supervisor::ChildSupervisor reaper;
   bool stop = false;
   while (!stop) {
+    int timeout_ms = 1000;
+    for (const auto& [name, at] : restart_at) {
+      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            at - Clock::now())
+                            .count();
+      timeout_ms = std::clamp(static_cast<int>(left), 0, timeout_ms);
+    }
     // fds[1]: PID 1's channel (console mute); negative = ignored by poll.
     std::vector<pollfd> fds{{sigfd, POLLIN, 0},
                             {channel.Closed() ? -1 : channel.Fd(), POLLIN, 0}};
@@ -162,7 +192,9 @@ int RunContainerd(const ContainerdOptions& options) {
       fds.push_back({w.second, POLLIN, 0});
       names.push_back(name);
     }
-    if (::poll(fds.data(), fds.size(), 1000) < 0 && errno != EINTR) break;
+    if (::poll(fds.data(), fds.size(), timeout_ms) < 0 && errno != EINTR) {
+      break;
+    }
 
     if ((fds[0].revents & POLLIN) != 0) {
       signalfd_siginfo si{};
@@ -178,9 +210,22 @@ int RunContainerd(const ContainerdOptions& options) {
       const auto it = watched.find(names[i - 2]);
       log.info(
           "container '{}' init (pid {}) exited", it->first, it->second.first);
+      const std::string name = it->first;
       containers.HandleExit(it->second.first, 1);
       ::close(it->second.second);
       watched.erase(it);
+      if (!stop) schedule_restart(name);
+    }
+
+    // Due restarts (a failed start counts as another attempt).
+    for (auto it = restart_at.begin(); !stop && it != restart_at.end();) {
+      if (it->second > Clock::now()) {
+        ++it;
+        continue;
+      }
+      const std::string name = it->first;
+      it = restart_at.erase(it);
+      if (!containers.StartContainer(name)) schedule_restart(name);
     }
 
     // Our own children (helpers liblxc waits for itself are left to it).
@@ -188,6 +233,7 @@ int RunContainerd(const ContainerdOptions& options) {
     watch_running();
   }
 
+  restart_at.clear();
   log.info("stopping all containers");
   for (const auto& [name, w] : watched) ::close(w.second);
   containers.StopAll();

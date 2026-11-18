@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -177,6 +178,69 @@ TEST_F(ContainerManagerTest, MissingExtraConfigFileIsIgnored) {
   ASSERT_TRUE(cm_->AddContainer(Config("plain")));
   EXPECT_FALSE(cm_->StartContainer("plain"));  // fails on its own config
   EXPECT_EQ(cm_->GetContainerState("plain"), State::kFailed);
+}
+
+// Restart decisions after an exit. A container whose squashfs can't be
+// mounted fails to start (kFailed) without root or LXC.
+class ContainerRestartTest : public ContainerManagerTest {
+ protected:
+  ContainerManager::ContainerConfig Failing(
+      const std::string& name, aember::containerd::RestartPolicy policy,
+      unsigned max_attempts = 0) const {
+    auto cfg = Config(name);
+    cfg.squashfs = (dir_ / "missing.squashfs").string();
+    cfg.restart_policy = policy;
+    cfg.max_restart_attempts = max_attempts;
+    cfg.restart_delay = std::chrono::seconds{3};
+    return cfg;
+  }
+};
+
+TEST_F(ContainerRestartTest, PolicyNoNeverRestarts) {
+  ASSERT_TRUE(
+      cm_->AddContainer(Failing("a", aember::containerd::RestartPolicy::kNo)));
+  EXPECT_FALSE(cm_->StartContainer("a"));
+  EXPECT_FALSE(cm_->NextRestart("a").has_value());
+}
+
+TEST_F(ContainerRestartTest, OnFailureAndAlwaysRestartAfterAFailure) {
+  using aember::containerd::RestartPolicy;
+  ASSERT_TRUE(cm_->AddContainer(Failing("f", RestartPolicy::kOnFailure)));
+  ASSERT_TRUE(cm_->AddContainer(Failing("s", RestartPolicy::kAlways)));
+  for (const char* name : {"f", "s"}) {
+    EXPECT_FALSE(cm_->StartContainer(name));
+    EXPECT_EQ(cm_->GetContainerState(name), State::kFailed);
+    EXPECT_EQ(cm_->NextRestart(name), std::chrono::seconds{3}) << name;
+  }
+}
+
+TEST_F(ContainerRestartTest, OnFailureLeavesACleanStopAlone) {
+  using aember::containerd::RestartPolicy;
+  ASSERT_TRUE(cm_->AddContainer(Failing("f", RestartPolicy::kOnFailure)));
+  // Never started: kStopped, not a failure.
+  EXPECT_FALSE(cm_->NextRestart("f").has_value());
+}
+
+TEST_F(ContainerRestartTest, GivesUpAfterMaxAttempts) {
+  ASSERT_TRUE(cm_->AddContainer(
+      Failing("m", aember::containerd::RestartPolicy::kAlways, 2)));
+  for (int attempt = 1; attempt <= 2; ++attempt) {
+    EXPECT_FALSE(cm_->StartContainer("m"));
+    EXPECT_TRUE(cm_->NextRestart("m").has_value()) << attempt;
+  }
+  EXPECT_FALSE(cm_->StartContainer("m"));
+  EXPECT_FALSE(cm_->NextRestart("m").has_value());
+}
+
+TEST_F(ContainerRestartTest, StopRequestedIsNeverRestarted) {
+  ASSERT_TRUE(cm_->AddContainer(
+      Failing("r", aember::containerd::RestartPolicy::kAlways)));
+  EXPECT_FALSE(cm_->StartContainer("r"));  // kFailed
+  // A failed container counts as stopped for StopContainer only once it was
+  // running; force the request through the state it is in.
+  EXPECT_TRUE(cm_->StopContainer("r"));
+  EXPECT_FALSE(cm_->NextRestart("r").has_value());
+  EXPECT_FALSE(cm_->NextRestart("unknown").has_value());
 }
 
 }  // namespace

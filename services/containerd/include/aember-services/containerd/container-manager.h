@@ -16,6 +16,7 @@
 #include <aember-services/containerd/container-parser.h>
 #include <aember-services/containerd/container-state.h>
 
+#include <chrono>
 #include <functional>
 #include <map>
 #include <memory>
@@ -88,6 +89,11 @@ class ContainerManager {
    */
   bool HandleExit(pid_t pid, int exit_code);
 
+  /// After an exit (HandleExit): the delay before starting @p name again,
+  /// or nullopt (policy "no", stop requested, attempts used up). Counts
+  /// the attempt.
+  std::optional<std::chrono::seconds> NextRestart(std::string_view name);
+
   /** Take over a container that is already running (left by a previous
    *  containerd): LXC handle, state running, init pid tracked. False if
    *  it isn't running (start it normally then). */
@@ -130,6 +136,8 @@ class ContainerManager {
 
  private:
   std::string extra_config_path_{"/etc/aember/lxc-extra.conf"};
+  /// Static BusyBox bind mounted into containers as their init wrapper.
+  std::string host_busybox_{"/bin/busybox"};
   // ---------------------------------------------------------------------------
   // LXC lifecycle helpers
   // ---------------------------------------------------------------------------

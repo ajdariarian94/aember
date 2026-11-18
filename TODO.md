@@ -51,12 +51,18 @@ dependencies), StartAll starting nothing after one bad dependency,
 matching any word of /proc/modules, and Debug rootfs images silently cut
 off by guestfish. Left:
 
-- [ ] Containers ignore the graceful stop: `lxc shutdown` times out after
-  5 s per container, then `stop` kills them. Set `lxc.signal.halt` to
-  something the container init handles (SIGTERM for BusyBox init).
-- [ ] At shutdown the SquashFS lower dir can't be unmounted (`EBUSY`): the
-  overlay on top is only lazily detached (`MNT_DETACH`). Unmount the
-  overlay for real first.
+- [x] **Graceful container stop** (2026-11-18): BusyBox init wrapper +
+  `lxc.signal.halt` SIGTERM, signals unblocked in containerd's fork
+  children, `stop_timeout`.
+- [x] **Container restart policy** (2026-11-18): `restart_policy`,
+  `max_restart_attempts`, `restart_delay` are read and applied.
+- [ ] At shutdown the SquashFS lower dir is still `EBUSY` after the
+  overlay and the bind mounts in it are unmounted for real (now: 1 s
+  retry, then lazy detach). Something keeps the overlay superblock
+  alive; find out what (LXC monitor fds? a mount namespace copy?).
+- [ ] A static `aember-cinit` (tini-like) instead of the BusyBox sh
+  wrapper, once the SDK has static glibc (`glibc-staticdev` in
+  aember-resources' SDK).
 - [ ] `NetworkManager::Stop` waits up to one ping interval (the monitor
   thread sleeps); use a condition variable with the stop token.
 - [ ] `ProcessManager::ScheduleRestart` detaches a thread that captures
