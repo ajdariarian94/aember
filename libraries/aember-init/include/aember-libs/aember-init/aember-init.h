@@ -44,10 +44,6 @@ struct InitOptions {
   bool chroot = false;
 };
 
-/// Names of the built-in daemons (services in ServiceManager).
-inline constexpr std::string_view kNetd = "aember-netd";
-inline constexpr std::string_view kContainerd = "aember-containerd";
-
 class AemberInit {
  public:
   using DebugShell = aember::utils::shell::DebugShell;
@@ -87,10 +83,8 @@ class AemberInit {
 
   Result<> InitMounts();
   Result<> InitServiceStack();
-  /// `aember netd` and `aember containerd` as services (ipc, always
-  /// restarted, containerd after netd).
-  void RegisterDaemons();
-  /// A message from a daemon: readiness, network status, container state.
+  /// A message from a service started with "ipc" (aember-netd,
+  /// aember-containerd, ...): readiness, network status, container state.
   void OnDaemonMessage(const std::string& name, const nlohmann::json& message);
   Result<> InitSignals();
 

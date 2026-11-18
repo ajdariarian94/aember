@@ -70,6 +70,8 @@ class RpiImageStep(Step):
         root = ctx.root
         package_dir = root / "build" / "package" / rpi.ARCHITECTURE / ctx.build_type
         initramfs_root = package_dir / "initramfs_root"
+        # Services (aember-netd, aember-containerd, ...) are rootfs-only.
+        services_root = package_dir / "services_root"
         overlay = root / "resources" / rpi.ARCHITECTURE / "rootfs"
         for needed in (package_dir / "kernel", initramfs_root):
             if not needed.exists():
@@ -106,7 +108,11 @@ class RpiImageStep(Step):
         # Root partition size from its contents; total a power of two MiB.
         root_mb = (
             math.ceil(
-                (_tree_size(initramfs_root) + _tree_size(overlay))
+                (
+                    _tree_size(initramfs_root)
+                    + _tree_size(services_root)
+                    + _tree_size(overlay)
+                )
                 / (1024 * 1024)
                 * SIZE_MARGIN
             )
@@ -138,6 +144,11 @@ class RpiImageStep(Step):
             f"mkfs ext4 /dev/sda2 label:{rpi.ROOT_LABEL}",
             "mount /dev/sda2 /",
             *[f"copy-in {e} /" for e in initramfs_root.iterdir()],
+            *(
+                [f"copy-in {e} /" for e in services_root.iterdir()]
+                if services_root.exists()
+                else []
+            ),
             *(
                 [f"copy-in {e} /" for e in overlay.iterdir()]
                 if overlay.exists()

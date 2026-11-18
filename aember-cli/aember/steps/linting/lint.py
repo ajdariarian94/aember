@@ -10,7 +10,7 @@ from aember.utils.runner import CommandRunner
 log = logging.getLogger("aember.lint")
 
 EXCLUDE_PATHS = ["build", "vcpkg", ".venv"]
-CPP_SCAN_FOLDERS = ["libraries", "executables", "examples"]
+CPP_SCAN_FOLDERS = ["libraries", "executables", "services", "examples"]
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +122,7 @@ class LintStep(Step):
             log.warning("black reported issues")
 
         # ---------------------------------------------------------------------------
-        # C++ — parallel clang-format over libraries/ executables/ examples/ only
+        # C++ — parallel clang-format over CPP_SCAN_FOLDERS only
         # ---------------------------------------------------------------------------
         log.info("Linting C++ with clang-format")
 

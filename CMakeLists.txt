@@ -62,6 +62,29 @@ ExternalProject_Add(
              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 )
 
+# Services: programs PID 1 starts from services.json (aember-netd,
+# aember-containerd, ...). Every directory under services/ with a CMakeLists.txt
+# is one; see services/README.md to add your own.
+ExternalProject_Add(
+  services
+  DEPENDS aember-libs
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/services
+  BUILD_ALWAYS TRUE
+  CMAKE_ARGS -DVCPKG_HOST_TRIPLET=${VCPKG_HOST_TRIPLET}
+             -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}
+             -DVCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}
+             -DVCPKG_MANIFEST_INSTALL=${VCPKG_MANIFEST_INSTALL}
+             -DCMAKE_MODULE_PATH=${CMAKE_MODULE_PATH}
+             -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}
+             -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
+             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+             -DARCHITECTURE=${ARCHITECTURE}
+             -DBUILD_TESTS=${BUILD_TESTS}
+             -DVERSION=${PROJECT_VERSION}
+             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+)
+
 ExternalProject_Add(
   examples
   DEPENDS aember-libs

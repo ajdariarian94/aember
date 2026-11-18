@@ -161,14 +161,10 @@ void AemberInit::StartRoot() {
           });
     });
 
-    // Network and containers run as built-in daemons (`aember netd`,
-    // `aember containerd`), supervised like any service.
-    Guarded(log_, "Built-in daemons", [this] { RegisterDaemons(); });
-
     Guarded(
         log_, "Starting services", [this] { service_manager_->StartAll(); });
   } else {
-    log_.error("No service manager: no services, network or containers");
+    log_.error("No service manager: no services");
   }
 
   Guarded(log_, "Monitor and heartbeat", [this] {
@@ -289,43 +285,6 @@ AemberInit::Result<> AemberInit::InitServiceStack() {
   return {};
 }
 
-void AemberInit::RegisterDaemons() {
-  // Same binary, another role (multi-call): /proc/self/exe is this aember.
-  std::error_code ec;
-  auto self = std::filesystem::read_symlink("/proc/self/exe", ec);
-  if (ec) { self = "/usr/bin/aember"; }
-
-  const auto daemon = [&](std::string name,
-                          std::string role,
-                          std::vector<std::string>
-                              deps,
-                          std::chrono::milliseconds stop_timeout) {
-    aember::utils::process::ProcessConfig cfg;
-    cfg.name = std::move(name);
-    cfg.description = "built-in " + role + " daemon";
-    cfg.executable = self.string();
-    cfg.args = {std::move(role)};
-    cfg.dependencies = std::move(deps);
-    cfg.ipc = true;
-    cfg.ready_timeout = std::chrono::seconds{120};  // DHCP retries take time
-    cfg.restart_on_failure = true;
-    cfg.max_restarts = 0;  // always
-    cfg.restart_delay = std::chrono::seconds{2};
-    cfg.stop_timeout = stop_timeout;
-    if (!process_manager_->AddProcess(cfg) ||
-        !service_manager_->AddProcess(cfg.name)) {
-      log_.error("Could not register built-in daemon '{}'", cfg.name);
-    }
-  };
-
-  daemon(std::string{kNetd}, "netd", {}, std::chrono::seconds{10});
-  // Containers need the bridge; stopping them gracefully takes a while.
-  daemon(std::string{kContainerd},
-         "containerd",
-         {std::string{kNetd}},
-         std::chrono::seconds{60});
-}
-
 void AemberInit::OnDaemonMessage(const std::string& name,
                                  const nlohmann::json& message) {
   namespace ipc = aember::utils::ipc;
@@ -402,24 +361,21 @@ AemberInit::Result<> AemberInit::LoadAndRegisterProcesses(
   auto configs = process_manager_->LoadProcesses(std::string{path});
   log_.info("Loaded {} process config(s) from {}", configs.size(), path);
 
-  const auto registered =
-      configs | std::views::filter([&](const auto& cfg) {
-        if (!process_manager_->AddProcess(cfg)) {
-          log_.error("Failed to register process '{}'", cfg.name);
-          return false;
-        }
-        return true;
-      }) |
-      std::views::transform([&](const auto& cfg) { return cfg.name; }) |
-      std::ranges::to<std::vector>();
-
-  std::ranges::for_each(registered, [&](const auto& name) {
-    if (!service_manager_->AddProcess(name)) {
-      log_.error("Failed to add process '{}' to service manager", name);
-    } else {
-      log_.info("Registered process '{}'", name);
+  // A plain loop: AddProcess has a side effect, so it must run exactly once
+  // per entry. (It used to sit in a views::filter predicate, which
+  // ranges::to may evaluate twice; the second call failed as a duplicate
+  // and dropped every entry but the first.)
+  for (const auto& cfg : configs) {
+    if (!process_manager_->AddProcess(cfg)) {
+      log_.error("Failed to register process '{}'", cfg.name);
+      continue;
     }
-  });
+    if (!service_manager_->AddProcess(cfg.name)) {
+      log_.error("Failed to add process '{}' to service manager", cfg.name);
+      continue;
+    }
+    log_.info("Registered process '{}'", cfg.name);
+  }
 
   return {};
 }
