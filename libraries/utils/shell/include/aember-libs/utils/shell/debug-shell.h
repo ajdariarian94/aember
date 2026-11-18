@@ -37,6 +37,11 @@ class DebugShell {
   using OnSpawn = std::move_only_function<void(pid_t)>;
   /// True while the shell with this pid has not been reaped.
   using IsAlive = std::move_only_function<bool(pid_t)>;
+  /// Called with true when a shell takes the console (this process's
+  /// console log is muted then) and with false when it gave it back. PID 1
+  /// passes it on to its daemons, whose output would otherwise run through
+  /// the shell.
+  using OnConsole = std::move_only_function<void(bool shell_open)>;
 
   DebugShell();
   ~DebugShell();
@@ -48,6 +53,11 @@ class DebugShell {
   /// @p console is the console device (tests may pass another tty).
   void Start(OnSpawn on_spawn, IsAlive is_alive, bool shell_now,
              const std::string& console = "/dev/console");
+
+  /// Set before Start().
+  void SetConsoleCallback(OnConsole on_console) {
+    on_console_ = std::move(on_console);
+  }
 
   /// Stop the listener and restore the console. A running shell is left
   /// alone (shutdown kills it with everything else).
@@ -62,9 +72,12 @@ class DebugShell {
   pid_t SpawnShell(const std::string& console);
   /// Wait until the shell is reaped or the listener is stopped.
   void WaitForShell(std::stop_token st, pid_t pid);
+  /// Mute/unmute the console log and tell on_console_.
+  void ShellOwnsConsole(bool owns);
 
   OnSpawn on_spawn_;
   IsAlive is_alive_;
+  OnConsole on_console_;
   int wake_pipe_[2] = {-1, -1};
   std::jthread thread_;
   aember::utils::logging::Logger log_;

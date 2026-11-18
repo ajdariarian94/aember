@@ -447,6 +447,11 @@ void AemberInit::StartReaperThread() {
 void AemberInit::StartDebugShell(bool shell_now) {
   Guarded(log_, "Debug shell", [this, shell_now] {
     debug_shell_.emplace();
+    // The daemons log to the same console: mute them too while a shell is
+    // open (also the ones started or restarted meanwhile).
+    debug_shell_->SetConsoleCallback([this](bool shell_open) {
+      hub_.Publish("console", aember::utils::ipc::Console(!shell_open));
+    });
     // The reaper collects the shell: track it, and it is alive until reaped.
     debug_shell_->Start(
         [this](pid_t pid) { child_supervisor_.AddChild(pid, "debug-shell"); },

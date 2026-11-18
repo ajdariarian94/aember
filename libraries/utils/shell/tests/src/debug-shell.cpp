@@ -8,6 +8,7 @@
  * @copyright Copyright (c) 2026, Aember, All rights reserved.
  */
 
+#include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/shell/debug-shell.h>
 
 #include <gtest/gtest.h>
@@ -16,8 +17,10 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <fcntl.h>
 #include <poll.h>
@@ -139,6 +142,38 @@ TEST(DebugShellTest, ShellNow) {
   EXPECT_TRUE(pty.WaitFor("now-open", 5s));
   EXPECT_EQ(spawned.load(), 1);
   shell.Stop();
+}
+
+// The console callback (PID 1 mutes its daemons with it) sees the shell
+// open and close, and the own console log is muted in between.
+TEST(DebugShellTest, ConsoleCallbackFollowsTheShell) {
+  Pty pty;
+  ASSERT_TRUE(pty.ok());
+  std::mutex mutex;
+  std::vector<bool> events;
+  std::vector<bool> logging_during;
+
+  DebugShell shell;
+  shell.SetConsoleCallback([&](bool open) {
+    std::lock_guard lock{mutex};
+    events.push_back(open);
+    logging_during.push_back(aember::utils::logging::console_logging_enabled());
+  });
+  shell.Start([](pid_t) {}, nullptr, true, pty.slave());
+  pty.Type("echo cb-\"\"done; exit\n");
+  EXPECT_TRUE(pty.WaitFor("cb-done", 5s));
+  for (int i = 0; i < 50; ++i) {
+    {
+      std::lock_guard lock{mutex};
+      if (events.size() >= 2) break;
+    }
+    std::this_thread::sleep_for(50ms);
+  }
+  shell.Stop();
+
+  std::lock_guard lock{mutex};
+  EXPECT_EQ(events, (std::vector<bool>{true, false}));
+  EXPECT_EQ(logging_during, (std::vector<bool>{false, true}));
 }
 
 }  // namespace

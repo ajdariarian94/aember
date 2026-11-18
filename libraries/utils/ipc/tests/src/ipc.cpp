@@ -10,6 +10,7 @@
 
 #include <aember-libs/utils/ipc/channel.h>
 #include <aember-libs/utils/ipc/hub.h>
+#include <aember-libs/utils/logging/logging.h>
 
 #include <gtest/gtest.h>
 
@@ -18,6 +19,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -260,6 +262,63 @@ TEST_F(HubTest, StopIsPrompt) {
   const auto t0 = std::chrono::steady_clock::now();
   hub_.Stop();
   EXPECT_LT(std::chrono::steady_clock::now() - t0, 1s);
+}
+
+// ---------------------------------------------------------------------------
+// Console control (debug shell open -> daemons mute their console log)
+// ---------------------------------------------------------------------------
+
+std::optional<bool> ConsoleState(ipc::Channel& c) {
+  const auto m = c.Receive(500ms);
+  if (!m || ipc::TypeOf(*m) != "console") return std::nullopt;
+  return m->at("enabled").get<bool>();
+}
+
+// Published state goes to every channel now and to channels added later
+// (a daemon restarted while a shell is open starts muted).
+TEST_F(HubTest, PublishReachesCurrentAndLaterChannels) {
+  auto [netd_pid1, netd] = MakePair();
+  hub_.Add("netd", std::move(netd_pid1));
+
+  hub_.Publish("console", ipc::Console(false));
+  EXPECT_EQ(ConsoleState(netd), std::optional<bool>{false});
+
+  auto [ctrd_pid1, ctrd] = MakePair();
+  hub_.Add("containerd", std::move(ctrd_pid1));
+  EXPECT_EQ(ConsoleState(ctrd), std::optional<bool>{false});
+
+  // A newer message with the same key replaces the old one.
+  hub_.Publish("console", ipc::Console(true));
+  EXPECT_EQ(ConsoleState(netd), std::optional<bool>{true});
+  EXPECT_EQ(ConsoleState(ctrd), std::optional<bool>{true});
+  auto [late_pid1, late] = MakePair();
+  hub_.Add("late", std::move(late_pid1));
+  EXPECT_EQ(ConsoleState(late), std::optional<bool>{true});
+  EXPECT_FALSE(late.Receive(100ms).has_value());  // only the latest
+}
+
+// PID 1 must not hang on a daemon that never reads its channel.
+TEST_F(HubTest, PublishNeverBlocks) {
+  auto [mine, theirs] = MakePair();
+  hub_.Add("stuck", std::move(mine));
+  const auto t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < 10000; ++i) {
+    hub_.Publish("console", ipc::Console(i % 2 == 0));
+  }
+  EXPECT_LT(std::chrono::steady_clock::now() - t0, 2s);
+}
+
+TEST(ControlTest, ApplyControlMutesTheConsoleLog) {
+  ASSERT_TRUE(aember::utils::logging::console_logging_enabled());
+  EXPECT_TRUE(ipc::ApplyControl(ipc::Console(false)));
+  EXPECT_FALSE(aember::utils::logging::console_logging_enabled());
+  EXPECT_TRUE(ipc::ApplyControl(ipc::Console(true)));
+  EXPECT_TRUE(aember::utils::logging::console_logging_enabled());
+
+  EXPECT_FALSE(ipc::ApplyControl(ipc::Ready()));
+  EXPECT_FALSE(ipc::ApplyControl(json{{"type", "console"}}));
+  EXPECT_FALSE(ipc::ApplyControl(json{{"type", "console"}, {"enabled", 1}}));
+  EXPECT_TRUE(aember::utils::logging::console_logging_enabled());
 }
 
 }  // namespace

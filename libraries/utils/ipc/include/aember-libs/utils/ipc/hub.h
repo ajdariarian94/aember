@@ -20,6 +20,7 @@
 #include <aember-libs/utils/logging/logging.h>
 
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -47,6 +48,12 @@ class Hub {
   /// Watch @p channel under @p name (replaces a channel of the same name).
   void Add(std::string name, Channel channel);
 
+  /// Send @p message to every channel now and to every channel added later
+  /// (a daemon started or restarted afterwards gets the current state).
+  /// A newer message with the same @p key replaces the older one. Never
+  /// blocks: a daemon that doesn't read misses the message.
+  void Publish(const std::string& key, nlohmann::json message);
+
   /// Number of channels being watched.
   [[nodiscard]] std::size_t Size();
 
@@ -61,6 +68,7 @@ class Hub {
 
   std::mutex mutex_;
   std::vector<Entry> entries_;
+  std::map<std::string, nlohmann::json> published_;
   int wake_[2] = {-1, -1};
   MessageHandler on_message_;
   ClosedHandler on_closed_;

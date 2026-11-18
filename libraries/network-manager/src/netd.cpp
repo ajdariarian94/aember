@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <fstream>
 #include <memory>
 #include <mutex>
@@ -48,6 +49,9 @@ int RunNetd(const NetdOptions& options) {
   if (!channel.Valid()) {
     log.warn("no channel to PID 1 on fd 3; running standalone");
   }
+  ipc::ReceiveControl(channel);  // muted if a debug shell is open
+  // Keeps what the console doesn't show while a debug shell is open.
+  aember::utils::logging::enable_file_logging("/var/log/aember-netd.log");
 
   nlohmann::json config;
   {
@@ -86,9 +90,14 @@ int RunNetd(const NetdOptions& options) {
   log.info("netd ready");
 
   while (true) {
-    pollfd p{sigfd, POLLIN, 0};
-    const int r = ::poll(&p, 1, kReportEveryMs);
+    // A negative fd is ignored by poll: no channel, or PID 1 closed it.
+    std::array<pollfd, 2> fds{
+        {{sigfd, POLLIN, 0},
+         {channel.Closed() ? -1 : channel.Fd(), POLLIN, 0}}};
+    const int r = ::poll(fds.data(), fds.size(), kReportEveryMs);
     if (r > 0) {
+      if (fds[1].revents != 0) ipc::ReceiveControl(channel);
+      if ((fds[0].revents & POLLIN) == 0) continue;
       signalfd_siginfo si{};
       if (::read(sigfd, &si, sizeof(si)) == sizeof(si) &&
           si.ssi_signo != SIGHUP) {

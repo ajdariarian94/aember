@@ -58,9 +58,22 @@ void Hub::Add(std::string name, Channel channel) {
   {
     std::lock_guard lock{mutex_};
     std::erase_if(entries_, [&](const Entry& e) { return e.name == name; });
+    for (const auto& [key, message] : published_) {
+      std::ignore = channel.Send(message, /*wait=*/false);
+    }
     entries_.push_back({std::move(name), std::move(channel)});
   }
   Wake();
+}
+
+void Hub::Publish(const std::string& key, nlohmann::json message) {
+  std::lock_guard lock{mutex_};
+  for (const auto& e : entries_) {
+    if (!e.channel.Send(message, /*wait=*/false)) {
+      log_.debug("'{}' missed a '{}' message", e.name, key);
+    }
+  }
+  published_[key] = std::move(message);
 }
 
 std::size_t Hub::Size() {

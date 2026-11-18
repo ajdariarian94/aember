@@ -49,6 +49,12 @@ liblxc (containerd `dlopen`s it) and uses ~1 MB less RSS.
   thread polling all channels). Messages: `{"type":"ready"}`,
   `{"type":"event","name":"network"|"container","data":{...}}`. PID 1
   keeps the last network status and container states for the heartbeat.
+  PID 1 → daemon: `{"type":"console","enabled":bool}` (debug shell
+  open/closed) through `Hub::Publish`, which also sends the last value to
+  channels added later, never blocking; ProcessManager hands the channel
+  to the hub *before* the fork, so it is waiting when the daemon starts.
+  Daemons call `ipc::ReceiveControl` right after `Channel::Inherited()`
+  and whenever fd 3 is readable.
 - Readiness: a service with `ipc` stays Starting until "ready"
   (`ServiceManager::MarkReady`) or its `ready_timeout`; services whose
   dependencies aren't running wait and start as soon as they are (also on
@@ -209,7 +215,8 @@ BusyBox stays in the image for the debug shell and interactive use.
   only skips that entry; the rest still starts.
 - The ipc hub catches handler exceptions per message (a throwing handler
   once killed the hub thread, so readiness was never seen again).
-- The file log `/var/log/aember-init.log` rotates (1 MiB × 3).
+- The file logs `/var/log/aember-{init,netd,containerd}.log` rotate
+  (1 MiB × 3 each).
 
 Runtime config lives in the overlay at
 `resources/<arch>/rootfs/etc/aember/{services,containers,modules,network}.json`;
@@ -345,8 +352,10 @@ shell exits, `d` opens a new one). `aember.shell=1` on the kernel command
 line opens one at boot: `aember app launch --debug-shell` adds it, on a
 board it goes into the boot loader's command line (`cmdline.txt` on a
 Raspberry Pi). If the switch to the real root fails, the initramfs opens
-an emergency shell by itself. While a shell is open PID 1's console log is
-muted (`set_console_logging`); the file log keeps everything. In headless
+an emergency shell by itself. While a shell is open the console log of PID 1
+and of its daemons is muted (`set_console_logging`, passed on to netd and
+containerd over ipc); the file logs keep everything
+(`/var/log/aember-init.log`, `aember-netd.log`, `aember-containerd.log`). In headless
 QEMU, type into the terminal (or pipe into `docker exec -i`). Headless keeps the virtual
 GPU (`-display none`, not `-vga none`): the `aember-monitor` container binds
 `/dev/dri` and `/dev/fb0` and fails without them. Serial logs go to

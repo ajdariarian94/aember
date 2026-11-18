@@ -364,6 +364,11 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
     }
     mine = std::move(pair->first);
     theirs = std::move(pair->second);
+    // Ours goes to the owner (PID 1's hub) before the fork: what the hub
+    // sends on Add (e.g. "console muted" while a debug shell is open) is
+    // then already waiting when the daemon starts. If the fork fails, the
+    // hub just sees the channel close. Called with mutex_ held (from Start).
+    if (on_channel_) on_channel_(config.name, std::move(mine));
   }
 
   const pid_t pid = fork();
@@ -410,11 +415,7 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
     _exit(1);
   }
 
-  // Parent: the child's end is closed here (theirs goes out of scope); ours
-  // goes to the owner (PID 1's hub). Called with mutex_ held (from Start).
-  if (pid > 0 && mine.Valid() && on_channel_) {
-    on_channel_(config.name, std::move(mine));
-  }
+  // Parent: the child's end is closed here (theirs goes out of scope).
   return pid;
 }
 
