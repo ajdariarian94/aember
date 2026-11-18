@@ -61,7 +61,14 @@ off by guestfish. Left:
   thread sleeps); use a condition variable with the stop token.
 - [ ] `ProcessManager::ScheduleRestart` detaches a thread that captures
   `this`; a restart pending at shutdown can touch a destroyed manager.
-- [ ] Hardware **watchdog** support and recovery for PID 1 itself.
+- [x] **Hardware watchdog** (2026-11-18): `utils/watchdog`, fed only
+  while PID 1's run loop and reaper are alive, disarmed for a requested
+  shutdown, `aember.watchdog=<s>|0`. Left:
+  - [ ] Verify on the real Pi 4 (QEMU raspi resets at once, x64 has no
+    driver): normal run stays up; a hung PID 1 resets the board.
+  - [ ] x64/aarch64 QEMU coverage: enable `I6300ESB_WDT` (x64) / use
+    `sp805` or i6300esb on virt in aember-resources, then test the reset
+    path in QEMU too.
 
 ## Architecture
 

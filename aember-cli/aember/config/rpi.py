@@ -52,8 +52,12 @@ CMDLINE_TXT = (
 
 # Smoke test in QEMU (the Pi 3 machine: QEMU 8.2 has no raspi4b): same
 # kernel, initramfs and SD image; its first serial port is the PL011.
+# aember.watchdog=0: QEMU's raspi machines reset the moment the BCM2835
+# watchdog is started (no countdown emulated), so PID 1 must not arm it
+# there; a real Pi counts down and gets the watchdog.
 QEMU_PI3_APPEND = (
-    f"console=ttyAMA0,115200 root=LABEL={ROOT_LABEL} rootfstype=ext4 rootwait rw"
+    f"console=ttyAMA0,115200 root=LABEL={ROOT_LABEL} rootfstype=ext4 rootwait rw "
+    "aember.watchdog=0"
 )
 
 # `aember rpi flash` refuses anything bigger (it's not an SD card) unless

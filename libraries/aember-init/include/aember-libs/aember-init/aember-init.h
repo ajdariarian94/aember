@@ -21,9 +21,11 @@
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/shell/debug-shell.h>
 #include <aember-libs/utils/signal/signal.h>
+#include <aember-libs/utils/watchdog/watchdog.h>
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <expected>
 #include <map>
 #include <memory>
@@ -155,6 +157,17 @@ class AemberInit {
   std::unique_ptr<aember::service_manager::ServiceManager> service_manager_;
 
   std::jthread reaper_thread_;
+
+  // Hardware watchdog (root mode on a device): fed only while the run loop
+  // and the reaper tick (steady_clock time since epoch, in ms).
+  void StartWatchdog();
+  [[nodiscard]] bool Alive() const;
+  static std::int64_t NowMs();
+  std::unique_ptr<aember::utils::watchdog::Watchdog> watchdog_;
+  std::atomic<std::int64_t> loop_tick_ms_{0};
+  std::atomic<std::int64_t> reap_tick_ms_{0};
+  std::atomic<std::int64_t> watchdog_armed_ms_{0};
+  std::atomic<bool> loop_started_{false};
 
   /// Daemon channels (netd, containerd) and what they last reported.
   aember::utils::ipc::Hub hub_;
