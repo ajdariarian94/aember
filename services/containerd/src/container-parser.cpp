@@ -10,6 +10,9 @@
 
 #include <aember-services/containerd/container-parser.h>
 
+#include <chrono>
+#include <string>
+
 namespace aember::containerd {
 
 bool ContainersConfigParser::ParseFile(const std::string& path,
@@ -100,6 +103,49 @@ bool ContainersConfigParser::ParseContainer(const nlohmann::json& json,
       cfg.args.push_back(arg.get<std::string>());
     }
   }
+
+  // -------------------------
+  // Lifecycle (optional, top level)
+  // -------------------------
+  const auto seconds = [&](const char* key, std::chrono::seconds& out) {
+    if (!json.contains(key)) return true;
+    if (!json[key].is_number_unsigned()) {
+      error = config::ConfigError(std::string{"'"} + key +
+                                  "' must be a number of seconds");
+      return false;
+    }
+    out = std::chrono::seconds{json[key].get<unsigned>()};
+    return true;
+  };
+
+  if (json.contains("init")) {
+    if (!json["init"].is_boolean()) {
+      error = config::ConfigError("'init' must be true or false");
+      return false;
+    }
+    cfg.init = json["init"].get<bool>();
+  }
+  if (!seconds("stop_timeout", cfg.stop_timeout)) return false;
+  if (json.contains("restart_policy")) {
+    const auto policy =
+        json["restart_policy"].is_string()
+            ? RestartPolicyFromString(json["restart_policy"].get<std::string>())
+            : std::nullopt;
+    if (!policy) {
+      error = config::ConfigError(
+          "'restart_policy' must be \"no\", \"on-failure\" or \"always\"");
+      return false;
+    }
+    cfg.restart_policy = *policy;
+  }
+  if (json.contains("max_restart_attempts")) {
+    if (!json["max_restart_attempts"].is_number_unsigned()) {
+      error = config::ConfigError("'max_restart_attempts' must be >= 0");
+      return false;
+    }
+    cfg.max_restart_attempts = json["max_restart_attempts"].get<unsigned>();
+  }
+  if (!seconds("restart_delay", cfg.restart_delay)) return false;
 
   return true;
 }

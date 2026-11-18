@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -129,6 +130,52 @@ TEST(ContainerStateTest, NamesAreDistinct) {
   }
   EXPECT_EQ(names.size(), 5u);
   EXPECT_EQ(ContainerStateToString(ContainerState::kRunning), "running");
+}
+
+TEST_F(ContainerParserTest, LifecycleDefaults) {
+  ASSERT_TRUE(ParseOne(kValid)) << error_.message;
+  const auto& c = parser_.GetContainers().at(0);
+  EXPECT_TRUE(c.init);
+  EXPECT_EQ(c.stop_timeout, std::chrono::seconds{10});
+  EXPECT_EQ(c.restart_policy, aember::containerd::RestartPolicy::kNo);
+  EXPECT_EQ(c.max_restart_attempts, 0u);
+  EXPECT_EQ(c.restart_delay, std::chrono::seconds{5});
+}
+
+TEST_F(ContainerParserTest, LifecycleFields) {
+  std::string entry = kValid;
+  entry.insert(entry.rfind('}'),
+               R"(, "init": false, "stop_timeout": 30,
+                  "restart_policy": "on-failure",
+                  "max_restart_attempts": 3, "restart_delay": 7)");
+  ASSERT_TRUE(ParseOne(entry)) << error_.message;
+  const auto& c = parser_.GetContainers().at(0);
+  EXPECT_FALSE(c.init);
+  EXPECT_EQ(c.stop_timeout, std::chrono::seconds{30});
+  EXPECT_EQ(c.restart_policy, aember::containerd::RestartPolicy::kOnFailure);
+  EXPECT_EQ(c.max_restart_attempts, 3u);
+  EXPECT_EQ(c.restart_delay, std::chrono::seconds{7});
+
+  for (const char* policy : {"no", "never", "always"}) {
+    std::string e = kValid;
+    e.insert(e.rfind('}'),
+             std::string{R"(, "restart_policy": ")"} + policy + "\"");
+    EXPECT_TRUE(ParseOne(e)) << policy << ": " << error_.message;
+  }
+}
+
+TEST_F(ContainerParserTest, BadLifecycleFieldsAreRejected) {
+  for (const char* extra : {R"(, "init": "yes")",
+                            R"(, "stop_timeout": -1)",
+                            R"(, "stop_timeout": "10")",
+                            R"(, "restart_policy": "sometimes")",
+                            R"(, "restart_policy": 1)",
+                            R"(, "max_restart_attempts": -2)",
+                            R"(, "restart_delay": 1.5)"}) {
+    std::string e = kValid;
+    e.insert(e.rfind('}'), extra);
+    EXPECT_FALSE(ParseOne(e)) << extra;
+  }
 }
 
 }  // namespace

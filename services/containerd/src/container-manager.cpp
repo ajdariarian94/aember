@@ -11,11 +11,16 @@
 #include <aember-services/containerd/container-manager.h>
 #include <aember-services/containerd/lxc-api.h>
 
+#include <cerrno>
+#include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <ranges>
 #include <sstream>
+#include <string>
+#include <thread>
 
 #include <lxc/lxccontainer.h>
 #include <sys/mount.h>
@@ -24,6 +29,50 @@
 #include <unistd.h>
 
 namespace aember::containerd {
+
+namespace {
+
+/// Where the host's static BusyBox appears inside a container. The name
+/// must start with "busybox": BusyBox picks the applet from argv[0]
+/// otherwise ("/.aember-busybox sh" fails with "applet not found").
+constexpr const char* kInitInContainer = "/busybox.aember-init";
+
+/// The init wrapper (BusyBox sh as the container's init): starts the app,
+/// passes SIGTERM/INT/HUP on (a shell with a trap gets them, an app that
+/// is the namespace init doesn't) and exits with the app's status.
+constexpr const char* kInitScript =
+    "trap 'kill -TERM $pid 2>/dev/null' TERM INT HUP; "
+    "\"$@\" & pid=$!; "
+    "while :; do wait $pid; rc=$?; kill -0 $pid 2>/dev/null || exit $rc; done";
+
+/// A file that is (or was, in a reused rootfs) bind mounted: not empty.
+bool HasInitWrapper(const std::string& rootfs) {
+  std::error_code ec;
+  const auto size = std::filesystem::file_size(rootfs + kInitInContainer, ec);
+  return !ec && size > 0;
+}
+
+/// umount2(path, 0); if it is busy, detach it lazily. False only if it
+/// couldn't be unmounted at all (not mounted counts as done).
+bool UnmountPath(const std::string& path, aember::utils::logging::Logger& log) {
+  if (::umount2(path.c_str(), 0) == 0) {
+    log.info("Unmounted {}", path);
+    return true;
+  }
+  if (errno == EINVAL || errno == ENOENT) {
+    log.info("{} was not mounted", path);
+    return true;
+  }
+  const int err = errno;
+  if (::umount2(path.c_str(), MNT_DETACH) == 0) {
+    log.warn("{} busy ({}), detached lazily", path, std::strerror(err));
+    return true;
+  }
+  log.warn("Cannot unmount {}: {}", path, std::strerror(errno));
+  return false;
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Ctor / Dtor
@@ -135,6 +184,8 @@ bool ContainerManager::StartContainer(std::string_view name) {
     }
   }
 
+  e->stop_requested = false;
+  e->started_at = std::chrono::steady_clock::now();
   SetState(*e, ContainerState::kRunning);
   return true;
 }
@@ -160,6 +211,7 @@ bool ContainerManager::StopContainer(std::string_view name) {
   }
 
   log_.info("Stopping container '{}'", name);
+  e->stop_requested = true;
   SetState(*e, ContainerState::kStopping);
 
   const bool ok = Stop(*e);
@@ -186,6 +238,9 @@ bool ContainerManager::HandleExit(pid_t pid, int exit_code) {
   if (!e) { return true; }
 
   const bool was_stopping = (e->state == ContainerState::kStopping);
+  if (std::chrono::steady_clock::now() - e->started_at >= kStableRun) {
+    e->restarts = 0;  // it ran fine for a while: a fresh failure
+  }
   Release(*e);
 
   if (was_stopping || exit_code == 0) {
@@ -201,6 +256,42 @@ bool ContainerManager::HandleExit(pid_t pid, int exit_code) {
   }
 
   return true;
+}
+
+std::optional<std::chrono::seconds> ContainerManager::NextRestart(
+    std::string_view name) {
+  std::lock_guard lock{mutex_};
+  auto* e = Find(name);
+  if (!e || e->stop_requested) return std::nullopt;
+  const auto& cfg = e->config;
+  switch (cfg.restart_policy) {
+    case RestartPolicy::kNo:
+      return std::nullopt;
+    case RestartPolicy::kOnFailure:
+      if (e->state != ContainerState::kFailed) return std::nullopt;
+      break;
+    case RestartPolicy::kAlways:
+      if (e->state == ContainerState::kRunning ||
+          e->state == ContainerState::kStarting) {
+        return std::nullopt;
+      }
+      break;
+  }
+  if (cfg.max_restart_attempts > 0 && e->restarts >= cfg.max_restart_attempts) {
+    log_.error(
+        "Container '{}': {} restart(s) in a row, giving up", name, e->restarts);
+    return std::nullopt;
+  }
+  ++e->restarts;
+  log_.info("Container '{}': restart {}{} in {} s ({})",
+            name,
+            e->restarts,
+            cfg.max_restart_attempts > 0
+                ? "/" + std::to_string(cfg.max_restart_attempts)
+                : std::string{},
+            cfg.restart_delay.count(),
+            ToString(cfg.restart_policy));
+  return cfg.restart_delay;
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +474,24 @@ bool ContainerManager::Create(ContainerEntry& e) {
       log_.info("Successfully bind-mounted host /var/log to '{}'",
                 container_host_logs);
     }
+
+    // 4. The init wrapper: the host's static BusyBox as /busybox.aember-init.
+    if (e.config.init) {
+      const std::string target = e.config.rootfs + kInitInContainer;
+      { std::ofstream{target, std::ios::app}; }  // bind target must exist
+      if (mount(host_busybox_.c_str(),
+                target.c_str(),
+                nullptr,
+                MS_BIND | MS_RDONLY,
+                nullptr) != 0) {
+        log_.warn("'{}': no init wrapper (bind {}: {}); the app is init",
+                  e.config.name,
+                  host_busybox_,
+                  strerror(errno));
+      }
+    }
   }
+  e.init_wrapper = e.config.init && HasInitWrapper(e.config.rootfs);
 
   // 2. Instantiate LXC handle AFTER OverlayFS and bind mounts are complete
   const auto* lxc = Lxc();
@@ -411,6 +519,13 @@ bool ContainerManager::Create(ContainerEntry& e) {
   }
 
   log_.info("Loaded container config from '{}'", e.config.config_path);
+
+  // `lxc shutdown` sends lxc.signal.halt (SIGPWR by default) to the init:
+  // the wrapper passes SIGTERM on to the app.
+  if (e.init_wrapper &&
+      !e.lxc->set_config_item(e.lxc, "lxc.signal.halt", "SIGTERM")) {
+    log_.warn("'{}': lxc.signal.halt = SIGTERM rejected", e.config.name);
+  }
 
   // Settings for every container from the environment aember runs in (e.g.
   // the chroot launcher passes the X11 display through). Optional file.
@@ -465,9 +580,16 @@ bool ContainerManager::Start(ContainerEntry& e) {
 
   log_.debug("Starting LXC container '{}'", e.config.name);
 
+  std::vector<std::string> args;
+  if (e.init_wrapper && !e.config.args.empty()) {
+    args = {kInitInContainer, "sh", "-c", kInitScript, "aember-init"};
+    log_.debug("'{}' runs under the init wrapper", e.config.name);
+  }
+  args.insert(args.end(), e.config.args.begin(), e.config.args.end());
+
   std::vector<char*> argv;
-  argv.reserve(e.config.args.size() + 1);
-  std::ranges::transform(e.config.args, std::back_inserter(argv), [](auto& a) {
+  argv.reserve(args.size() + 1);
+  std::ranges::transform(args, std::back_inserter(argv), [](auto& a) {
     return const_cast<char*>(a.c_str());
   });
   if (!argv.empty()) { argv.push_back(nullptr); }
@@ -489,19 +611,40 @@ bool ContainerManager::Stop(ContainerEntry& e) {
   if (e.lxc && e.lxc->is_running(e.lxc)) {
     log_.debug("Stopping LXC container '{}'", e.config.name);
 
-    if (!e.lxc->shutdown(e.lxc, 5)) {
+    const auto timeout = static_cast<int>(e.config.stop_timeout.count());
+    if (!e.lxc->shutdown(e.lxc, timeout)) {
       log_.warn("Graceful shutdown failed for '{}' — forcing stop",
                 e.config.name);
       e.lxc->stop(e.lxc);
     }
   }
 
-  // Unmount OverlayFS first, then clean up SquashFS lowerdir
+  // Innermost first: the bind mounts inside the rootfs (they kept the
+  // overlay busy, so it was only detached lazily and the SquashFS under it
+  // stayed in use), then the overlay, then the SquashFS lowerdir.
   if (!e.config.squashfs.empty()) {
     const std::string lower_dir = std::format("{}-lower", e.config.rootfs);
 
-    // Unmount OverlayFS from rootfs
-    umount2(e.config.rootfs.c_str(), MNT_DETACH);
+    UnmountPath(e.config.rootfs + kInitInContainer, log_);
+    UnmountPath(e.config.rootfs + "/host-logs", log_);
+    UnmountPath(e.config.rootfs, log_);
+    e.init_wrapper = false;
+
+    // The SquashFS lowerdir can stay busy after the overlay is gone (the
+    // overlay superblock outlives its mount for a while; see TODO.md). Try
+    // for 1 s, then detach it lazily: the loop device clears itself
+    // (autoclear) once the last user lets go.
+    bool unmounted = false;
+    for (int i = 0; i < 10 && !unmounted; ++i) {
+      unmounted = ::umount2(lower_dir.c_str(), 0) == 0 || errno == EINVAL;
+      if (!unmounted && errno != EBUSY) break;
+      if (!unmounted) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+      }
+    }
+    if (!unmounted && ::umount2(lower_dir.c_str(), MNT_DETACH) == 0) {
+      log_.warn("{} still busy, detached lazily", lower_dir);
+    }
 
     // Unmount SquashFS from lowerdir
     mount_manager_->Unmount(lower_dir);
