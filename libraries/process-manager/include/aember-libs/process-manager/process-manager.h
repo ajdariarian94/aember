@@ -15,12 +15,16 @@
 #include <aember-libs/utils/process/process-config.h>
 #include <aember-libs/utils/process/process-state.h>
 
+#include <atomic>
 #include <functional>
+#include <list>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace aember::process_manager {
@@ -132,6 +136,17 @@ class ProcessManager {
   std::map<std::string, unsigned int> restart_counts_;
 
   mutable std::mutex mutex_;
+
+  /// Pending restarts (ScheduleRestart). They used to be detached threads
+  /// capturing `this`: one still pending at shutdown ran on a destroyed
+  /// manager. Now the destructor stops and joins them; finished ones are
+  /// pruned when the next one is added.
+  struct PendingRestart {
+    std::shared_ptr<std::atomic<bool>> done;
+    std::jthread thread;
+  };
+  std::mutex restarts_mutex_;
+  std::list<PendingRestart> restarts_;
 
   ExitCallback on_exit_;
 

@@ -167,6 +167,9 @@ void AemberMonitor::Log(const nlohmann::json& payload) const {
               Field(net, "interface", std::string{}),
               Field(net, "rtt_ms", 0),
               Field(net, "ip", std::string{}));
+  } else {
+    // No service reports it (e.g. ConnMan instead of aember-netd).
+    log_.info("  Network      │ not reported (no aember network service)");
   }
 
   if (const auto& services = Child(payload, "services"); services.is_array()) {

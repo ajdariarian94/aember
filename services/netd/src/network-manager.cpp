@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <format>
 #include <fstream>
@@ -464,7 +465,11 @@ void NetworkManager::MonitorLoop(std::stop_token stop_token) {
     } catch (const std::exception& e) {
       log_.error("Connectivity check failed: {}", e.what());
     }
-    std::this_thread::sleep_for(config_.ping_interval);
+    // Wakes at once on Stop() (it used to sleep out the whole interval).
+    std::mutex m;
+    std::unique_lock lock{m};
+    std::condition_variable_any{}.wait_for(
+        lock, stop_token, config_.ping_interval, [] { return false; });
   }
 
   log_.info("Connectivity monitor stopped");

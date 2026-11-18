@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <exception>
+#include <thread>
 
 namespace {
 
@@ -83,6 +84,18 @@ TEST(NetworkManagerTest, InvalidConfigsThrow) {
         { NetworkManager nm{json::parse(text)}; }, std::exception)
         << text;
   }
+}
+
+// Stop() used to wait out a whole ping interval (the monitor slept).
+TEST(NetworkManagerTest, StopIsPromptWithALongPingInterval) {
+  NetworkManager nm{json::parse(R"({
+    "ping_target": "127.0.0.1", "ping_interval_ms": 60000, "interfaces": []
+  })")};
+  nm.Start();
+  std::this_thread::sleep_for(200ms);  // the monitor is in its wait now
+  const auto t0 = std::chrono::steady_clock::now();
+  nm.Stop();
+  EXPECT_LT(std::chrono::steady_clock::now() - t0, 3s);
 }
 
 }  // namespace

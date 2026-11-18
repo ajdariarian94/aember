@@ -43,8 +43,10 @@ def build_qemu(
 
     steps = []
 
-    # Clean only when running tests — ensures fresh initramfs with latest test binaries
-    if build_tests or BuildType.debug:
+    # Clean only when building tests: a fresh initramfs with the latest test
+    # binaries. (This used to read `build_tests or BuildType.debug`, which is
+    # always true, so every build started by cleaning.)
+    if build_tests:
         steps.append(CleanStep())
 
     steps += [

@@ -10,11 +10,14 @@
  */
 
 #include <aember-libs/device-health/aember-monitor.h>
+#include <aember-libs/utils/logging/logging.h>
 
 #include <gtest/gtest.h>
+#include <spdlog/sinks/ostream_sink.h>
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -62,6 +65,25 @@ TEST(AemberMonitorTest, LogDoesNotThrowOnPartialPayloads) {
   EXPECT_NO_THROW(monitor.Log(monitor.Snapshot()));
   EXPECT_NO_THROW(monitor.Log(nlohmann::json::object()));
   EXPECT_NO_THROW(monitor.Log(nlohmann::json{{"pid1", "garbage"}}));
+}
+
+// The network line says so when no service reports the network.
+TEST(AemberMonitorTest, LogSaysWhenNoNetworkIsReported) {
+  auto stream = std::make_shared<std::ostringstream>();
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(*stream);
+  auto& logger = aember::utils::logging::global_logger();
+  logger.sinks().push_back(sink);
+  AemberMonitor monitor;
+  monitor.Log(nlohmann::json::object());
+  monitor.Log(nlohmann::json{
+      {"network",
+       {{"online", true}, {"interface", "eth0"}, {"ip", "10.0.2.15"}}}});
+  logger.flush();
+  std::erase(logger.sinks(), sink);
+  const auto text = stream->str();
+  EXPECT_NE(text.find("Network      │ not reported"), std::string::npos)
+      << text;
+  EXPECT_NE(text.find("ONLINE  │ iface=eth0"), std::string::npos) << text;
 }
 
 TEST(AemberMonitorTest, LogToFileRewritesInPlace) {

@@ -10,6 +10,7 @@
 
 #include <aember-libs/process-manager/process-manager.h>
 
+#include <condition_variable>
 #include <ranges>
 #include <thread>
 
@@ -33,6 +34,15 @@ ProcessManager::ProcessManager(ExitCallback on_exit)
 }
 
 ProcessManager::~ProcessManager() {
+  // Pending restarts first (outside mutex_: they may be inside Start()).
+  {
+    std::list<PendingRestart> pending;
+    {
+      std::lock_guard lock{restarts_mutex_};
+      pending.swap(restarts_);
+    }
+    pending.clear();  // request_stop + join each
+  }
   std::lock_guard lock{mutex_};
   for (const auto& [name, pid] : name_to_pid_) {
     log_.info("Killing '{}' (pid {})", name, pid);
@@ -249,11 +259,20 @@ void ProcessManager::ScheduleRestart(std::string_view name) {
 
   lock.unlock();
 
-  // jthread auto-joins on destruction — detach replaced with move-to-local.
-  std::jthread{[this, key, delay](std::stop_token) {
+  auto done = std::make_shared<std::atomic<bool>>(false);
+  std::jthread thread{[this, key, delay, done](std::stop_token st) {
+    struct Done {
+      std::atomic<bool>& flag;
+      ~Done() { flag = true; }
+    } mark{*done};
     // An exception escaping a thread calls std::terminate: fatal in PID 1.
     try {
-      std::this_thread::sleep_for(delay);
+      // Interruptible: the destructor stops a pending restart at once.
+      std::mutex m;
+      std::unique_lock wait_lock{m};
+      std::condition_variable_any{}.wait_for(
+          wait_lock, st, delay, [] { return false; });
+      if (st.stop_requested()) return;
       log_.info("Restarting '{}'", key);
       if (on_restart_) {
         on_restart_(key);
@@ -263,7 +282,15 @@ void ProcessManager::ScheduleRestart(std::string_view name) {
     } catch (const std::exception& e) {
       log_.error("Restart of '{}' failed: {}", key, e.what());
     } catch (...) { log_.error("Restart of '{}' failed", key); }
-  }}.detach();
+  }};
+
+  std::lock_guard restarts_lock{restarts_mutex_};
+  std::erase_if(restarts_, [](PendingRestart& r) {
+    if (!r.done->load()) return false;
+    r.thread.join();  // finished: joining is immediate
+    return true;
+  });
+  restarts_.push_back({std::move(done), std::move(thread)});
 }
 
 // ---------------------------------------------------------------------------

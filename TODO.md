@@ -17,8 +17,9 @@ Left:
 
 - [ ] `aember.shell=initramfs`: stop before the pivot, for root mount
   problems (today the shell only opens there when the pivot fails).
-- [ ] The listener starts after the network phase (it needs the reaper),
-  so `d` works only after up to 30 s when there is no network.
+- [x] ~~The listener starts after the network phase~~: obsolete since the
+  network is a service (2026-11-18): the listener starts right after the
+  reaper, before any service.
 - [ ] The emergency shell path was tested in the unit tests only, not by
   booting QEMU with a broken `root=`.
 - [ ] `d` works in Release images too, as before: anyone at the serial
@@ -63,10 +64,10 @@ off by guestfish. Left:
 - [ ] A static `aember-cinit` (tini-like) instead of the BusyBox sh
   wrapper, once the SDK has static glibc (`glibc-staticdev` in
   aember-resources' SDK).
-- [ ] `NetworkManager::Stop` waits up to one ping interval (the monitor
-  thread sleeps); use a condition variable with the stop token.
-- [ ] `ProcessManager::ScheduleRestart` detaches a thread that captures
-  `this`; a restart pending at shutdown can touch a destroyed manager.
+- [x] `NetworkManager::Stop` no longer waits out a ping interval (the
+  monitor waits on its stop token, 2026-11-18).
+- [x] `ProcessManager::ScheduleRestart` keeps its restart threads; the
+  destructor stops and joins them (2026-11-18).
 - [x] **Hardware watchdog** (2026-11-18): `utils/watchdog`, fed only
   while PID 1's run loop and reaper are alive, disarmed for a requested
   shutdown, `aember.watchdog=<s>|0`. Left:
@@ -94,8 +95,8 @@ off by guestfish. Left:
     overlay), so QEMU and the Pi 4 can pick different services.
   - [ ] ConnMan as an alternative network service (aember-resources:
     connman + dbus + wpa_supplicant recipes, Pi Wi-Fi in the kernel).
-  - [ ] Heartbeat: say "network: external" instead of nothing when no
-    service reports network status.
+  - [x] Heartbeat says "Network │ not reported" when no service reports
+    the network (2026-11-18).
   - [ ] Measure shared vs static spdlog/fmt across aember and the services
     (nlohmann is header-only); keep PID 1 static unless it pays off.
 - [ ] Merge ProcessManager into ServiceManager: with containers gone they
@@ -154,14 +155,13 @@ BusyBox init / s6 / runit / dinit.
 
 ## Smaller cleanups / known issues
 
-- [ ] `cli/qemu/build.py`: `if build_tests or BuildType.debug:` is always
-  true, so every `aember qemu build` starts with `CleanStep`.
+- [x] `aember qemu build` cleans only with `--with-tests` (the condition
+  was always true, 2026-11-18).
 - [ ] Dev Dockerfile has Yocto-era leftovers (GNU tar 1.34 downgrade,
   gcc-12/14 PPA, gcc cross packages); drop them on the next image rebuild.
 - [ ] `aember changelog` compares `main..HEAD`, so it finds nothing on
   `main`; let it take the last tag as base (`--since v0.9.0`).
-- [ ] `utils/merge_compile_command.py` also merges its own previous output
-  (top-level `build/configure/<arch>/<type>/compile_commands.json`), so the
-  file gains a copy of every entry on each build, stale flags included.
-- [ ] `utils/fetch_artifact.py` still has the old gh-based download helpers;
-  remove what's no longer used.
+- [x] `merge_compile_command.py` skips its own output and keeps one entry
+  per file (2026-11-18).
+- [x] `utils/fetch_artifact.py`: the unused gh download helpers are gone
+  (2026-11-18).
