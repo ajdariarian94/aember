@@ -25,7 +25,10 @@ class ChangelogStep(Step):
 
     def run(self, ctx: Context) -> None:
         self.bump = VersionBump(ctx.bump)
-        self.base_branch = "main"
+        # What the changes are counted from: "main" on a feature branch, the
+        # last release tag (e.g. v0.12.0) on main (`aember changelog --since`).
+        self.base_branch = ctx.data.get("since", "main")
+        self.root = ctx.root
         self.cmake_file = "CMakeLists.txt"
 
         log.info("Running changelog step (bump=%s)", self.bump)
@@ -63,6 +66,7 @@ class ChangelogStep(Step):
         return subprocess.check_output(
             cmd,
             shell=True,
+            cwd=self.root,
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()

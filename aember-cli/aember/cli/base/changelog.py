@@ -11,9 +11,14 @@ def changelog(
         VersionBump.MINOR,
         help="Version bump type",
         case_sensitive=False,
-    )
+    ),
+    since: str = typer.Option(
+        "main",
+        help="Count the changes from this ref: main on a feature branch, the "
+        "last release tag (e.g. v0.12.0) on main.",
+    ),
 ):
-    ctx = Context(bump=version_bump.value)
+    ctx = Context(bump=version_bump.value, data={"since": since})
 
     Pipeline(
         [

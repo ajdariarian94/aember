@@ -193,8 +193,8 @@ BusyBox init / s6 / runit / dinit.
   was always true, 2026-11-18).
 - [ ] Dev Dockerfile has Yocto-era leftovers (GNU tar 1.34 downgrade,
   gcc-12/14 PPA, gcc cross packages); drop them on the next image rebuild.
-- [ ] `aember changelog` compares `main..HEAD`, so it finds nothing on
-  `main`; let it take the last tag as base (`--since v0.9.0`).
+- [x] `aember changelog --since v<last version>` counts from the last
+  release tag instead of `main` (2026-11-19).
 - [x] `merge_compile_command.py` skips its own output and keeps one entry
   per file (2026-11-18).
 - [x] `utils/fetch_artifact.py`: the unused gh download helpers are gone
