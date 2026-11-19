@@ -55,7 +55,7 @@ kernel ─► initramfs /init = aember        mounts, loads modules, finds the r
 
 | Target | Architecture | Runs on |
 |--------|--------------|---------|
-| `x64-poky-linux` | x86-64 | QEMU, PCs; or without a VM (`--chroot`) |
+| `x64-poky-linux` | x86-64 | QEMU, **PCs** (USB stick image, UEFI); or without a VM (`--chroot`, AppImage) |
 | `aarch64-poky-linux` | ARMv8 (Cortex-A72) | QEMU `virt`, **Raspberry Pi 4** (SD card image) |
 | `arm-poky-linux` | ARMv7-A hard-float NEON | QEMU `virt` (Cortex-A15) |
 
@@ -101,6 +101,35 @@ aember rpi launch --timeout 60       # smoke test in QEMU (raspi3b)
 The serial console is on GPIO 14/15 (115200 8N1); press `d` there for a
 shell. On WSL, attach the card reader first with `usbipd attach --wsl`.
 
+### A PC from a USB stick
+
+```sh
+aember app build && aember app pack
+aember usb image                     # build/usb/aember-x64-usb-v<version>.img
+aember usb flash --device /dev/sdX   # or balenaEtcher / Raspberry Pi Imager "Use custom"
+aember usb launch --headless --timeout 90   # boot it in QEMU: UEFI, USB stick
+```
+
+Boot the PC from the stick in **UEFI mode with Secure Boot off** (the
+kernel is not signed; there is no legacy BIOS boot). systemd-boot offers
+aember (console on the screen; `d` on the keyboard opens a shell), aember
+with the console on the serial port, and aember with a shell at boot.
+Nothing on the PC's own disks is touched.
+
+### Ready-made images
+
+`aember release` also writes the flashable images of a version into
+`build/release/images/` and `aember publish` uploads them:
+`aember-rpi4-v<V>.img.xz`, `aember-x64-usb-v<V>.img.xz` (+ `.sha256`) and
+`aember-rpi-imager.json`, a Raspberry Pi Imager repository list. With it,
+Imager lists aember: insert the card, pick aember, write:
+
+```sh
+rpi-imager --repo https://github.com/ajdariarian94/aember/releases/latest/download/aember-rpi-imager.json
+```
+
+balenaEtcher's "Flash from URL" takes the `.img.xz` links directly.
+
 ### Try it on your Linux desktop
 
 ```sh
@@ -122,6 +151,7 @@ machine's network; closing the window ends it and cleans up.
 | `aember qemu build --with-tests` | x64 Debug build with the unit tests |
 | `aember test` | Run the CLI and C++ unit tests (`-k <name>` to filter, `-n <N>` to repeat) |
 | `aember rpi image` / `flash` / `launch` | Raspberry Pi 4 SD card image |
+| `aember usb image` / `flash` / `launch` | x86-64 PC USB stick image (UEFI) |
 | `aember fetch-resources` | Download kernel, BusyBox, LXC and SDK only |
 | `aember lint` | ruff, black, clang-format, cmake-format, cmakelint |
 | `aember generate-docs` / `view-docs` | Doxygen documentation |
@@ -142,7 +172,20 @@ The root filesystem overlay is `resources/<arch>/rootfs/`; aember reads:
 | `/etc/aember/modules.json` | Kernel modules to load |
 
 Logs: `/var/log/aember-init.log`, `aember-netd.log`, `aember-containerd.log`
-(rotating), and the heartbeat in `/var/log/aember-monitor.json`.
+(rotating), and the heartbeat in `/var/log/aember-monitor.json`. A
+container's output goes to its console; with `lxc.console.logfile` in its
+LXC config it is kept, e.g. `/var/log/aember-container-<name>.log`.
+
+## Your application as a container
+
+[aember-build-helper](https://github.com/ajdariarian94/aember-build-helper)
+(the sibling repository `../aember-build-helper`)
+packs a project into an aember-ready container: add it as a submodule,
+describe the container in `aember-container.json` (from a Dockerfile, a
+Docker image, or a CMake install with the libraries from the aember SDK),
+then `aember-pack build` and `aember-pack install <this repo>` put the
+SquashFS image, its LXC config and the `containers.json` entry into the
+board's overlay.
 
 ## Writing a service
 

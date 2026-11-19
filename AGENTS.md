@@ -91,7 +91,15 @@ image at all. A crash in them never takes PID 1 down.
     start with "busybox" or BusyBox looks for an applet of that name).
     The wrapper is the namespace init and passes SIGTERM/INT/HUP on; an
     app that is init itself never gets SIGTERM. `lxc.signal.halt` =
-    SIGTERM, graceful stop waits `"stop_timeout"` (10 s).
+    SIGTERM, graceful stop waits `"stop_timeout"` (10 s). The script is
+    `kInitScript` in `init-wrapper.h` (tested with the host's sh in
+    `init-wrapper-unittest`). Inside a container (`container=lxc`) with a
+    console (`/dev/console` a char device that opens) it first sends the
+    app's stdin/stdout/stderr to `/dev/null`/the console: LXC gives a
+    daemonized init `/dev/null`, so app output was lost; the console pty
+    is what LXC reads, and `lxc.console.logfile` in the container's
+    config keeps it (aember-build-helper writes
+    `/var/log/aember-container-<name>.log`, 1 MB, rotated).
   - containerd's `pthread_atfork` child handler unblocks all signals:
     liblxc forks without exec and gives the container init the caller's
     mask, so with containerd's signalfd mask nothing in a container got
@@ -118,7 +126,7 @@ aember-resources (`../aember-resources`,
 <https://github.com/ajdariarian94/aember-resources>) builds the low-level
 pieces with kas/Yocto and publishes them as assets of the GitHub release
 `v<version>`. The version aember uses is pinned in
-`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.6`;
+`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.7`;
 x64, aarch64 and arm32).
 
 `aember fetch-resources` (also the first step of `aember qemu build`,
@@ -277,7 +285,8 @@ BusyBox stays in the image for the debug shell and interactive use.
   armed, so the board resets instead of reaping forever. The kernels have
   `i6300esb` (aember-resources v0.1.6) and `aember app launch` adds QEMU's
   `-device i6300esb` (a real countdown, reset on expiry), so QEMU tests
-  the watchdog on every architecture; the Pi has `bcm2835_wdt`. **QEMU's
+  the watchdog on every architecture; the Pi has `bcm2835_wdt`, x64 PCs
+  `iTCO_wdt`/`sp5100_tco` (aember-resources v0.1.7). **QEMU's
   raspi machines reset the instant the BCM2835 watchdog starts** (no
   countdown), so `aember rpi launch` boots with `aember.watchdog=0`.
   Reset check: `aember app launch --headless --append aember.watchdog=0`,
@@ -414,6 +423,38 @@ privileged helper container of the dev image (`steps/launching/chroot.py`).
   (`-snapshot`, the image stays untouched). It tests the Pi boot path (DT,
   SD driver, root by label, serial), not the GPU firmware step.
 
+**x86-64 PCs: `aember usb image | flash | launch`** (`steps/usb/`,
+`config/usb.py`). The x64 build boots on a PC from a USB stick (UEFI):
+- `aember usb image` (after `aember app build`/`pack` for x64) writes
+  `build/usb/aember-x64-usb-v<V>.img`: GPT, p1 EFI system partition
+  (FAT32 `AEMBERBOOT`) with systemd-boot as `EFI/BOOT/BOOTX64.EFI`
+  (from Ubuntu 24.04's `systemd-boot-efi` 255.4-1ubuntu8 **release
+  pocket** deb, pinned by sha256, cached in
+  `build/downloads/systemd-boot/`, extracted with `dpkg-deb`), its
+  `loader/` config and the kernel + initramfs under `aember/`; p2 ext4
+  `aember-root` with the same tree as the QEMU rootfs. UEFI only, Secure
+  Boot off (unsigned kernel).
+- Boot: firmware → systemd-boot (3 s menu, `loader/entries/*.conf`):
+  "aember" (`console=tty0` last: screen + keyboard, `d` opens a shell),
+  "aember (serial console)" (`ttyS0` last), "aember (debug shell at
+  boot)". The kernel's EFI stub loads the initramfs (LoadFile2);
+  `root=LABEL=aember-root` is found like on the Pi (superblocks, 30 s
+  wait for the USB disk).
+- The x64 kernel (aember-resources v0.1.7) has the UEFI framebuffer
+  (`efifb`: screen console and `/dev/fb0` on any GPU), Realtek/Intel
+  NICs, NVMe and the iTCO/SP5100 watchdogs; x86_64_defconfig brings the
+  EFI stub, USB storage, xHCI, AHCI and USB HID.
+- `aember usb flash --device /dev/sdX`: the Pi's flash code
+  (`steps/rpi/flash.py`, `kind`/`max_bytes` parameters: USB sticks up
+  to 512 GiB without `--force`).
+- `aember usb launch [--headless] [--timeout N]`: QEMU q35 with OVMF
+  (`/usr/share/ovmf/OVMF.fd`), the image as `usb-storage` on `qemu-xhci`
+  (`bootindex=0`, `-snapshot`), e1000e NIC, i6300esb. Headless, the
+  launcher picks the serial-console entry by sending Down + Enter over
+  the serial port once systemd-boot's menu shows (`MenuPicker`; OVMF's
+  console includes the serial port). Tested: boot from USB, efifb fb0,
+  the Qt monitor container on it, DHCP, watchdog. Not yet on a real PC.
+
 **AppImage: `aember appimage`** (`steps/appimage/`, `config/appimage.py`)
 builds `build/appimage/aember-x86_64-v<V>.AppImage` from the packed x64
 Release system: aember on a Linux desktop, isolated.
@@ -483,12 +524,21 @@ The toolchain files find everything relative to the repo
    configures, builds, packs and writes
    `build/release/<arch>/<type>/`: `aember-app-<arch>-<type>-v<V>.tar.gz`
    (kernel, initramfs, rootfs image), `aember-binary-…`, and
-   `aember-resources-v<V>.tar.gz` + `.sha256` (the overlay).
+   `aember-resources-v<V>.tar.gz` + `.sha256` (the overlay). For the
+   Release builds `ReleaseImages` (`steps/releasing/images.py`) also writes
+   the flashable images into `build/release/images/`:
+   `aember-rpi4-v<V>.img.xz` (aarch64), `aember-x64-usb-v<V>.img.xz` (x64),
+   each with a `.sha256`, plus `aember-rpi-imager.json` (a Raspberry Pi
+   Imager repository list: url, sizes and sha256 of the compressed and
+   extracted image, `devices: ["pi4-64bit"]`) and its icon
+   `aember-icon.png`. `rpi-imager --repo https://github.com/<repo>/releases/latest/download/aember-rpi-imager.json`
+   then lists aember (the website's Install page points there).
 3. Commit and push, then `aember publish [--clobber]`
    (`steps/releasing/publish.py`): it checks the overlay tarballs against
    their `.sha256` and that HEAD is pushed, creates the GitHub release `v<V>`
    at HEAD (notes: that version's `doc/changelog/` file) and uploads the
-   overlay tarball **once** plus every app and binary tarball. Existing
+   overlay tarball **once** plus every app and binary tarball, and the
+   images, their `.sha256` and the Imager list of that version. Existing
    assets are refused unless `--clobber`. A fresh clone needs
    `aember-resources-v<project VERSION>.tar.gz` in release `v<VERSION>`, so
    a version bump must always be followed by its release.
@@ -512,7 +562,8 @@ C++:
 - A library dir has `CMakeLists.txt` (STATIC lib + `aember-libs::` alias +
   install/export), `Config.cmake.in`, `include/`, `src/`, optional `tests/`
   (GTest, `<lib>-unittest`, `add_test`). Every library and service has
-  tests (22 suites, ~210 tests); only what needs root, real interfaces or LXC
+  tests (24 suites, 240 tests as `dev`, 252 as root, plus 34 CLI tests);
+  only what needs root, real interfaces or LXC
   containers is left to the QEMU boots.
 - Tests build only with `--with-tests`, which forces x64 Debug; the test
   binaries are packed into the initramfs (run them in the VM from the debug
@@ -522,7 +573,9 @@ C++:
   It first runs the CLI's own tests (`aember-cli/tests`, stdlib
   `unittest`, no extra packages; `--no-cli` skips them, `-k cli` runs
   only them): pure logic of the CLI (QEMU command lines, which services
-  get packed, Pi boot config). Add one for every CLI change.
+  get packed, Pi boot config, the USB image's boot entries and QEMU
+  command, flash checks, the release images and Imager list). Add one
+  for every CLI change.
 - `aember app launch --append "<kernel args>"` adds to the kernel command
   line (e.g. `aember.watchdog=0`, `aember.shell=1`).
 - Test binaries go into the rootfs image only (`tests_root`), not the

@@ -153,6 +153,28 @@ BusyBox init / s6 / runit / dinit.
 - [ ] Docs and a small example appliance, so others can try it in an
   afternoon.
 
+## x86-64 PCs (USB stick)
+
+- [x] **`aember usb image|flash|launch`** (2026-11-19): UEFI USB stick
+  image (GPT, systemd-boot, root by label), QEMU test boot from a USB
+  stick with OVMF; aember-resources v0.1.7 adds the UEFI framebuffer,
+  Realtek/Intel NICs, NVMe and PC watchdogs. Left:
+  - [ ] Boot a real PC (Intel and AMD; a Realtek NIC; the iTCO/SP5100
+    watchdog really resets).
+  - [ ] Legacy BIOS boot (GRUB or syslinux in an MBR hybrid), if needed.
+  - [ ] Secure Boot (shim + signed kernel), if needed.
+  - [ ] Install to the internal disk (NVMe/SATA) from the stick.
+- [x] **Release images** (2026-11-19): `aember release` writes the Pi and
+  USB images (`.img.xz`) and a Raspberry Pi Imager repository list;
+  `aember publish` uploads them. Not exercised against a real release yet
+  (needs the next `aember release` + `publish`); `rpi-imager --repo` with
+  the list untested.
+- [x] **Container output** (2026-11-19): the init wrapper sends the app's
+  output to the container console (it was LXC's `/dev/null`);
+  aember-build-helper keeps it with `lxc.console.logfile`. The overlay's
+  own containers (aember-echo, aember-monitor) have no console log file
+  in their LXC config yet.
+
 ## AppImage
 
 - [x] **`aember appimage`** (2026-11-19): x86-64 AppImage, aember in its

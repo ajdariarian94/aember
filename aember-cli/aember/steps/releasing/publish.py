@@ -4,7 +4,10 @@ Publish aember's release v<VERSION> (CMakeLists.txt project VERSION) to GitHub.
 Uploads what `aember release` wrote to build/release/<arch>/<type>/:
   - every aember-app-* and aember-binary-* tarball of the version,
   - the rootfs overlay aember-resources-v<V>.tar.gz (+ .sha256) once: every
-    <arch>/<type> dir holds a copy packed from the same resources/ tree.
+    <arch>/<type> dir holds a copy packed from the same resources/ tree,
+  - the flashable disk images in build/release/images/ (Pi 4 SD card, x86-64
+    USB stick, .img.xz + .sha256) and the Raspberry Pi Imager repository
+    (aember-rpi-imager.json + its icon), when `aember release` made them.
 
 Before anything is uploaded the step checks that every overlay tarball still
 matches its .sha256 and that HEAD is pushed to origin. The tag v<VERSION> is
@@ -24,6 +27,7 @@ from aember.utils.github import get_repo, load_github_token
 from aember.utils.runner import CommandRunner
 
 from .get_version_from_cmake import get_version_from_cmake
+from .images import release_images
 
 log = logging.getLogger("aember.publish")
 
@@ -79,7 +83,17 @@ class PublishRelease(Step):
         dupes = sorted({n for n in names if names.count(n) > 1})
         if dupes:
             raise RuntimeError(f"Duplicate asset names: {dupes}")
-        return [*tarballs, overlay, overlay.with_name(overlay.name + ".sha256")]
+        images = release_images(root, version)
+        for img in (i for i in images if i.name.endswith(".img.xz")):
+            sha_file = img.with_name(img.name + ".sha256")
+            if sha_file.read_text().split()[0] != _sha256(img):
+                raise RuntimeError(f"{img} does not match {sha_file.name}")
+        return [
+            *tarballs,
+            overlay,
+            overlay.with_name(overlay.name + ".sha256"),
+            *images,
+        ]
 
     # ------------------------------------------------------------------
     # Checks and GitHub

@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 
 RESOURCES_REPO = "ajdariarian94/aember-resources"
-RESOURCES_VERSION = "0.1.6"
+RESOURCES_VERSION = "0.1.7"
 
 # Install root, relative to the repo root. The SDK installer bakes this path
 # into the installed SDK, so moving it means re-installing the SDK.
