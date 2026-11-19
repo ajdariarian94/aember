@@ -517,8 +517,9 @@ The toolchain files find everything relative to the repo
 
 1. Bump `project(VERSION)` in `CMakeLists.txt` and write
    `doc/changelog/`. `aember changelog --version-bump minor|patch|major`
-   compares `main..HEAD`, so it only finds changes on a feature branch; on
-   `main` run its `ChangelogStep` with `base_branch` set to the last tag.
+   compares `main..HEAD` (changes on a feature branch); for a release
+   branch cut from `main`, `--since v<last version>` counts from the last
+   release tag.
 2. `aember release` (every architecture by default, `-a` repeatable to pick
    some): for each architecture and build type it fetches resources,
    configures, builds, packs and writes
@@ -562,7 +563,7 @@ C++:
 - A library dir has `CMakeLists.txt` (STATIC lib + `aember-libs::` alias +
   install/export), `Config.cmake.in`, `include/`, `src/`, optional `tests/`
   (GTest, `<lib>-unittest`, `add_test`). Every library and service has
-  tests (24 suites, 240 tests as `dev`, 252 as root, plus 34 CLI tests);
+  tests (24 suites, 240 tests as `dev`, 252 as root, plus 36 CLI tests);
   only what needs root, real interfaces or LXC
   containers is left to the QEMU boots.
 - Tests build only with `--with-tests`, which forces x64 Debug; the test
@@ -574,8 +575,8 @@ C++:
   `unittest`, no extra packages; `--no-cli` skips them, `-k cli` runs
   only them): pure logic of the CLI (QEMU command lines, which services
   get packed, Pi boot config, the USB image's boot entries and QEMU
-  command, flash checks, the release images and Imager list). Add one
-  for every CLI change.
+  command, flash checks, the release images and Imager list, the
+  changelog). Add one for every CLI change.
 - `aember app launch --append "<kernel args>"` adds to the kernel command
   line (e.g. `aember.watchdog=0`, `aember.shell=1`).
 - Test binaries go into the rootfs image only (`tests_root`), not the
