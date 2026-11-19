@@ -54,17 +54,22 @@ def describe(device: str, sys_block: Path = Path("/sys/block")) -> BlockDevice:
     )
 
 
-def problems(dev: BlockDevice, image_size: int, mounts: str, force: bool) -> list[str]:
+def problems(
+    dev: BlockDevice,
+    image_size: int,
+    mounts: str,
+    force: bool,
+    max_bytes: int = rpi.MAX_CARD_BYTES,
+    kind: str = "an SD card",
+) -> list[str]:
     """Why writing to @p dev is refused (empty: OK)."""
     out = []
     if "virtual disk" in dev.model.lower():
-        out.append(f"{dev.path} is a virtual disk ({dev.model}), not an SD card")
+        out.append(f"{dev.path} is a virtual disk ({dev.model}), not {kind}")
     if not dev.removable and not force:
         out.append(f"{dev.path} is not removable (some USB readers aren't: --force)")
-    if dev.size > rpi.MAX_CARD_BYTES and not force:
-        out.append(
-            f"{dev.path} is {dev.size / 1024**3:.0f} GiB: too big for an SD card"
-        )
+    if dev.size > max_bytes and not force:
+        out.append(f"{dev.path} is {dev.size / 1024**3:.0f} GiB: too big for {kind}")
     if dev.size < image_size:
         out.append(
             f"{dev.path} ({dev.size} B) is smaller than the image ({image_size} B)"
@@ -79,12 +84,33 @@ def problems(dev: BlockDevice, image_size: int, mounts: str, force: bool) -> lis
     return out
 
 
-def flash(image: Path, device: str, yes: bool, force: bool, confirm) -> None:
+RPI_DONE = (
+    "Done: put the card into the Raspberry Pi 4. Serial console: "
+    "GPIO 14/15, 115200 8N1."
+)
+
+
+def flash(
+    image: Path,
+    device: str,
+    yes: bool,
+    force: bool,
+    confirm,
+    max_bytes: int = rpi.MAX_CARD_BYTES,
+    kind: str = "an SD card",
+    build_hint: str = "aember rpi image",
+    done: str = RPI_DONE,
+) -> None:
     if not image.exists():
-        raise FileNotFoundError(f"{image} not found: run `aember rpi image` first")
+        raise FileNotFoundError(f"{image} not found: run `{build_hint}` first")
     dev = describe(device)
     errors = problems(
-        dev, image.stat().st_size, Path("/proc/mounts").read_text(), force
+        dev,
+        image.stat().st_size,
+        Path("/proc/mounts").read_text(),
+        force,
+        max_bytes=max_bytes,
+        kind=kind,
     )
     if errors:
         raise RuntimeError("Refusing to write: " + "; ".join(errors))
@@ -112,7 +138,4 @@ def flash(image: Path, device: str, yes: bool, force: bool, confirm) -> None:
         cmd = ["sudo", *cmd]
     subprocess.run(cmd, check=True)
     subprocess.run(["sync"], check=False)
-    log.info(
-        "Done: put the card into the Raspberry Pi 4. Serial console: "
-        "GPIO 14/15, 115200 8N1."
-    )
+    log.info(done)

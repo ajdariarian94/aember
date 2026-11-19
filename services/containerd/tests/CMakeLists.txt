@@ -47,3 +47,24 @@ install(
   TARGETS container-parser-unittest
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
 )
+
+add_executable(
+  init-wrapper-unittest
+  src/init-wrapper.cpp
+)
+
+target_link_libraries(
+  init-wrapper-unittest
+  PRIVATE aember-containerd-core
+          GTest::gtest_main
+)
+
+add_test(
+  NAME init-wrapper-unittest
+  COMMAND init-wrapper-unittest
+)
+
+install(
+  TARGETS init-wrapper-unittest
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
+)

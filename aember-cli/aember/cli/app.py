@@ -19,6 +19,7 @@ from .base.test import test
 from .qemu.build import build_qemu
 from .qemu.launch import launch_qemu
 from .rpi import commands as rpi_commands
+from .usb import commands as usb_commands
 
 aember = typer.Typer(help="Aember build system")
 
@@ -92,3 +93,9 @@ rpi_app.command("image")(rpi_commands.image)
 rpi_app.command("flash")(rpi_commands.flash)
 rpi_app.command("launch")(rpi_commands.launch)
 aember.add_typer(rpi_app, name="rpi")
+
+usb_app = typer.Typer(help="x86-64 PCs: bootable USB stick image, flashing, QEMU test")
+usb_app.command("image")(usb_commands.image)
+usb_app.command("flash")(usb_commands.flash)
+usb_app.command("launch")(usb_commands.launch)
+aember.add_typer(usb_app, name="usb")

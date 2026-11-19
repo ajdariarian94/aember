@@ -8,6 +8,7 @@ from aember.core.pipeline import Pipeline
 from aember.steps.cmake.build import BuildStep
 from aember.steps.cmake.configure import ConfigureStep
 from aember.steps.packaging.pack import PackStep
+from aember.steps.releasing.images import ReleaseImages
 from aember.steps.releasing.release import ReleaseStep
 from aember.steps.resources.check_resources import CheckResources
 from aember.steps.resources.fetch_resources import FetchResources
@@ -36,5 +37,8 @@ def release(
                     BuildStep(),
                     PackStep(),
                     ReleaseStep(),
+                    # Release builds: the Pi 4 SD card image (aarch64) and
+                    # the x86-64 USB stick image, compressed.
+                    ReleaseImages(),
                 ]
             ).run(ctx)
