@@ -9,6 +9,7 @@
  */
 
 #include <aember-services/containerd/container-manager.h>
+#include <aember-services/containerd/init-wrapper.h>
 #include <aember-services/containerd/lxc-api.h>
 
 #include <cerrno>
@@ -31,19 +32,6 @@
 namespace aember::containerd {
 
 namespace {
-
-/// Where the host's static BusyBox appears inside a container. The name
-/// must start with "busybox": BusyBox picks the applet from argv[0]
-/// otherwise ("/.aember-busybox sh" fails with "applet not found").
-constexpr const char* kInitInContainer = "/busybox.aember-init";
-
-/// The init wrapper (BusyBox sh as the container's init): starts the app,
-/// passes SIGTERM/INT/HUP on (a shell with a trap gets them, an app that
-/// is the namespace init doesn't) and exits with the app's status.
-constexpr const char* kInitScript =
-    "trap 'kill -TERM $pid 2>/dev/null' TERM INT HUP; "
-    "\"$@\" & pid=$!; "
-    "while :; do wait $pid; rc=$?; kill -0 $pid 2>/dev/null || exit $rc; done";
 
 /// A file that is (or was, in a reused rootfs) bind mounted: not empty.
 bool HasInitWrapper(const std::string& rootfs) {
