@@ -183,9 +183,9 @@ LXC config it is kept, e.g. `/var/log/aember-container-<name>.log`.
 packs a project into an aember-ready container: add it as a submodule,
 describe the container in `aember-container.json` (from a Dockerfile, a
 Docker image, or a CMake install with the libraries from the aember SDK),
-then `aember-pack build` and `aember-pack install <this repo>` put the
-SquashFS image, its LXC config and the `containers.json` entry into the
-board's overlay.
+then its `aember` CLI (`aember-cli/run.py build`, then
+`aember-cli/run.py install <this repo>`) puts the SquashFS image, its LXC
+config and the `containers.json` entry into the board's overlay.
 
 ## Writing a service
 
