@@ -49,13 +49,14 @@ class RootManager {
   // Public API
   // ---------------------------------------------------------------------------
 
-  /** Complete pivot: mount real root + pivot_root + cleanup. */
+  /** Complete switch: mount the real root, then PivotToNewRoot(). */
   bool PerformPivot(const RootConfig& config);
 
   /** Mount the real root filesystem at config.new_root_path. */
   bool MountRealRoot(const RootConfig& config);
 
-  /** Perform pivot_root to switch to the already-mounted new root. */
+  /** Switch to the already-mounted new root (MS_MOVE + chroot) and exec
+   *  kRootInit from it. Only returns (false) if that failed. */
   bool PivotToNewRoot();
 
   /** Returns true if running inside initramfs (no services.json present). */
@@ -98,14 +99,12 @@ class RootManager {
   bool PrepareNewRoot();
   bool MountEssentialFilesystems();
   bool SwitchRoot();
-  bool UnmountOldRoot();
 
   [[nodiscard]] std::string ResolveDevice(std::string_view device);
 
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
 
   std::string new_root_path_;
-  bool pivoted_{false};
   std::chrono::milliseconds root_wait_{kRootWait};
 
   mutable Logger log_{"root-manager"};

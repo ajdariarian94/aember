@@ -30,11 +30,29 @@ namespace aember::utils::netlink {
 
 namespace {
 
+/// @p p points into a buffer aligned to NLMSG_ALIGNTO, at an NLMSG_ALIGN'ed
+/// offset: a valid T*. Through void*, because a direct char* -> T* cast
+/// can't show that and -Wcast-align (32-bit ARM) rejects it.
+template <typename T>
+T* As(char* p) {
+  // The alignment is real (see above).
+  // NOLINTNEXTLINE(bugprone-casting-through-void)
+  return static_cast<T*>(static_cast<void*>(p));
+}
+
+/// IPv4 address of a getifaddrs() sockaddr, copied out (no cast that
+/// assumes the sockaddr is aligned for sockaddr_in).
+in_addr Ipv4Of(const sockaddr* sa) {
+  sockaddr_in sin{};
+  std::memcpy(&sin, sa, sizeof(sin));
+  return sin.sin_addr;
+}
+
 /// One netlink request with room for attributes.
 struct Request {
   alignas(NLMSG_ALIGNTO) std::array<char, 512> buf{};
 
-  nlmsghdr* Header() { return reinterpret_cast<nlmsghdr*>(buf.data()); }
+  nlmsghdr* Header() { return As<nlmsghdr>(buf.data()); }
 
   template <typename T>
   T* Init(int type, int flags) {
@@ -53,7 +71,7 @@ struct Request {
     const std::size_t at = NLMSG_ALIGN(h->nlmsg_len);
     const std::size_t total = RTA_LENGTH(len);
     if (at + RTA_ALIGN(total) > buf.size()) return nullptr;
-    auto* rta = reinterpret_cast<rtattr*>(buf.data() + at);
+    auto* rta = As<rtattr>(buf.data() + at);
     rta->rta_type = static_cast<unsigned short>(type);
     rta->rta_len = static_cast<unsigned short>(total);
     if (len > 0) std::memcpy(RTA_DATA(rta), data, len);
@@ -89,7 +107,7 @@ int Transact(Request& req) {
     if (n < 0) {
       result = -errno;
     } else {
-      auto* h = reinterpret_cast<nlmsghdr*>(reply.data());
+      auto* h = As<nlmsghdr>(reply.data());
       if (NLMSG_OK(h, static_cast<unsigned>(n)) &&
           h->nlmsg_type == NLMSG_ERROR) {
         result = reinterpret_cast<nlmsgerr*>(NLMSG_DATA(h))->error;
@@ -114,7 +132,7 @@ std::optional<in_addr> FirstIPv4Address(std::string_view name) {
   for (const ifaddrs* a = list; a != nullptr; a = a->ifa_next) {
     if (a->ifa_addr != nullptr && a->ifa_addr->sa_family == AF_INET &&
         a->ifa_name != nullptr && name == a->ifa_name) {
-      found = reinterpret_cast<const sockaddr_in*>(a->ifa_addr)->sin_addr;
+      found = Ipv4Of(a->ifa_addr);
       break;
     }
   }
@@ -132,8 +150,7 @@ int FirstIPv4Prefix(std::string_view name) {
         name != a->ifa_name) {
       continue;
     }
-    prefix = NetmaskToPrefix(
-        reinterpret_cast<const sockaddr_in*>(a->ifa_netmask)->sin_addr);
+    prefix = NetmaskToPrefix(Ipv4Of(a->ifa_netmask));
     break;
   }
   ::freeifaddrs(list);

@@ -16,6 +16,7 @@
 #include <format>
 #include <fstream>
 #include <ranges>
+#include <system_error>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -99,8 +100,10 @@ bool MountManager::Mount(const MountPoint& mp) {
               mp.fstype.c_str(),
               mp.flags,
               data) != 0) {
-    log_.error(
-        "Failed to mount {} on {}: {}", mp.source, mp.target, strerror(errno));
+    log_.error("Failed to mount {} on {}: {}",
+               mp.source,
+               mp.target,
+               std::system_category().message(errno));
     return false;
   }
 
@@ -121,7 +124,8 @@ std::expected<MountManager::LoopDevice, std::string> MountManager::AttachLoop(
     std::string_view image) {
   const int file = ::open(std::string{image}.c_str(), O_RDONLY | O_CLOEXEC);
   if (file < 0) {
-    return std::unexpected(std::format("open {}: {}", image, strerror(errno)));
+    return std::unexpected(std::format(
+        "open {}: {}", image, std::system_category().message(errno)));
   }
   struct FdCloser {
     int fd;
@@ -132,8 +136,8 @@ std::expected<MountManager::LoopDevice, std::string> MountManager::AttachLoop(
 
   const int control = ::open("/dev/loop-control", O_RDWR | O_CLOEXEC);
   if (control < 0) {
-    return std::unexpected(
-        std::format("open /dev/loop-control: {}", strerror(errno)));
+    return std::unexpected(std::format("open /dev/loop-control: {}",
+                                       std::system_category().message(errno)));
   }
   FdCloser control_closer{control};
 
@@ -142,29 +146,33 @@ std::expected<MountManager::LoopDevice, std::string> MountManager::AttachLoop(
   for (int attempt = 0; attempt < 8; ++attempt) {
     const int n = ::ioctl(control, LOOP_CTL_GET_FREE);
     if (n < 0) {
-      return std::unexpected(
-          std::format("LOOP_CTL_GET_FREE: {}", strerror(errno)));
+      return std::unexpected(std::format(
+          "LOOP_CTL_GET_FREE: {}", std::system_category().message(errno)));
     }
     const auto device = std::format("/dev/loop{}", n);
     const int loop = ::open(device.c_str(), O_RDONLY | O_CLOEXEC);
     if (loop < 0) {
-      return std::unexpected(
-          std::format("open {}: {}", device, strerror(errno)));
+      return std::unexpected(std::format(
+          "open {}: {}", device, std::system_category().message(errno)));
     }
     LoopDevice handle{device, loop};  // keeps the fd open for the caller
 
     loop_config config{};
     config.fd = static_cast<__u32>(file);
     config.info.lo_flags = LO_FLAGS_READ_ONLY | LO_FLAGS_AUTOCLEAR;
-    std::snprintf(reinterpret_cast<char*>(config.info.lo_file_name),
-                  LO_NAME_SIZE,
-                  "%.*s",
-                  static_cast<int>(image.size()),
-                  image.data());
+    // Only informational (shown by losetup); truncation is fine.
+    std::ignore =
+        std::snprintf(reinterpret_cast<char*>(config.info.lo_file_name),
+                      LO_NAME_SIZE,
+                      "%.*s",
+                      static_cast<int>(image.size()),
+                      image.data());
     if (::ioctl(loop, LOOP_CONFIGURE, &config) == 0) return handle;
     if (errno != EBUSY) {
       return std::unexpected(
-          std::format("LOOP_CONFIGURE {}: {}", device, strerror(errno)));
+          std::format("LOOP_CONFIGURE {}: {}",
+                      device,
+                      std::system_category().message(errno)));
     }
   }
   return std::unexpected("no free loop device");
@@ -196,7 +204,7 @@ bool MountManager::MountSquashFS(std::string_view image,
                image,
                loop->path,
                target,
-               strerror(errno));
+               std::system_category().message(errno));
     return false;
   }
 
@@ -211,7 +219,9 @@ bool MountManager::MountSquashFS(std::string_view image,
   }
 
   if (::mount("tmpfs", tmp_path.c_str(), "tmpfs", 0, nullptr) != 0) {
-    log_.warn("Failed to mount tmpfs on {}: {}", tmp_path, strerror(errno));
+    log_.warn("Failed to mount tmpfs on {}: {}",
+              tmp_path,
+              std::system_category().message(errno));
   } else {
     mounted_targets_.push_back(tmp_path);
     log_.info("Mounted tmpfs on {}", tmp_path);
@@ -235,7 +245,9 @@ bool MountManager::Unmount(std::string_view target, bool force) {
       log_.debug("{} was not mounted", target);
       return true;
     }
-    log_.error("Failed to unmount {}: {}", target, strerror(errno));
+    log_.error("Failed to unmount {}: {}",
+               target,
+               std::system_category().message(errno));
     return false;
   }
 
@@ -310,7 +322,9 @@ bool MountManager::EnsureDirectory(std::string_view path, mode_t mode) {
 
   // std::filesystem::create_directories uses umask; set explicit permissions.
   if (::chmod(std::string{path}.c_str(), mode) != 0) {
-    log_.warn("chmod failed for '{}': {}", path, strerror(errno));
+    log_.warn("chmod failed for '{}': {}",
+              path,
+              std::system_category().message(errno));
   }
 
   log_.debug("Created directory '{}'", path);

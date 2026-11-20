@@ -52,8 +52,8 @@ enum class MessageType : std::uint8_t {
 struct Lease {
   in_addr address{};
   in_addr netmask{};
-  std::optional<in_addr> router;
-  std::vector<in_addr> dns;
+  std::optional<in_addr> router{};
+  std::vector<in_addr> dns{};
   in_addr server{};
   std::uint32_t lease_seconds{0};
   /// T1/T2 (options 58/59); 0 = not sent (then 50% / 87.5% of the lease).

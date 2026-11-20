@@ -12,5 +12,8 @@ project(
   LANGUAGES CXX
 )
 
+# Warnings (as errors) for aember's own code
+include(${CMAKE_CURRENT_SOURCE_DIR}/../tools/cmake/AemberWarnings.cmake)
+
 # Examples
 add_subdirectory(aember-child-demo)

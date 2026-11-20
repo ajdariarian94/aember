@@ -12,10 +12,12 @@
 
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <optional>
+#include <system_error>
 #include <thread>
 
 #include <dirent.h>
@@ -49,8 +51,9 @@ bool RootManager::PerformPivot(const RootConfig& config) {
   log_.info("Starting root pivot operation");
 
   if (mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0) {
-    log_.error(
-        "Failed to set MS_PRIVATE: errno={} ({})", errno, strerror(errno));
+    log_.error("Failed to set MS_PRIVATE: errno={} ({})",
+               errno,
+               std::system_category().message(errno));
     return false;
   }
 
@@ -97,8 +100,9 @@ bool RootManager::MountRealRoot(const RootConfig& config) {
             config.fstype.c_str(),
             0,
             options) != 0) {
-    log_.error(
-        "Failed to mount real root: errno={} ({})", errno, strerror(errno));
+    log_.error("Failed to mount real root: errno={} ({})",
+               errno,
+               std::system_category().message(errno));
     DumpMountInfo("mount real root failed");
     return false;
   }
@@ -109,22 +113,12 @@ bool RootManager::MountRealRoot(const RootConfig& config) {
 bool RootManager::PivotToNewRoot() {
   log_.info("Pivoting to new root: {}", new_root_path_);
 
-  if (pivoted_) {
-    log_.warn("Already pivoted");
-    return true;
-  }
-
   if (!PrepareNewRoot()) { return false; }
   if (!MountEssentialFilesystems()) { return false; }
-  if (!SwitchRoot()) { return false; }
-
-  if (!UnmountOldRoot()) {
-    log_.warn("Failed to unmount old root (non-fatal)");
-  }
-
-  pivoted_ = true;
-  log_.info("Root pivot completed successfully");
-  return true;
+  // Execs aember from the new root; only returns if that failed. (There is
+  // no old root to unmount: MS_MOVE replaces it, unlike pivot_root.)
+  SwitchRoot();
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,34 +131,6 @@ bool RootManager::PrepareNewRoot() {
   if (!mount_manager_->IsMounted(new_root_path_)) {
     log_.error("New root is not a mount point: {}", new_root_path_);
     DumpMountInfo("new root not mounted");
-    return false;
-  }
-
-  const auto old_root_dir = std::format("{}/.oldroot", new_root_path_);
-
-  if (!mount_manager_->EnsureDirectory(old_root_dir)) {
-    log_.error("Failed to create {}", old_root_dir);
-    return false;
-  }
-
-  // Ensure .oldroot is empty before pivot_root.
-  DIR* d = opendir(old_root_dir.c_str());
-  if (!d) {
-    log_.error("Failed to open {}: errno={}", old_root_dir, errno);
-    return false;
-  }
-
-  bool empty = true;
-  while (const struct dirent* e = readdir(d)) {
-    if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) {
-      empty = false;
-      break;
-    }
-  }
-  closedir(d);
-
-  if (!empty) {
-    log_.error("{} is not empty, cannot pivot_root", old_root_dir);
     return false;
   }
 
@@ -188,8 +154,10 @@ bool RootManager::MountEssentialFilesystems() {
 
     log_.info("MS_MOVE {} -> {}", src, dst);
     if (mount(src, dst.c_str(), nullptr, MS_MOVE, nullptr) != 0) {
-      log_.error(
-          "Failed to move {}: errno={} ({})", src, errno, strerror(errno));
+      log_.error("Failed to move {}: errno={} ({})",
+                 src,
+                 errno,
+                 std::system_category().message(errno));
       DumpMountInfo("MS_MOVE failed");
       return false;
     }
@@ -204,15 +172,21 @@ bool RootManager::SwitchRoot() {
   log_.info("Switching root to {}", new_root_path_);
 
   if (::chdir(new_root_path_.c_str()) != 0) {
-    log_.error("chdir {}: {}", new_root_path_, strerror(errno));
+    log_.error(
+        "chdir {}: {}", new_root_path_, std::system_category().message(errno));
     return false;
   }
 
   // The initramfs stays in RAM until its files are deleted. Only delete if
   // / really is the initramfs (ramfs/tmpfs), never on a disk.
   struct statfs root_fs {};
+  // f_type is long on 64-bit and int on 32-bit ARM, the magics are 32-bit
+  // unsigned (RAMFS_MAGIC doesn't fit an int): compare as uint32_t.
+  const auto fs_type = [&] {
+    return static_cast<std::uint32_t>(root_fs.f_type);
+  };
   if (::statfs("/", &root_fs) == 0 &&
-      (root_fs.f_type == RAMFS_MAGIC || root_fs.f_type == TMPFS_MAGIC)) {
+      (fs_type() == RAMFS_MAGIC || fs_type() == TMPFS_MAGIC)) {
     struct stat root_st {};
     if (::stat("/", &root_st) == 0) {
       const int dir = ::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
@@ -226,11 +200,14 @@ bool RootManager::SwitchRoot() {
   }
 
   if (::mount(".", "/", nullptr, MS_MOVE, nullptr) != 0) {
-    log_.error("MS_MOVE {} -> /: {}", new_root_path_, strerror(errno));
+    log_.error("MS_MOVE {} -> /: {}",
+               new_root_path_,
+               std::system_category().message(errno));
     return false;
   }
   if (::chroot(".") != 0 || ::chdir("/") != 0) {
-    log_.error("chroot into new root: {}", strerror(errno));
+    log_.error("chroot into new root: {}",
+               std::system_category().message(errno));
     return false;
   }
 
@@ -241,7 +218,7 @@ bool RootManager::SwitchRoot() {
   ::execv(args[0], args.data());
 
   // execv only returns on failure.
-  log_.error("exec {}: {}", kRootInit, strerror(errno));
+  log_.error("exec {}: {}", kRootInit, std::system_category().message(errno));
   return false;
 }
 
@@ -270,22 +247,6 @@ void RootManager::DeleteInitramfs(int dir_fd, dev_t root_dev) {
     }
   }
   ::closedir(dir);
-}
-
-bool RootManager::UnmountOldRoot() {
-  log_.info("Unmounting old root");
-
-  if (umount2("/.oldroot", MNT_DETACH) != 0) {
-    log_.warn(
-        "Failed to unmount old root: errno={} ({})", errno, strerror(errno));
-    return false;
-  }
-
-  if (rmdir("/.oldroot") != 0) {
-    log_.debug("Failed to remove /.oldroot dir: errno={}", errno);
-  }
-
-  return true;
 }
 
 // ---------------------------------------------------------------------------

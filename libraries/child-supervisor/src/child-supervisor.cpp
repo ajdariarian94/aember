@@ -134,7 +134,29 @@ std::vector<ChildSupervisor::Exit> ChildSupervisor::ReapZombies(
     exits.push_back(std::move(exit));
   }
 
+  // A tracked child someone else collected (ProcessManager::Stop waits for
+  // its own child when it gets there first) never shows up as a zombie
+  // here: forget it once it is gone or its pid belongs to someone else's
+  // child, or it stays tracked forever and could be mistaken for a later
+  // process that reuses the pid.
+  std::erase_if(children_, [&](const auto& kv) {
+    return !present.contains(kv.first) && !IsChildOfThis(kv.first, proc_root);
+  });
+
   return exits;
+}
+
+bool ChildSupervisor::IsChildOfThis(pid_t pid,
+                                    const std::filesystem::path& proc_root) {
+  std::ifstream stat{proc_root / std::to_string(pid) / "stat"};
+  std::string line;
+  if (!std::getline(stat, line)) { return false; }  // gone
+  const auto close = line.rfind(')');
+  if (close == std::string::npos || close + 4 >= line.size()) { return false; }
+  pid_t ppid = 0;
+  const char* begin = line.c_str() + close + 4;  // ") S <ppid>"
+  std::from_chars(begin, line.c_str() + line.size(), ppid);
+  return ppid == ::getpid();
 }
 
 // ---------------------------------------------------------------------------

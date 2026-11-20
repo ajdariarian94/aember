@@ -10,13 +10,18 @@
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/process-manager/process-manager.h>
+#include <aember-libs/utils/ipc/channel.h>
 
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <optional>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include <signal.h>
 #include <sys/wait.h>
@@ -144,6 +149,206 @@ TEST(ProcessManagerTest, ScheduledRestartRuns) {
     }
     EXPECT_EQ(restarts.load(), round);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Registry
+// ---------------------------------------------------------------------------
+
+TEST(ProcessManagerRegistryTest, RejectsInvalidAndDuplicateConfigs) {
+  ProcessManager pm;
+  auto cfg = SleepConfig("");
+  EXPECT_FALSE(pm.AddProcess(cfg));  // no name
+  cfg = SleepConfig("x");
+  cfg.executable.clear();
+  EXPECT_FALSE(pm.AddProcess(cfg));  // no executable
+  EXPECT_TRUE(pm.AddProcess(SleepConfig("x")));
+  EXPECT_FALSE(pm.AddProcess(SleepConfig("x")));  // duplicate
+  EXPECT_TRUE(pm.HasProcess("x"));
+  EXPECT_EQ(pm.GetConfigs().size(), 1u);
+  ASSERT_TRUE(pm.GetConfig("x").has_value());
+  EXPECT_EQ(pm.GetConfig("x")->args, std::vector<std::string>{"30"});
+  EXPECT_FALSE(pm.GetConfig("y").has_value());
+}
+
+TEST(ProcessManagerRegistryTest, RemoveStopsAndForgets) {
+  ProcessManager pm;
+  ASSERT_TRUE(pm.AddProcess(SleepConfig("x")));
+  const auto pid = pm.Start("x");
+  ASSERT_TRUE(pid);
+  EXPECT_TRUE(pm.RemoveProcess("x"));
+  EXPECT_FALSE(pm.HasProcess("x"));
+  EXPECT_FALSE(Alive(*pid));
+  EXPECT_FALSE(pm.RemoveProcess("x"));  // gone already
+}
+
+TEST(ProcessManagerRegistryTest, UnknownNames) {
+  ProcessManager pm;
+  EXPECT_FALSE(pm.Start("nope").has_value());
+  EXPECT_EQ(pm.GetState("nope"), State::Failed);
+  EXPECT_FALSE(pm.GetPid("nope").has_value());
+  EXPECT_FALSE(pm.IsRunning("nope"));
+  EXPECT_FALSE(pm.HandleExit(999999, 0));  // not ours
+}
+
+TEST(ProcessManagerRegistryTest, LoadProcessesFromFile) {
+  ProcessManager pm;
+  EXPECT_TRUE(pm.LoadProcesses("/nonexistent/services.json").empty());
+  const auto path = std::filesystem::temp_directory_path() /
+                    ("pm-test-" + std::to_string(::getpid()) + ".json");
+  std::ofstream{path} << R"({"processes":[{"name":"a","executable":"/bin/true"},
+                                          {"name":"b","executable":"/bin/true",
+                                           "args":["1"]}]})";
+  const auto configs = pm.LoadProcesses(path.string());
+  std::filesystem::remove(path);
+  ASSERT_EQ(configs.size(), 2u);
+  EXPECT_EQ(configs[1].args, std::vector<std::string>{"1"});
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+TEST(ProcessManagerLifecycleTest, StartingARunningProcessReturnsItsPid) {
+  ProcessManager pm;
+  ASSERT_TRUE(pm.AddProcess(SleepConfig("x")));
+  const auto first = pm.Start("x");
+  ASSERT_TRUE(first);
+  EXPECT_TRUE(pm.IsRunning("x"));
+  EXPECT_EQ(pm.Start("x"), first);  // no second copy
+  EXPECT_TRUE(pm.Stop("x"));
+}
+
+TEST(ProcessManagerLifecycleTest, StopKillsWhatIgnoresSigterm) {
+  ProcessManager pm;
+  auto cfg = SleepConfig("stubborn");
+  cfg.executable = "/bin/sh";
+  cfg.args = {"-c", "trap '' TERM; while :; do sleep 1; done"};
+  cfg.stop_timeout = 300ms;
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  const auto pid = pm.Start("stubborn");
+  ASSERT_TRUE(pid);
+  std::this_thread::sleep_for(200ms);  // let the trap be set
+  const auto t0 = std::chrono::steady_clock::now();
+  EXPECT_TRUE(pm.Stop("stubborn"));
+  EXPECT_GE(std::chrono::steady_clock::now() - t0, 250ms);
+  // Regression: the SIGKILL path returned before the child was collected,
+  // leaving it Stopping (and a zombie) without a reaper.
+  EXPECT_FALSE(pm.GetPid("stubborn").has_value());
+  EXPECT_EQ(pm.GetState("stubborn"), State::Stopped);
+  EXPECT_FALSE(Alive(*pid));
+}
+
+TEST(ProcessManagerLifecycleTest, StoppingSomethingNotRunningIsFine) {
+  ProcessManager pm;
+  ASSERT_TRUE(pm.AddProcess(SleepConfig("x")));
+  EXPECT_TRUE(pm.Stop("x"));
+  EXPECT_TRUE(pm.Stop("unknown"));  // nothing to stop
+}
+
+TEST(ProcessManagerLifecycleTest, ArgsEnvironmentAndWorkingDirectory) {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("pm-cwd-" + std::to_string(::getpid()));
+  std::filesystem::create_directories(dir);
+  ProcessManager pm;
+  ProcessManager::ProcessConfig cfg;
+  cfg.name = "env";
+  cfg.executable = "/bin/sh";
+  cfg.args = {"-c", "echo \"$GREETING $1 $(pwd)\" > out", "sh", "arg1"};
+  cfg.environment = {{"GREETING", "hello"}};
+  cfg.working_directory = dir.string();
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  const auto pid = pm.Start("env");
+  ASSERT_TRUE(pid);
+  int status = 0;
+  ASSERT_EQ(::waitpid(*pid, &status, 0), *pid);
+  pm.HandleExit(*pid, status);
+  std::ifstream out{dir / "out"};
+  std::string line;
+  std::getline(out, line);
+  std::filesystem::remove_all(dir);
+  EXPECT_EQ(line, "hello arg1 " + dir.string());
+}
+
+TEST(ProcessManagerLifecycleTest, MissingExecutableExitsWithOne) {
+  ProcessManager pm;
+  auto cfg = SleepConfig("missing");
+  cfg.executable = "/nonexistent/aember-test-binary";
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  const auto pid = pm.Start("missing");
+  ASSERT_TRUE(pid);  // fork worked; the exec in the child didn't
+  int status = 0;
+  ASSERT_EQ(::waitpid(*pid, &status, 0), *pid);
+  EXPECT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 1);
+}
+
+TEST(ProcessManagerLifecycleTest, IpcServiceGetsItsChannelOnFd3) {
+  ProcessManager pm;
+  std::optional<aember::utils::ipc::Channel> ours;
+  pm.SetChannelCallback(
+      [&](const std::string& name, aember::utils::ipc::Channel channel) {
+        EXPECT_EQ(name, "daemon");
+        ours = std::move(channel);
+      });
+  auto cfg = SleepConfig("daemon");
+  cfg.executable = "/bin/sh";
+  cfg.args = {"-c", R"(printf '{"type":"ready"}' >&3)"};
+  cfg.ipc = true;
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  const auto pid = pm.Start("daemon");
+  ASSERT_TRUE(pid);
+  ASSERT_TRUE(ours.has_value());
+  const auto msg = ours->Receive(5s);
+  ASSERT_TRUE(msg.has_value());
+  EXPECT_EQ(aember::utils::ipc::TypeOf(*msg), "ready");
+  int status = 0;
+  ::waitpid(*pid, &status, 0);
+}
+
+TEST(ProcessManagerLifecycleTest, DestructorKillsWhatIsStillRunning) {
+  pid_t pid = -1;
+  {
+    ProcessManager pm;
+    ASSERT_TRUE(pm.AddProcess(SleepConfig("x")));
+    pid = pm.Start("x").value_or(-1);
+    ASSERT_GT(pid, 0);
+  }
+  int status = 0;
+  ASSERT_EQ(::waitpid(pid, &status, 0), pid);
+  EXPECT_TRUE(WIFSIGNALED(status));
+  EXPECT_EQ(WTERMSIG(status), SIGKILL);
+}
+
+// ---------------------------------------------------------------------------
+// Restarts
+// ---------------------------------------------------------------------------
+
+TEST(ProcessManagerRestartTest, DisabledRestartLeavesItStopped) {
+  ProcessManager pm;
+  ASSERT_TRUE(pm.AddProcess(SleepConfig("x")));  // restart_on_failure false
+  pm.ScheduleRestart("x");
+  EXPECT_NE(pm.GetState("x"), State::Restarting);
+  pm.ScheduleRestart("unknown");  // no crash
+}
+
+TEST(ProcessManagerRestartTest, GivesUpAfterMaxRestarts) {
+  ProcessManager pm;
+  std::atomic<int> restarts{0};
+  pm.SetRestartCallback([&](const std::string&) { ++restarts; });
+  auto cfg = SleepConfig("flaky");
+  cfg.restart_on_failure = true;
+  cfg.max_restarts = 2;
+  cfg.restart_delay = 10ms;
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  for (int i = 0; i < 2; ++i) {
+    pm.ScheduleRestart("flaky");
+    EXPECT_EQ(pm.GetState("flaky"), State::Restarting);
+  }
+  pm.ScheduleRestart("flaky");  // third: over the limit
+  EXPECT_EQ(pm.GetState("flaky"), State::Failed);
+  std::this_thread::sleep_for(200ms);
+  EXPECT_EQ(restarts.load(), 2);
 }
 
 }  // namespace

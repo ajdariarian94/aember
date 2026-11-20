@@ -18,11 +18,11 @@ namespace aember::utils::mount {
  * @brief Represents a single mount point with its properties.
  */
 struct MountPoint {
-  std::string source;   ///< What to mount (e.g., "proc", "none")
-  std::string target;   ///< Mount point path (e.g., "/proc")
-  std::string fstype;   ///< Filesystem type (e.g., "proc", "sysfs")
-  unsigned long flags;  ///< Mount flags (MS_NOEXEC, MS_NOSUID, etc.)
-  std::string data;     ///< Mount options (e.g., "mode=0755")
+  std::string source{};    ///< What to mount (e.g., "proc", "none")
+  std::string target{};    ///< Mount point path (e.g., "/proc")
+  std::string fstype{};    ///< Filesystem type (e.g., "proc", "sysfs")
+  unsigned long flags{0};  ///< Mount flags (MS_NOEXEC, MS_NOSUID, etc.)
+  std::string data{};      ///< Mount options (e.g., "mode=0755")
 };
 
 }  // namespace aember::utils::mount

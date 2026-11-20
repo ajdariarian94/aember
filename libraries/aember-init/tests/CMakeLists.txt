@@ -26,3 +26,32 @@ install(
   TARGETS pid1-unittest
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
 )
+
+# Integration: AemberInit::StartRoot() with real services in a forked child
+find_package(
+  nlohmann_json
+  CONFIG
+  REQUIRED
+)
+
+add_executable(
+  aember-init-unittest
+  src/aember-init.cpp
+)
+
+target_link_libraries(
+  aember-init-unittest
+  PRIVATE aember-libs::aember-init
+          nlohmann_json::nlohmann_json
+          GTest::gtest_main
+)
+
+add_test(
+  NAME aember-init-unittest
+  COMMAND aember-init-unittest
+)
+
+install(
+  TARGETS aember-init-unittest
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
+)

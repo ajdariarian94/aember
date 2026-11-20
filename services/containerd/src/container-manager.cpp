@@ -21,6 +21,7 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 
 #include <lxc/lxccontainer.h>
@@ -53,10 +54,13 @@ bool UnmountPath(const std::string& path, aember::utils::logging::Logger& log) {
   }
   const int err = errno;
   if (::umount2(path.c_str(), MNT_DETACH) == 0) {
-    log.warn("{} busy ({}), detached lazily", path, std::strerror(err));
+    log.warn("{} busy ({}), detached lazily",
+             path,
+             std::system_category().message(err));
     return true;
   }
-  log.warn("Cannot unmount {}: {}", path, std::strerror(errno));
+  log.warn(
+      "Cannot unmount {}: {}", path, std::system_category().message(errno));
   return false;
 }
 
@@ -69,7 +73,7 @@ bool UnmountPath(const std::string& path, aember::utils::logging::Logger& log) {
 ContainerManager::ContainerManager(
     std::shared_ptr<aember::mount_manager::MountManager> mount_manager,
     StateCallback cb)
-    : mount_manager_(std::move(mount_manager)), callback_(std::move(cb)) {
+    : callback_(std::move(cb)), mount_manager_(std::move(mount_manager)) {
   log_.info("ContainerManager initialized");
 }
 
@@ -427,7 +431,7 @@ bool ContainerManager::Create(ContainerEntry& e) {
       log_.error("Failed to mount OverlayFS at '{}': errno={} ({})",
                  e.config.rootfs,
                  errno,
-                 strerror(errno));
+                 std::system_category().message(errno));
       mount_manager_->Unmount(lower_dir);
       return false;
     }
@@ -457,7 +461,7 @@ bool ContainerManager::Create(ContainerEntry& e) {
       log_.error("Failed to bind mount /var/log onto '{}': errno={} ({})",
                  container_host_logs,
                  errno,
-                 strerror(errno));
+                 std::system_category().message(errno));
     } else {
       log_.info("Successfully bind-mounted host /var/log to '{}'",
                 container_host_logs);
@@ -475,7 +479,7 @@ bool ContainerManager::Create(ContainerEntry& e) {
         log_.warn("'{}': no init wrapper (bind {}: {}); the app is init",
                   e.config.name,
                   host_busybox_,
-                  strerror(errno));
+                  std::system_category().message(errno));
       }
     }
   }
@@ -596,6 +600,9 @@ bool ContainerManager::Start(ContainerEntry& e) {
 }
 
 bool ContainerManager::Stop(ContainerEntry& e) {
+  // False only if the container may still be running (StopContainer then
+  // reports it as failed, not stopped). The mounts are released either way.
+  bool stopped = true;
   if (e.lxc && e.lxc->is_running(e.lxc)) {
     log_.debug("Stopping LXC container '{}'", e.config.name);
 
@@ -603,7 +610,10 @@ bool ContainerManager::Stop(ContainerEntry& e) {
     if (!e.lxc->shutdown(e.lxc, timeout)) {
       log_.warn("Graceful shutdown failed for '{}' — forcing stop",
                 e.config.name);
-      e.lxc->stop(e.lxc);
+      if (!e.lxc->stop(e.lxc)) {
+        log_.error("Container '{}' could not be stopped", e.config.name);
+        stopped = false;
+      }
     }
   }
 
@@ -643,7 +653,7 @@ bool ContainerManager::Stop(ContainerEntry& e) {
         std::format("/tmp/aember-overlay/{}", e.config.name), ec);
   }
 
-  return true;
+  return stopped;
 }
 
 void ContainerManager::Release(ContainerEntry& e) {

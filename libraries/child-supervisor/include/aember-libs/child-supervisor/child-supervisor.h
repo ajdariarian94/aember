@@ -81,6 +81,10 @@ class ChildSupervisor {
   /** True if @p pid was registered with AddChild and not yet reaped. */
   bool IsTracked(pid_t pid);
 
+  /// Whether @p pid exists and is a child of this process (its ppid).
+  static bool IsChildOfThis(pid_t pid,
+                            const std::filesystem::path& proc_root = "/proc");
+
   /** pids of our children that are zombies right now (from proc_root). */
   static std::vector<pid_t> ListZombieChildren(
       const std::filesystem::path& proc_root = "/proc");

@@ -13,6 +13,7 @@
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <system_error>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -62,7 +63,7 @@ class RawConsole {
 
 DebugShell::DebugShell() : log_("debug-shell") {
   if (::pipe2(wake_pipe_, O_CLOEXEC) != 0) {
-    log_.error("pipe2() failed: {}", strerror(errno));
+    log_.error("pipe2() failed: {}", std::system_category().message(errno));
   }
 }
 
@@ -135,8 +136,9 @@ void DebugShell::Listen(std::stop_token st, const std::string& console,
   while (!st.stop_requested()) {
     const int fd = ::open(console.c_str(), O_RDWR | O_NOCTTY | O_CLOEXEC);
     if (fd < 0) {
-      log_.error(
-          "Cannot open {}: {}; no debug shell", console, strerror(errno));
+      log_.error("Cannot open {}: {}; no debug shell",
+                 console,
+                 std::system_category().message(errno));
       return;
     }
 
@@ -149,7 +151,8 @@ void DebugShell::Listen(std::stop_token st, const std::string& console,
         pollfd fds[2] = {{fd, POLLIN, 0}, {wake_pipe_[0], POLLIN, 0}};
         if (::poll(fds, 2, -1) < 0) {
           if (errno == EINTR) continue;
-          log_.error("poll() failed: {}", strerror(errno));
+          log_.error("poll() failed: {}",
+                     std::system_category().message(errno));
           break;
         }
         if (fds[1].revents != 0) break;  // Stop()
@@ -195,6 +198,7 @@ pid_t DebugShell::SpawnShell(const std::string& console) {
 
     sigset_t all;
     sigfillset(&all);
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): fork child: one thread
     ::sigprocmask(SIG_UNBLOCK, &all, nullptr);
 
     ::execl("/bin/sh", "sh", nullptr);
@@ -202,7 +206,7 @@ pid_t DebugShell::SpawnShell(const std::string& console) {
   }
 
   if (pid < 0) {
-    log_.error("fork() failed: {}", strerror(errno));
+    log_.error("fork() failed: {}", std::system_category().message(errno));
     ShellOwnsConsole(false);
     return -1;
   }

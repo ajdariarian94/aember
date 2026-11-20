@@ -152,7 +152,9 @@ TEST_F(HeartbeatTest, RestartAfterStop) {
   ASSERT_TRUE(WaitForHeartbeats(2, std::chrono::seconds(1)));
   heartbeat_->Stop();
 
+  // Stopped: the first run counted its beats and no more come in.
   int first_run_count = call_count_.load(std::memory_order_relaxed);
+  EXPECT_GE(first_run_count, 2);
 
   // Reset counter
   call_count_.store(0);

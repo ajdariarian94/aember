@@ -176,4 +176,47 @@ TEST(DebugShellTest, ConsoleCallbackFollowsTheShell) {
   EXPECT_EQ(logging_during, (std::vector<bool>{false, true}));
 }
 
+TEST(DebugShellTest, MissingConsoleEndsTheListenerQuietly) {
+  DebugShell shell;
+  shell.Start([](pid_t) { ADD_FAILURE() << "no shell without a console"; },
+              nullptr,
+              false,
+              "/nonexistent/aember-console");
+  std::this_thread::sleep_for(200ms);
+  shell.Stop();  // the listener already gave up: Stop() must not hang
+}
+
+TEST(DebugShellTest, ThrowingConsoleCallbackDoesNotKillTheListener) {
+  Pty pty;
+  ASSERT_TRUE(pty.ok());
+  std::atomic<int> calls{0};
+  DebugShell shell;
+  shell.SetConsoleCallback([&](bool) {
+    ++calls;
+    throw std::runtime_error("callback broke");
+  });
+  shell.Start([](pid_t) {}, nullptr, true, pty.slave());
+  pty.Type("echo still-\"\"alive; exit\n");
+  EXPECT_TRUE(pty.WaitFor("still-alive", 5s));
+  for (int i = 0; i < 50 && calls.load() < 2; ++i) {
+    std::this_thread::sleep_for(50ms);
+  }
+  EXPECT_EQ(calls.load(), 2);  // shell opened and closed, both caught
+  // Console logging is back on even though the callback threw.
+  EXPECT_TRUE(aember::utils::logging::console_logging_enabled());
+  shell.Stop();
+}
+
+TEST(DebugShellTest, HangupOnTheConsoleIsSurvived) {
+  auto pty = std::make_unique<Pty>();
+  ASSERT_TRUE(pty->ok());
+  const std::string console = pty->slave();
+  DebugShell shell;
+  shell.Start([](pid_t) {}, nullptr, false, console);
+  std::this_thread::sleep_for(200ms);
+  pty.reset();                          // master closed: POLLHUP on the console
+  std::this_thread::sleep_for(1500ms);  // backs off instead of spinning
+  shell.Stop();
+}
+
 }  // namespace

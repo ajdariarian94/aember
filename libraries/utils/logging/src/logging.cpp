@@ -22,7 +22,7 @@ namespace aember::utils::logging {
 
 namespace {
 
-constexpr std::size_t kLogFileMaxBytes = 1024 * 1024;
+constexpr std::size_t kLogFileMaxBytes = std::size_t{1024} * 1024;
 constexpr std::size_t kLogFileMaxFiles = 3;
 // The component name is part of the message ("[name] text"), so the pattern
 // has no %n: there is only one logger.

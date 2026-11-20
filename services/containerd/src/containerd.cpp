@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <tuple>
 #include <vector>
 
@@ -74,7 +75,10 @@ int EnsureBridges(const std::string& containers_json) {
     }
     if (const int rc = aember::utils::netlink::EnsureBridge(name, address);
         rc != 0) {
-      log.error("bridge '{}' ({}): {}", name, address, std::strerror(-rc));
+      log.error("bridge '{}' ({}): {}",
+                name,
+                address,
+                std::system_category().message(-rc));
       ++failed;
       continue;
     }
@@ -106,6 +110,7 @@ int RunContainerd(const ContainerdOptions& options) {
   pthread_atfork(nullptr, nullptr, [] {
     sigset_t none;
     sigemptyset(&none);
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): atfork child handler: one thread
     sigprocmask(SIG_SETMASK, &none, nullptr);  // async-signal-safe
   });
   const int sigfd = ::signalfd(-1, &signals, SFD_CLOEXEC | SFD_NONBLOCK);
@@ -116,7 +121,7 @@ int RunContainerd(const ContainerdOptions& options) {
   }
   ipc::ReceiveControl(channel);  // muted if a debug shell is open
   // Keeps what the console doesn't show while a debug shell is open.
-  aember::utils::logging::enable_file_logging("/var/log/aember-containerd.log");
+  aember::utils::logging::enable_file_logging(options.log_file);
 
   if (Lxc() == nullptr) {
     log.critical("cannot load liblxc: {}", LxcLoadError());

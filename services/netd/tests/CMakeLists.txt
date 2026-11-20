@@ -47,3 +47,25 @@ install(
   TARGETS dhcp-client-unittest
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
 )
+
+# The daemon end to end: RunNetd() in a forked child with a channel on fd 3
+add_executable(
+  netd-daemon-unittest
+  src/netd.cpp
+)
+
+target_link_libraries(
+  netd-daemon-unittest
+  PRIVATE aember-netd-core
+          GTest::gtest_main
+)
+
+add_test(
+  NAME netd-daemon-unittest
+  COMMAND netd-daemon-unittest
+)
+
+install(
+  TARGETS netd-daemon-unittest
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
+)

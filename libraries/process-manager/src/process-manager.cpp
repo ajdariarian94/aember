@@ -12,6 +12,7 @@
 
 #include <condition_variable>
 #include <ranges>
+#include <system_error>
 #include <thread>
 
 #include <errno.h>
@@ -183,7 +184,17 @@ bool ProcessManager::Stop(std::string_view name) {
   if (exited()) { return true; }
   log_.warn("'{}' did not exit after SIGTERM — SIGKILL", name);
   kill(pid, SIGKILL);
-  return true;
+  // SIGKILL can't be ignored: wait until it is collected (by us or the
+  // reaper), so Stop() returns with the state Stopped, not Stopping and a
+  // zombie, also without a reaper.
+  const auto kill_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds{2};
+  while (std::chrono::steady_clock::now() < kill_deadline) {
+    if (exited()) { return true; }
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+  }
+  log_.error("'{}' (pid {}) still there after SIGKILL", name, pid);
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +412,9 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
   const pid_t pid = fork();
 
   if (pid < 0) {
-    log_.error("fork() failed for '{}': {}", config.name, strerror(errno));
+    log_.error("fork() failed for '{}': {}",
+               config.name,
+               std::system_category().message(errno));
     return -1;
   }
 
@@ -410,6 +423,7 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
     // but child processes must receive signals normally
     sigset_t all_signals;
     sigfillset(&all_signals);
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): fork child: one thread
     sigprocmask(SIG_UNBLOCK, &all_signals, nullptr);
 
     if (theirs.Valid()) {
@@ -426,6 +440,8 @@ pid_t ProcessManager::SpawnProcess(const ProcessConfig& config) {
     }
 
     for (const auto& [key, value] : config.environment) {
+      // fork child before exec: one thread.
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
       setenv(key.c_str(), value.c_str(), 1);
     }
 

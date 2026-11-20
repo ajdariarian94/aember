@@ -51,7 +51,7 @@ int RunNetd(const NetdOptions& options) {
   }
   ipc::ReceiveControl(channel);  // muted if a debug shell is open
   // Keeps what the console doesn't show while a debug shell is open.
-  aember::utils::logging::enable_file_logging("/var/log/aember-netd.log");
+  aember::utils::logging::enable_file_logging(options.log_file);
 
   nlohmann::json config;
   {

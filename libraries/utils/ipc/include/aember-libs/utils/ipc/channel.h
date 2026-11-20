@@ -36,7 +36,7 @@ namespace aember::utils::ipc {
 inline constexpr int kInheritedFd = 3;
 
 /// Largest message (bytes of JSON).
-inline constexpr std::size_t kMaxMessage = 64 * 1024;
+inline constexpr std::size_t kMaxMessage = std::size_t{64} * 1024;
 
 class Channel {
  public:

@@ -127,4 +127,25 @@ TEST(AemberMonitorClientTest, SnapshotDescribesThisProcess) {
   EXPECT_NO_THROW(client.Report());
 }
 
+TEST(AemberMonitorTest, LogListsServicesAndSurvivesWrongTypes) {
+  auto stream = std::make_shared<std::ostringstream>();
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(*stream);
+  auto& logger = aember::utils::logging::global_logger();
+  logger.sinks().push_back(sink);
+  AemberMonitor monitor;
+  monitor.Log(nlohmann::json{
+      {"pid1", {{"pid", "not a number"}, {"threads", 3}}},
+      {"network", {{"online", "yes"}, {"rtt_ms", nullptr}}},
+      {"services",
+       {{{"name", "netd"}, {"state", "running"}, {"type", "process"}},
+        {{"name", 42}}}}});
+  logger.flush();
+  std::erase(logger.sinks(), sink);
+  const auto text = stream->str();
+  EXPECT_NE(text.find("2 service(s)"), std::string::npos) << text;
+  EXPECT_NE(text.find("netd [running] (process)"), std::string::npos) << text;
+  EXPECT_NE(text.find("? [?] (?)"), std::string::npos) << text;  // fallbacks
+  EXPECT_NE(text.find("threads=3"), std::string::npos) << text;
+}
+
 }  // namespace

@@ -14,6 +14,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <system_error>
 
 #include <fcntl.h>
 #include <poll.h>
@@ -23,7 +24,7 @@ namespace aember::utils::ipc {
 
 Hub::Hub() {
   if (::pipe2(wake_, O_CLOEXEC | O_NONBLOCK) != 0) {
-    log_.error("pipe2: {}", std::strerror(errno));
+    log_.error("pipe2: {}", std::system_category().message(errno));
   }
 }
 
@@ -102,7 +103,7 @@ void Hub::Loop(std::stop_token st) {
 
     if (::poll(fds.data(), fds.size(), -1) < 0) {
       if (errno == EINTR) continue;
-      log_.error("poll: {}", std::strerror(errno));
+      log_.error("poll: {}", std::system_category().message(errno));
       return;
     }
     if (fds[0].revents != 0) {  // woken: channels changed or Stop()

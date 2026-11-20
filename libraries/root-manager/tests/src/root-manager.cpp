@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 
@@ -25,6 +26,7 @@
 #include <sched.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
@@ -53,6 +55,20 @@ namespace {
 
 namespace fs = std::filesystem;
 using aember::root_manager::RootManager;
+
+/// Coverage builds (AEMBER_COVERAGE, set by instrument.cmake): write this
+/// process's gcov counters now. A forked child ends with _exit(), which
+/// skips gcov's exit handler, so what it ran would never be counted. (A
+/// weak reference doesn't work: it never pulls __gcov_dump out of
+/// libgcov.a.) A no-op in other builds.
+#ifdef AEMBER_COVERAGE
+extern "C" void __gcov_dump(void);
+inline void FlushCoverage() {
+  __gcov_dump();
+}
+#else
+inline void FlushCoverage() {}
+#endif
 
 class DeleteInitramfsTest : public ::testing::Test {
  protected:
@@ -188,6 +204,149 @@ TEST(RootManagerTest, WaitsForTheRootDevice) {
   EXPECT_FALSE(rm.MountRealRoot(cfg));
   EXPECT_GE(std::chrono::steady_clock::now() - t0,
             std::chrono::milliseconds{350});
+}
+
+// ---------------------------------------------------------------------------
+// Pivot stages
+// ---------------------------------------------------------------------------
+
+TEST(RootManagerTest, PivotRefusesANewRootThatIsNotMounted) {
+  RootManager rm{std::make_shared<aember::mount_manager::MountManager>()};
+  // No MountRealRoot: the (empty) new root path is no mount point.
+  EXPECT_FALSE(rm.PivotToNewRoot());
+}
+
+TEST(RootManagerTest, IsInInitramfsWhenThereAreNoServices) {
+  // The dev container and the test VM's initramfs have no
+  // /etc/aember/services.json; a booted rootfs has.
+  EXPECT_EQ(RootManager::IsInInitramfs(),
+            !fs::exists("/etc/aember/services.json"));
+}
+
+TEST(RootManagerTest, DumpMountInfoDoesNotThrow) {
+  RootManager rm{std::make_shared<aember::mount_manager::MountManager>()};
+  EXPECT_NO_THROW(rm.DumpMountInfo("test"));
+}
+
+/// The whole switch from an initramfs to the real root, as root in a forked
+/// child: a tmpfs "initramfs" with /dev, /proc, /sys becomes /, an ext4
+/// image (LABEL=aember-pivot; ext4 labels have at most 16 characters) on
+/// a writable loop device is found by label,
+/// mounted, the essential filesystems are moved and /usr/bin/aember is
+/// exec'd from it with --root. That program is a BusyBox script that exits
+/// 42 only if it got --root and /proc was moved along.
+TEST(RootManagerPivotTest, SwitchesIntoTheRealRootAndExecsAember) {
+  if (::geteuid() != 0) GTEST_SKIP() << "needs root";
+  const char* busybox = std::getenv("AEMBER_TEST_BUSYBOX");
+  if (busybox == nullptr || !fs::exists(busybox)) {
+    GTEST_SKIP() << "AEMBER_TEST_BUSYBOX (a static BusyBox) not set";
+  }
+
+  const fs::path work = fs::path{"/var/tmp"} /
+                        ("aember-pivot-test-" + std::to_string(::getpid()));
+  const fs::path tree = work / "tree";
+  const fs::path image = work / "root.img";
+  fs::create_directories(tree / "usr" / "bin");
+  fs::create_directories(tree / "bin");
+  fs::copy_file(busybox, tree / "bin" / "busybox");
+  {
+    std::ofstream script{tree / "usr" / "bin" / "aember"};
+    script << "#!/bin/busybox sh\n"
+              "[ \"$1\" = --root ] && [ -e /proc/self/status ] && exit 42\n"
+              "exit 43\n";
+  }
+  fs::permissions(tree / "usr" / "bin" / "aember", fs::perms::owner_all);
+  { std::ofstream{image} << std::string(16 << 20, '\0'); }
+  const auto mkfs = "mkfs.ext4 -q -F -L aember-pivot -d " + tree.string() +
+                    " " + image.string() + " >/dev/null 2>&1";
+  if (std::system(mkfs.c_str()) != 0) {
+    fs::remove_all(work);
+    GTEST_SKIP() << "no mkfs.ext4 with -d";
+  }
+
+  // A writable loop device (MountManager::AttachLoop's are read-only, for
+  // SquashFS): the real root is mounted read-write. Loop devices are
+  // global, so the parent detaches it after the child is gone.
+  std::string loop_dev;
+  if (FILE* f = ::popen(("losetup -f --show " + image.string()).c_str(), "r")) {
+    char buf[64] = {};
+    if (std::fgets(buf, sizeof buf, f) != nullptr) loop_dev = buf;
+    ::pclose(f);
+  }
+  while (!loop_dev.empty() && loop_dev.back() == '\n') loop_dev.pop_back();
+  if (loop_dev.empty()) {
+    fs::remove_all(work);
+    GTEST_SKIP() << "no losetup / free loop device";
+  }
+
+  const pid_t child = ::fork();
+  ASSERT_GE(child, 0);
+  const fs::path child_log = work / "child.log";
+  if (child == 0) {
+    // Opened before the chroot: the fd keeps working inside it.
+    const int log_fd = ::open(child_log.c_str(), O_WRONLY | O_CREAT, 0644);
+    ::dup2(log_fd, STDOUT_FILENO);
+    ::dup2(log_fd, STDERR_FILENO);
+    if (::unshare(CLONE_NEWNS) != 0 ||
+        ::mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0) {
+      ::_exit(10);
+    }
+    auto mounts = std::make_shared<aember::mount_manager::MountManager>();
+    // A tmpfs as the "initramfs", with what the real one has mounted.
+    const fs::path initramfs = work / "initramfs";
+    fs::create_directories(initramfs);
+    if (::mount("tmpfs", initramfs.c_str(), "tmpfs", 0, nullptr) != 0) {
+      ::_exit(11);
+    }
+    for (const auto* d : {"dev", "proc", "sys", "mnt/root"}) {
+      fs::create_directories(initramfs / d);
+    }
+    if (::mount("/dev",
+                (initramfs / "dev").c_str(),
+                nullptr,
+                MS_BIND | MS_REC,
+                nullptr) != 0 ||
+        ::mount("proc", (initramfs / "proc").c_str(), "proc", 0, nullptr) !=
+            0 ||
+        ::mount("/sys",
+                (initramfs / "sys").c_str(),
+                nullptr,
+                MS_BIND | MS_REC,
+                nullptr) != 0) {
+      ::_exit(12);
+    }
+    { std::ofstream{initramfs / "initramfs-file"} << "freed by SwitchRoot"; }
+    if (::chdir(initramfs.c_str()) != 0 ||
+        ::mount(".", "/", nullptr, MS_MOVE, nullptr) != 0 ||
+        ::chroot(".") != 0 || ::chdir("/") != 0) {
+      ::_exit(13);
+    }
+
+    RootManager rm{mounts};
+    rm.SetRootWait(std::chrono::seconds{5});
+    aember::utils::root::RootConfig cfg;
+    cfg.device = "LABEL=aember-pivot";
+    cfg.fstype = "ext4";
+    cfg.new_root_path = "/mnt/root";
+    // exec replaces this process: what ran up to SwitchRoot() is counted
+    // only if written now (the exec itself can't be).
+    FlushCoverage();
+    rm.PerformPivot(cfg);  // execs /usr/bin/aember on success
+    ::_exit(15);
+  }
+  int status = 0;
+  ASSERT_EQ(::waitpid(child, &status, 0), child);
+  std::string log;
+  {
+    std::ifstream in{child_log};
+    log.assign(std::istreambuf_iterator<char>{in}, {});
+  }
+  std::ignore = std::system(("losetup -d " + loop_dev).c_str());
+  fs::remove_all(work);
+  ASSERT_TRUE(WIFEXITED(status)) << "status " << status << "\n" << log;
+  EXPECT_EQ(WEXITSTATUS(status), 42)
+      << "10-15: setup/pivot step failed, 43: aember ran without --root/proc\n"
+      << log;
 }
 
 }  // namespace

@@ -43,7 +43,7 @@ bool Guarded(aember::utils::logging::Logger& log, std::string_view phase,
 // ---------------------------------------------------------------------------
 
 AemberInit::AemberInit(std::string_view logger_name, Options options)
-    : options_(options), log_(std::string{logger_name}) {
+    : options_(std::move(options)), log_(std::string{logger_name}) {
 #ifndef NDEBUG
   aember::utils::logging::logging_level_debug();
 #else
@@ -117,19 +117,20 @@ void AemberInit::StartInitramfs() {
 void AemberInit::StartRoot() {
   if (running_.exchange(true)) return;
 
-  aember::utils::logging::enable_file_logging("/var/log/aember-init.log");
+  aember::utils::logging::enable_file_logging(options_.log_dir +
+                                              "/aember-init.log");
   log_.info("Starting Aember in root mode{}",
             options_.chroot ? " (chroot)" : "");
 
   // Create heartbeat JSON file early — needed for aember-monitor container
   // mount
   {
-    std::ofstream file{"/var/log/aember-monitor.json"};
+    std::ofstream file{options_.log_dir + "/aember-monitor.json"};
     file << "{}";
   }
 
   Guarded(log_, "Mount phase", [this] {
-    InitMounts().or_else([this](const Error& e) -> Result<> {
+    std::ignore = InitMounts().or_else([this](const Error& e) -> Result<> {
       log_.warn("Mount phase failed: {}", e.message);
       return {};
     });
@@ -160,11 +161,12 @@ void AemberInit::StartRoot() {
 
   if (service_manager_) {
     Guarded(log_, "Loading services", [this] {
-      LoadAndRegisterProcesses("/etc/aember/services.json")
-          .or_else([this](const Error& e) -> Result<> {
-            log_.warn("{}", e.message);
-            return {};
-          });
+      std::ignore =
+          LoadAndRegisterProcesses(options_.config_dir + "/services.json")
+              .or_else([this](const Error& e) -> Result<> {
+                log_.warn("{}", e.message);
+                return {};
+              });
     });
 
     Guarded(
@@ -262,7 +264,8 @@ AemberInit::Result<> AemberInit::InitMounts() {
   }
 
   module_loader_.emplace();
-  auto modules = module_loader_->LoadModules("/etc/aember/modules.json");
+  auto modules =
+      module_loader_->LoadModules(options_.config_dir + "/modules.json");
   if (!module_loader_->Load(modules)) {
     log_.warn("Some kernel modules failed to load, continuing anyway");
   }
@@ -438,7 +441,8 @@ void AemberInit::StartDebugShell(bool shell_now) {
     debug_shell_->Start(
         [this](pid_t pid) { child_supervisor_.AddChild(pid, "debug-shell"); },
         [this](pid_t pid) { return child_supervisor_.IsTracked(pid); },
-        shell_now);
+        shell_now,
+        options_.console);
   });
 }
 
@@ -558,7 +562,7 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
 
   // Log the enriched dashboard.
   monitor_->Log(payload);
-  monitor_->LogToFile(payload, "/var/log/aember-monitor.json");
+  monitor_->LogToFile(payload, options_.log_dir + "/aember-monitor.json");
 }
 
 void AemberInit::OnServiceStateChange(const std::string& name,
