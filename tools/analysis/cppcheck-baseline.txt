@@ -1,0 +1,12 @@
+# cppcheck findings accepted for now (`aember analyze --update-baseline`).
+# count<TAB>file<TAB>check<TAB>message. Fix them; don't add to it by hand.
+1	libraries/aember-init/src/aember-init.cpp	useStlAlgorithm	Consider using std::transform algorithm instead of a raw loop.
+1	libraries/mount-manager/src/mount-manager.cpp	useStlAlgorithm	Consider using std::find_if algorithm instead of a raw loop.
+1	libraries/process-manager/src/process-manager.cpp	localMutex	The lock is ineffective because the mutex is locked at the same scope as the mutex itself.
+1	libraries/service-manager/src/dependency-resolver.cpp	useStlAlgorithm	Consider using std::copy_if algorithm instead of a raw loop.
+1	libraries/service-manager/src/service-manager.cpp	useStlAlgorithm	Consider using std::copy_if algorithm instead of a raw loop.
+1	libraries/utils/netlink/src/netlink.cpp	constVariablePointer	Variable 'a' can be declared as pointer to const
+1	libraries/utils/watchdog/src/watchdog.cpp	localMutex	The lock is ineffective because the mutex is locked at the same scope as the mutex itself.
+1	services/netd/src/dhcp-client.cpp	useStlAlgorithm	Consider using std::any_of algorithm instead of a raw loop.
+1	services/netd/src/network-manager.cpp	localMutex	The lock is ineffective because the mutex is locked at the same scope as the mutex itself.
+1	services/netd/src/network-manager.cpp	useStlAlgorithm	Consider using std::transform algorithm instead of a raw loop.

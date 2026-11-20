@@ -16,6 +16,8 @@ from .base.publish import publish
 from .base.release import release
 from .base.resources import fetch_resources
 from .base.test import test
+from .base.analyze import analyze
+from .base.mutate import mutate
 from .qemu.build import build_qemu
 from .qemu.launch import launch_qemu
 from .rpi import commands as rpi_commands
@@ -62,8 +64,12 @@ aember.command(help="x86-64 AppImage: aember isolated on a Linux desktop")(appim
 aember.command(help="Upload build/release/ as GitHub release v<VERSION>")(publish)
 aember.command(help="Serve documentation locally")(view_docs)
 aember.command(
-    help="Run the CLI and C++ unit tests (C++: after `aember qemu build --with-tests`)"
+    help="Run the CLI and C++ unit tests; --coverage, --sanitize, --valgrind, --root"
 )(test)
+aember.command(help="Static analysis: clang-tidy and cppcheck against a baseline")(
+    analyze
+)
+aember.command(help="Mutation testing of one library's test suite")(mutate)
 
 # ----------------------------
 # Aember commands

@@ -1,0 +1,54 @@
+# clang-tidy for aember's own code (`aember analyze`). Findings are compared
+# against tools/analysis/clang-tidy-baseline.txt: new ones fail the run.
+#
+# Kept: real-bug families (bugprone, clang-analyzer, concurrency, cert
+# error checks), performance, portability and a few modernize/readability
+# checks that catch mistakes rather than style.
+# Off (with reason):
+#   bugprone-easily-swappable-parameters  flags most two-string functions
+#   bugprone-exception-escape             PID 1 deliberately lets Guarded() catch
+#   modernize-use-trailing-return-type    style only
+#   modernize-use-nodiscard               would touch every getter
+#   performance-enum-size                 uint8_t enums: style, not a bug
+#   readability-*                         except the ones listed below
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  clang-analyzer-*,
+  concurrency-*,
+  cert-err33-c,
+  cert-err34-c,
+  cert-err58-cpp,
+  cert-env33-c,
+  cert-flp30-c,
+  misc-redundant-expression,
+  misc-unused-parameters,
+  misc-throw-by-value-catch-by-reference,
+  misc-misplaced-const,
+  misc-definitions-in-headers,
+  misc-static-assert,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-loop-convert,
+  performance-*,
+  -performance-enum-size,
+  portability-*,
+  readability-container-size-empty,
+  readability-delete-null-pointer,
+  readability-misleading-indentation,
+  readability-redundant-string-cstr,
+  readability-simplify-boolean-expr
+WarningsAsErrors: ""
+HeaderFilterRegex: "/(libraries|services|executables)/"
+FormatStyle: file
+CheckOptions:
+  # glibc's thread-safety list (aember only runs on glibc), not POSIX's.
+  # strerror() is unsafe in both: use std::system_category().message().
+  - key: concurrency-mt-unsafe.FunctionSet
+    value: glibc
+  - key: bugprone-assert-side-effect.AssertMacros
+    value: assert
+  - key: performance-unnecessary-value-param.AllowedTypes
+    value: "std::shared_ptr;std::function;std::stop_token"

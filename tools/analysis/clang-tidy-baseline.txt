@@ -1,0 +1,2 @@
+# clang-tidy findings accepted for now (`aember analyze --update-baseline`).
+# count<TAB>file<TAB>check<TAB>message. Fix them; don't add to it by hand.

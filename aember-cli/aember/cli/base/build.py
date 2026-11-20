@@ -23,10 +23,7 @@ def build(
         case_sensitive=False,
     ),
 ):
-    ctx = Context(
-    architecture=architecture.value,
-    build_type=build_type.value
-    )
+    ctx = Context(architecture=architecture.value, build_type=build_type.value)
 
     # Everything a fresh clone needs: overlay images, kernel/BusyBox/LXC/SDK
     # from aember-resources, CMake configure (vcpkg deps), then the build.
