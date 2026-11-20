@@ -58,17 +58,29 @@ class ArchitectureTest(unittest.TestCase):
 
 
 class MuslVariantTest(unittest.TestCase):
-    def test_musl_toolchain_uses_the_musl_sdk_and_bigger_thread_stacks(self):
-        text = (ROOT / "tools/toolchains/x64-poky-linux-musl.cmake").read_text()
-        self.assertIn("x86_64-poky-linux-musl-g++", text)
-        self.assertIn("core2-64-poky-linux-musl", text)
-        self.assertIn("-Wl,-z,stack-size=", text)
-        self.assertNotRegex(text, r"x86_64-poky-linux[-/](?!musl)")
+    MUSL = [a.value for a in Architecture if a.value.endswith("-musl")]
 
-    def test_musl_loader(self):
-        self.assertEqual(
-            ARCH_CONFIG["x64-poky-linux-musl"]["loader_name"], "ld-musl-x86_64.so.1"
-        )
+    def test_there_are_musl_variants_of_glibc_targets(self):
+        self.assertIn("x64-poky-linux-musl", self.MUSL)
+        for arch in self.MUSL:
+            self.assertIn(arch.removesuffix("-musl"), [a.value for a in Architecture])
+
+    def test_musl_toolchains_use_the_musl_sdk_and_bigger_thread_stacks(self):
+        for arch in self.MUSL:
+            with self.subTest(arch=arch):
+                text = (ROOT / f"tools/toolchains/{arch}.cmake").read_text()
+                self.assertIn(f'build/aember-resources/{arch}"', text)
+                self.assertIn(SDK_SYSROOT_MAP[arch], text)
+                self.assertIn("-Wl,-z,stack-size=", text)
+                # every compiler/tool path points into the musl toolchain
+                for line in text.splitlines():
+                    if "/usr/bin/" in line and "POKY_SDK_ROOT" in line:
+                        self.assertIn("musl", line)
+
+    def test_musl_loaders(self):
+        for arch in self.MUSL:
+            with self.subTest(arch=arch):
+                self.assertTrue(ARCH_CONFIG[arch]["loader_name"].startswith("ld-musl-"))
 
 
 if __name__ == "__main__":

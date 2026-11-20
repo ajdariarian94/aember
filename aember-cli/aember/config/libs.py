@@ -26,6 +26,9 @@ ARCH_CONFIG = {
     "x64-poky-linux-musl": {
         "loader_name": "ld-musl-x86_64.so.1",
     },
+    "aarch64-poky-linux-musl": {
+        "loader_name": "ld-musl-aarch64.so.1",
+    },
 }
 
 # Libraries a service loads with dlopen (so not in its NEEDED), packed
@@ -41,6 +44,7 @@ BASE_MODULES: Dict[str, List[str]] = {
     "aarch64-poky-linux": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
     "arm-poky-linux": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
     "riscv64-poky-linux": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
+    "aarch64-poky-linux-musl": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
 }
 
 # Debug-only modules
@@ -50,4 +54,5 @@ DEBUG_ONLY_MODULES: Dict[str, List[str]] = {
     "aarch64-poky-linux": [],
     "arm-poky-linux": [],
     "riscv64-poky-linux": [],
+    "aarch64-poky-linux-musl": [],
 }
