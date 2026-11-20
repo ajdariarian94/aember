@@ -25,21 +25,15 @@ RUN \
         useradd -m -u "${UID}" -g "${GID}" "${USERNAME}"; \
     fi
 
-# ---- Add Ubuntu Toolchain PPA for GCC 14 ----
+# software-properties-common: apt-add-repository for the Kitware CMake repo
 RUN apt update && apt install -y \
     software-properties-common \
-    gnupg && \
-    add-apt-repository ppa:ubuntu-toolchain-r/test && \
-    apt update
+    gnupg
 
 # ---- Install system dependencies ----
 RUN apt update && apt install -y    \
     apt-utils                       \
     build-essential                 \
-    gcc-12                          \
-    g++-12                          \
-    gcc-14                          \
-    g++-14                          \
     clang                           \
     clang-tools                     \
     clang-tidy                      \
@@ -54,13 +48,10 @@ RUN apt update && apt install -y    \
     gdb-multiarch                   \
     genext2fs                       \
     graphviz                        \
-    gcc-aarch64-linux-gnu           \         
-    gcc-arm-linux-gnueabihf         \
-    g++-aarch64-linux-gnu           \
-    g++-arm-linux-gnueabihf         \
     lcov                            \
     nsis                            \
     valgrind                        \
+    libc6-dbg                       \
     liblxc-dev                      \
     libmbedtls-dev                  \
     zlib1g-dev                      \
@@ -111,14 +102,6 @@ RUN apt update && apt install -y    \
     lsb-release &&                  \
     gem install lolcat
 
-# ---- Set GCC 14 as default ----
-RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 50 && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 50 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100 && \
-    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-12 50 && \
-    update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-14 100
-
 RUN apt update && apt install -y \
     libgl1-mesa-dri \
     libegl-mesa0 \
@@ -153,20 +136,6 @@ RUN wget -O - https://apt.llvm.org/llvm.sh | bash -s -- 18 && \
 RUN locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8
-
-# ---- Downgrade GNU tar to 1.34 for Yocto/Bitbake compatibility ----
-# GNU tar 1.35 uses openat2/relative syscalls that cause Bitbake's pseudo wrapper to lose track of fds.
-# ---- Downgrade GNU tar to 1.34 for Yocto/Bitbake compatibility ----
-# GNU tar 1.35 uses openat2/relative syscalls that cause Bitbake's pseudo wrapper to lose track of fds.
-RUN cd /tmp && \
-    wget https://ftp.gnu.org/gnu/tar/tar-1.34.tar.gz && \
-    tar -xzf tar-1.34.tar.gz && \
-    cd tar-1.34 && \
-    FORCE_UNSAFE_CONFIGURE=1 ./configure --prefix=/usr && \
-    make -j$(nproc) && \
-    make install && \
-    cd /tmp && \
-    rm -rf tar-1.34 tar-1.34.tar.gz
 
 # ---- Setup virtual environment ----
 RUN python3 -m venv /venv

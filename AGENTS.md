@@ -547,6 +547,74 @@ The toolchain files find everything relative to the repo
 Kernel, BusyBox, LXC and SDK are no longer part of aember's releases; they
 live in aember-resources' releases.
 
+## Testing, coverage and analysis
+
+Everything runs in the dev container (and in CI, the same commands in the
+same image, `.github/workflows/ci.yml`).
+
+| Command | What it does |
+|---|---|
+| `aember test [--build] [--root]` | CLI tests + every C++ suite (x64 Debug); `--root` runs them through `sudo -n` so the root-only tests (mounts, loop devices, namespaces, the full root switch) run too |
+| `aember test --coverage [--root]` | builds the `Debug-coverage` variant, runs, reports per library/service: `build/coverage/index.html`, `components.json` (gcovr with the SDK's gcov; template instantiations merged per line) |
+| `aember test --sanitize asan\|tsan [--root]` | `Debug-asan` (Address + Leak + UndefinedBehavior) or `Debug-tsan` variant; the first report fails the suite (`SANITIZER_ENV`). Needs aember-resources v0.1.8+ (the SDK's gcc-sanitizers) |
+| `aember test --valgrind` | every suite under memcheck (errors and definite leaks fail; `tools/valgrind/aember.supp`) |
+| `aember analyze [--update-baseline]` | clang-tidy (`.clang-tidy`) and cppcheck over the Debug compile database; findings beyond `tools/analysis/*-baseline.txt` fail |
+| `aember mutate -k <suite> [-n N]` | mutation testing: one operator at a time changed in the library's sources, its suite rebuilt and run; survivors = lines no test checks (`build/mutation/<suite>.json`) |
+| `aember lint [--check]` | ruff, black, clang-format, cmake-format, cmakelint; `--check` changes nothing and fails on anything to fix (CI) |
+
+- **Variants** (`Context.instrument`, `tools/toolchains/instrument.cmake`,
+  `AEMBER_INSTRUMENT` passed through the superbuild): each has its own
+  `build/{configure,install}/x64-poky-linux/Debug-<variant>/`, so they never
+  disturb the normal builds. vcpkg's dependencies stay uninstrumented.
+  The flags are CMake's `*_FLAGS_INIT`: after changing instrument.cmake,
+  delete that variant's two directories (a cached build keeps old flags).
+- **Coverage of forked children**: a child that ends with `_exit()` (or
+  execs) never writes its gcov counters. Tests that fork call
+  `FlushCoverage()` (`__gcov_dump()` under `AEMBER_COVERAGE`, which only
+  coverage builds define; a weak reference would not link it) before
+  `_exit()`. The root switch execs away, so root-manager's pivot test passes
+  without being counted.
+- **Warnings**: `tools/cmake/AemberWarnings.cmake` (included by libraries,
+  services, executables, examples; not vcpkg) turns on `-Wall -Wextra
+  -Wpedantic -Wshadow ...` as errors (`AEMBER_WERROR`, ON). Keep the code
+  warning-free; not used: `-Wnull-dereference` (false positives inside
+  libstdc++ at -O2).
+- **Static analysis**: clang 18 parses the GCC 15 code with the SDK's
+  libstdc++ (`--target`, `-isystem`, `-D__cpp_concepts=202002L` for
+  `<expected>`, `-Wno-unknown-warning-option`). A `clang-diagnostic-error`
+  means clang couldn't compile a file: fix the invocation, never baseline
+  it. `concurrency-mt-unsafe` uses glibc's list; `strerror()` is not
+  thread-safe, use `std::system_category().message(err)`. Calls that only
+  run with one thread (fork children, atfork handlers) carry a
+  `NOLINTNEXTLINE(concurrency-mt-unsafe): <why>`. Fix findings rather than growing the baseline; remove what
+  you fixed (`--update-baseline` with the fix).
+- **Integration tests that run the real thing in a forked child**:
+  `aember-init-unittest` runs `AemberInit::StartRoot()` (chroot mode,
+  `InitOptions{config_dir, log_dir, console}` pointed at a sandbox under
+  `/var/tmp`, a pty as console) with shell-script services, including one
+  speaking the ipc protocol on fd 3, and stops it with each shutdown
+  signal; `netd-daemon-unittest` / `containerd-daemon-unittest` run
+  `RunNetd()` / `RunContainerd()` with a channel on fd 3
+  (`services/tests-common/daemon-runner.h`; as root in private mount + net
+  namespaces). `container-lifecycle-unittest` drives ContainerManager
+  against a fake liblxc (`SetLxcForTesting` in lxc-api.h: its "init" is a
+  forked `sleep`), without root. root-manager's pivot test does the whole initramfs → real
+  root switch in a private namespace (a tmpfs "initramfs", an ext4 image on
+  a writable loop device found by label, exec of a BusyBox script as
+  `/usr/bin/aember`; `AEMBER_TEST_BUSYBOX` comes from `aember test`).
+- **Regression tests** carry a comment starting `Regression:` saying which
+  bug they pin down.
+- **nlohmann::json pitfall**: a one-element braced list becomes that
+  element, not an array (`{x}` → `x`). Build arrays with
+  `nlohmann::json::array(...)` or from a `std::vector`.
+- **CI** (`.github/workflows/ci.yml`, GitHub's free hosted runners for
+  public repos): `tools/ci/free-disk.sh` makes room, `tools/ci/run.sh`
+  runs a command in the published dev image with the repo at
+  `/aember_ws/aember` (the SDK's baked path), privileged. Jobs: lint + CLI
+  tests; tests as root + analysis; coverage (artifact + job summary);
+  valgrind nightly. Job summaries come from `$GITHUB_STEP_SUMMARY`
+  (`build/ci-summary.md` inside the container).
+
 ## Coding conventions
 
 C++:
@@ -563,7 +631,8 @@ C++:
 - A library dir has `CMakeLists.txt` (STATIC lib + `aember-libs::` alias +
   install/export), `Config.cmake.in`, `include/`, `src/`, optional `tests/`
   (GTest, `<lib>-unittest`, `add_test`). Every library and service has
-  tests (24 suites, 240 tests as `dev`, 252 as root, plus 36 CLI tests);
+  tests (28 suites: 296 tests as `dev` with 23 root-only ones skipped,
+  317 as root, plus 66 CLI tests; 84% of the lines, `aember test --coverage`);
   only what needs root, real interfaces or LXC
   containers is left to the QEMU boots.
 - Tests build only with `--with-tests`, which forces x64 Debug; the test
@@ -634,8 +703,8 @@ CLI's history up to `af5bc15`). It's regular files here: edit it directly.
 
 ## Known issues (don't fix unless asked)
 
-- The dev Dockerfile still has Yocto-era leftovers (GNU tar 1.34
-  downgrade, gcc-12/14 PPA). Harmless, but can go on the next image rebuild.
+- Nothing open here right now (the Dockerfile's Yocto-era leftovers are
+  gone, 2026-11-19).
 
 ## Working agreements for agents
 
