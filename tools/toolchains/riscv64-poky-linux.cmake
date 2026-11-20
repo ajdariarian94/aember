@@ -7,7 +7,7 @@ set(CMAKE_SYSTEM_PROCESSOR riscv64)
 # ---------------------------------------------------------------------------
 get_filename_component(AEMBER_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(AEMBER_RESOURCES_DIR "${AEMBER_ROOT}/build/aember-resources/riscv64-poky-linux")
-set(POKY_SYSROOT  "${AEMBER_RESOURCES_DIR}/sdk/sysroots/riscv64-poky-linux")
+set(POKY_SYSROOT  "${AEMBER_RESOURCES_DIR}/sdk/sysroots/riscv64imafdc-poky-linux")
 set(POKY_SDK_ROOT "${AEMBER_RESOURCES_DIR}/sdk/sysroots/x86_64-pokysdk-linux")
 set(CMAKE_SYSROOT ${POKY_SYSROOT})
 
