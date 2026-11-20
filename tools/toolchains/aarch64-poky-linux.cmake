@@ -7,12 +7,12 @@ set(CMAKE_SYSTEM_PROCESSOR aarch64)
 # ---------------------------------------------------------------------------
 get_filename_component(AEMBER_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(AEMBER_RESOURCES_DIR "${AEMBER_ROOT}/build/aember-resources/aarch64-poky-linux")
-set(POKY_SYSROOT  "${AEMBER_RESOURCES_DIR}/sdk/sysroots/cortexa72-poky-linux")
+set(POKY_SYSROOT  "${AEMBER_RESOURCES_DIR}/sdk/sysroots/cortexa53-poky-linux")
 set(POKY_SDK_ROOT "${AEMBER_RESOURCES_DIR}/sdk/sysroots/x86_64-pokysdk-linux")
 set(CMAKE_SYSROOT ${POKY_SYSROOT})
 
 # ---------------------------------------------------------------------------
-# Compilers — Poky SDK cross GCC (Raspberry Pi 4, Cortex-A72)
+# Compilers — Poky SDK cross GCC (generic ARMv8-A: Raspberry Pi 3/4, i.MX8, ...)
 # ---------------------------------------------------------------------------
 set(CMAKE_C_COMPILER
   "${POKY_SDK_ROOT}/usr/bin/aarch64-poky-linux/aarch64-poky-linux-gcc"
@@ -36,13 +36,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 # Base flags
 #
-# Raspberry Pi 4 is Cortex-A72 (ARMv8-A):
-#   -march=armv8-a     baseline ARMv8-A instruction set
-#   -mcpu=cortex-a72   tune specifically for Cortex-A72
+# Generic ARMv8.0-A, the SDK's cortexa53 tune (aember-resources v0.1.8), so
+# one build runs on every 64-bit Arm board (Pi 3/4/Zero 2 W, i.MX8, Rockchip):
+#   -march=armv8-a       baseline ARMv8-A instruction set
+#   -mtune=cortex-a53    schedule for the A53; the code runs on A72 etc. too
 #   -mfpu is not needed on aarch64 — FPU is always present
 # ---------------------------------------------------------------------------
 set(POKY_FLAGS
-  "-march=armv8-a -mcpu=cortex-a72 -fstack-protector-strong"
+  "-march=armv8-a -mtune=cortex-a53 -fstack-protector-strong"
 )
 
 # ---------------------------------------------------------------------------
