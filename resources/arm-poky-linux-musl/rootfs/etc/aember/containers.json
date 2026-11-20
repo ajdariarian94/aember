@@ -1,6 +1,9 @@
 {
   "bridges": [
-    {"name": "lxcbr0", "address": "10.0.3.1/24"}
+    {
+      "name": "lxcbr0",
+      "address": "10.0.3.1/24"
+    }
   ],
   "containers": [
     {
@@ -10,12 +13,51 @@
         "squashfs": "/var/lib/aember/alpine/alpine.squashfs",
         "rootfs": "/var/lib/aember/containers/alpine",
         "config_path": "/var/lib/aember/alpine/lxc.container.conf",
-        "args": ["/bin/sh", "/echo-alpine.sh"]
+        "args": [
+          "/bin/sh",
+          "/echo-alpine.sh"
+        ]
       },
       "restart_policy": "always",
       "dependencies": [],
       "max_restart_attempts": 5,
       "restart_delay": 5
+    },
+    {
+      "name": "aember-stats",
+      "type": "container",
+      "container": {
+        "squashfs": "/var/lib/aember/aember-stats/aember-stats.squashfs",
+        "rootfs": "/var/lib/aember/containers/aember-stats",
+        "config_path": "/var/lib/aember/aember-stats/lxc.container.conf",
+        "args": [
+          "/usr/bin/aember-stats"
+        ]
+      },
+      "init": true,
+      "stop_timeout": 5,
+      "restart_policy": "always",
+      "dependencies": [],
+      "max_restart_attempts": 0,
+      "restart_delay": 2
+    },
+    {
+      "name": "aember-monitor",
+      "type": "container",
+      "container": {
+        "squashfs": "/var/lib/aember/aember-monitor/aember-monitor.squashfs",
+        "rootfs": "/var/lib/aember/containers/aember-monitor",
+        "config_path": "/var/lib/aember/aember-monitor/lxc.container.conf",
+        "args": [
+          "/usr/bin/aember-monitor"
+        ]
+      },
+      "init": true,
+      "stop_timeout": 5,
+      "restart_policy": "always",
+      "dependencies": [],
+      "max_restart_attempts": 0,
+      "restart_delay": 2
     }
   ]
 }
