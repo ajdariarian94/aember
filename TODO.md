@@ -195,9 +195,10 @@ first:
 
 - [ ] aarch64's `alpine` test container: 40 MB -> ~1 MB (static BusyBox +
   `echo-alpine.sh`, like arm32 and riscv64; see Production readiness).
-- [ ] Smaller liblxc: build without what aember doesn't use (seccomp,
-  apparmor, selinux, the lxc-* tools) in aember-resources'
-  `aember-lxc.bb`; maybe 1-2 MB.
+- [x] Release images strip the libraries they pack (2026-11-20): liblxc
+  from aember-resources has its debug info (for Debug builds and gdb):
+  4.8 MB -> 1.1 MB on x64. It is already built without seccomp, apparmor,
+  selinux and openssl.
 - [ ] Measure static libstdc++ (`-static-libstdc++` with LTO and
   `--gc-sections`) against the shared 2.5 MB for aember's few binaries.
 - [ ] Kernel modules and firmware: drop what an image ships but never
