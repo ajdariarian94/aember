@@ -79,7 +79,13 @@ def valgrind_leaked(output: str) -> int:
 def test_env(root: Path) -> dict[str, str]:
     """What the tests may use besides the system: the static BusyBox from
     aember-resources (root-manager's pivot test execs it in a new root)."""
-    return {"AEMBER_TEST_BUSYBOX": str(busybox_dir(root, TEST_ARCH) / "busybox")}
+    return {
+        "AEMBER_TEST_BUSYBOX": str(busybox_dir(root, TEST_ARCH) / "busybox"),
+        # The dynamic loader's own allocations (tools/sanitizers/lsan.supp)
+        "LSAN_OPTIONS": "suppressions="
+        + str(root / "tools" / "sanitizers" / "lsan.supp")
+        + ":print_suppressions=0",
+    }
 
 
 def tests_dir(root: Path, variant: str = TEST_BUILD_TYPE) -> Path:
@@ -115,6 +121,7 @@ class RunTests(Step):
         self.valgrind = valgrind
         self.as_root = as_root
         self.allow_empty = allow_empty
+        self.no_aslr = False  # set from ctx.instrument in run()
 
     def _command(self, root: Path, binary: Path) -> list[str]:
         sysroot = sdk_dir(root, TEST_ARCH) / "sysroots" / SDK_SYSROOT_MAP[TEST_ARCH]
@@ -132,6 +139,11 @@ class RunTests(Step):
                 f"SDK loader {loader} not found; run `aember qemu build --with-tests`."
             )
         cmd = [str(loader), "--library-path", lib_path, str(binary)]
+        if self.no_aslr:
+            # ThreadSanitizer needs ASLR off on kernels with many mmap random
+            # bits (WSL 6.18) and re-execs /proc/self/exe to turn it off; that
+            # is ld.so here, so the re-exec fails ("execve failed, errno 2").
+            cmd = ["setarch", "x86_64", "-R"] + cmd
         if self.valgrind:
             supp = root / "tools" / "valgrind" / "aember.supp"
             cmd = VALGRIND + [f"--suppressions={supp}"] + cmd
@@ -181,6 +193,7 @@ class RunTests(Step):
 
     def run(self, ctx: Context) -> None:
         variant = ctx.variant if ctx.build_type else TEST_BUILD_TYPE
+        self.no_aslr = ctx.instrument == "tsan"
         directory = tests_dir(ctx.root, variant)
         binaries = sorted(p for p in directory.glob("*-unittest") if p.is_file())
         if self.filter:

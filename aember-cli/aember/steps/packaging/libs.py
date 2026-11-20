@@ -186,3 +186,38 @@ def copy_runtime_libs(
         else:
             shutil.copy2(lib, dst_dir)
             log.debug("copy:    %s", lib.name)
+
+
+def sdk_strip_tool(root: Path, architecture: str) -> Path:
+    """The SDK's cross strip (<triple>-strip): the host's binutils only know
+    x86-64."""
+    bin_dir = sdk_dir(root, architecture) / "sysroots" / "x86_64-pokysdk-linux"
+    tools = sorted((bin_dir / "usr" / "bin").glob("*/*-strip"))
+    if not tools:
+        raise FileNotFoundError(f"No cross strip in {bin_dir}/usr/bin/*/")
+    return tools[0]
+
+
+def strip_libs(root: Path, architecture: str, lib_dir: Path) -> int:
+    """
+    Strip debug info and local symbols from the shared libraries in
+    @p lib_dir (Release images). liblxc from aember-resources keeps its
+    debug info for Debug builds: 4.8 MB unstripped, 1.1 MB stripped (x64).
+    Returns the bytes saved.
+    """
+    libs = [
+        p for p in sorted(lib_dir.glob("*.so*")) if p.is_file() and not p.is_symlink()
+    ]
+    if not libs:
+        return 0
+    before = sum(p.stat().st_size for p in libs)
+    subprocess.run(
+        [str(sdk_strip_tool(root, architecture)), "--strip-unneeded"]
+        + [str(p) for p in libs],
+        check=True,
+    )
+    saved = before - sum(p.stat().st_size for p in libs)
+    log.info(
+        "Stripped %d libraries in %s: %d KB less", len(libs), lib_dir, saved // 1024
+    )
+    return saved

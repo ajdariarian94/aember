@@ -19,6 +19,9 @@ ARCH_CONFIG = {
     "arm-poky-linux": {
         "loader_name": "ld-linux-armhf.so.3",
     },
+    "riscv64-poky-linux": {
+        "loader_name": "ld-linux-riscv64-lp64d.so.1",
+    },
 }
 
 # Libraries a service loads with dlopen (so not in its NEEDED), packed
@@ -32,6 +35,7 @@ BASE_MODULES: Dict[str, List[str]] = {
     "x64-poky-linux": ["llc", "stp", "bridge", "veth", "br_netfilter"],
     "aarch64-poky-linux": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
     "arm-poky-linux": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
+    "riscv64-poky-linux": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
 }
 
 # Debug-only modules
@@ -39,4 +43,5 @@ DEBUG_ONLY_MODULES: Dict[str, List[str]] = {
     "x64-poky-linux": ["netconsole"],
     "aarch64-poky-linux": [],
     "arm-poky-linux": [],
+    "riscv64-poky-linux": [],
 }

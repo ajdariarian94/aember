@@ -86,7 +86,9 @@ QEMU_PROFILES: dict[str, QemuProfile] = {
     "aarch64-poky-linux": QemuProfile(
         binary="qemu-system-aarch64",
         machine="virt",
-        cpu="cortex-a72",  # Raspberry Pi 4; the SDK targets it
+        # The SDK targets generic ARMv8.0-A (Cortex-A53, aember-resources
+        # v0.1.8); test on the smallest core it supports.
+        cpu="cortex-a53",
         drive="if=virtio,format=raw",
         console="console=tty0 console=ttyAMA0,115200",
         root="root=/dev/vda1",
@@ -99,6 +101,16 @@ QEMU_PROFILES: dict[str, QemuProfile] = {
         cpu="cortex-a15",  # ARMv7-A with NEON; the SDK targets generic ARMv7-A
         drive="if=virtio,format=raw",
         console="console=tty0 console=ttyAMA0,115200",
+        root="root=/dev/vda1",
+        display=("-device", "virtio-gpu-pci", "-display", "gtk"),
+    ),
+    "riscv64-poky-linux": QemuProfile(
+        binary="qemu-system-riscv64",
+        # virt loads its built-in OpenSBI firmware (-bios default)
+        machine="virt",
+        cpu="rv64",  # RV64GC, like the SDK
+        drive="if=virtio,format=raw",
+        console="console=tty0 console=ttyS0,115200",
         root="root=/dev/vda1",
         display=("-device", "virtio-gpu-pci", "-display", "gtk"),
     ),
@@ -117,6 +129,10 @@ GDB_PROFILES: dict[str, dict] = {
     "arm-poky-linux": {
         "binary": "gdb-multiarch",
         "setup": ["-ex", "set architecture arm"],
+    },
+    "riscv64-poky-linux": {
+        "binary": "gdb-multiarch",
+        "setup": ["-ex", "set architecture riscv:rv64"],
     },
 }
 

@@ -10,7 +10,7 @@ from aember.core.step import Step
 
 from .busybox import install_busybox
 from .initramfs import create_initramfs_tree, pack_initramfs
-from .libs import copy_runtime_libs
+from .libs import copy_runtime_libs, strip_libs
 from .modules import copy_kernel_modules
 from .rootfs import create_rootfs_image
 
@@ -21,6 +21,7 @@ KERNEL_IMAGE_NAMES: dict[str, str] = {
     "x64-poky-linux": "bzImage",
     "aarch64-poky-linux": "Image",
     "arm-poky-linux": "zImage",
+    "riscv64-poky-linux": "Image",
 }
 
 
@@ -229,6 +230,11 @@ class PackStep(Step):
             ],
             present_in=initramfs_root,
         )
+        if ctx.build_type == "Release":
+            # Debug keeps the symbols (gdb); the SDK's glibc and libstdc++
+            # come stripped already, aember-resources' liblxc doesn't.
+            for tree in (initramfs_root, services_root):
+                strip_libs(ctx.root, ctx.architecture, tree / "lib")
 
         log.info("Copying kernel modules")
         self.modules_json_path(ctx)

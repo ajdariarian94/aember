@@ -164,6 +164,27 @@ class RunTestsCommandTest(unittest.TestCase):
         for key in ("ASAN_OPTIONS", "UBSAN_OPTIONS", "TSAN_OPTIONS"):
             self.assertIn("halt_on_error=1", SANITIZER_ENV[key])
 
+    def test_tsan_runs_without_aslr_so_it_does_not_reexec(self):
+        r = RunTests()
+        r.no_aslr = True
+        cmd = r._command(self.root, Path("/t/x-unittest"))
+        self.assertEqual(cmd[:3], ["setarch", "x86_64", "-R"])
+        self.assertTrue(cmd[3].endswith("ld-linux-x86-64.so.2"))
+        self.assertNotIn("setarch", RunTests()._command(self.root, Path("/t/x")))
+
+    def test_lsan_suppressions_only_hide_the_dynamic_loader(self):
+        from aember.steps.testing.run_tests import test_env
+
+        repo = Path(__file__).resolve().parents[2]
+        lsan = test_env(repo)["LSAN_OPTIONS"]
+        supp = Path(lsan.split("suppressions=")[1].split(":")[0])
+        rules = [
+            line
+            for line in supp.read_text().splitlines()
+            if line and not line.startswith("#")
+        ]
+        self.assertEqual(rules, ["leak:ld-linux-x86-64.so.2"])
+
 
 @unittest.skipUnless(shutil.which("cmake"), "needs cmake")
 class InstrumentCmakeTest(unittest.TestCase):

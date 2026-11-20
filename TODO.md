@@ -187,7 +187,31 @@ BusyBox init / s6 / runit / dinit.
 - [ ] Older hosts: xterm and its libraries come from Ubuntu 24.04
   (glibc 2.39); older distributions would need them built elsewhere.
 
-## Smaller cleanups / known issues
+## Image size
+
+Measured 2026-11-20 (x64 Release): initramfs 10 MB, services 6 MB; glibc
+(libc, libm, loader) 3.2 MB, libstdc++ 2.5 MB, liblxc 4.8 MB. Biggest wins
+first:
+
+- [ ] aarch64's `alpine` test container: 40 MB -> ~1 MB (static BusyBox +
+  `echo-alpine.sh`, like arm32 and riscv64; see Production readiness).
+- [x] Release images strip the libraries they pack (2026-11-20): liblxc
+  from aember-resources has its debug info (for Debug builds and gdb):
+  4.8 MB -> 1.1 MB on x64. It is already built without seccomp, apparmor,
+  selinux and openssl.
+- [ ] Measure static libstdc++ (`-static-libstdc++` with LTO and
+  `--gc-sections`) against the shared 2.5 MB for aember's few binaries.
+- [ ] Kernel modules and firmware: drop what an image ships but never
+  loads (per-target `modules.json` audit).
+- [ ] **musl as an opt-in extra, not a replacement**: `-musl` targets
+  (e.g. `x64-poky-linux-musl`) next to the glibc ones, for developers who
+  need the last MBs (~2.5 MB on x64, ~0.8 MB on arm32: one ~0.7 MB
+  `libc.so` instead of libc + libm + loader). glibc stays the default
+  with the full tooling: ASan/TSan/LSan don't support musl and valgrind
+  only partly. aember needs explicit thread stack sizes there (musl's
+  default is 128 KB: hub, reaper, watchdog threads). Needs the musl SDKs
+  from aember-resources first; CI/tests for the variant too.
+
 
 - [x] `aember qemu build` cleans only with `--with-tests` (the condition
   was always true, 2026-11-18).
