@@ -1,0 +1,9 @@
+# LeakSanitizer suppressions for `aember test --sanitize asan`
+# (passed as LSAN_OPTIONS=suppressions=..., steps/testing/run_tests.py).
+#
+# Allocations made by the dynamic loader itself (TLS/DTV and dlopen
+# bookkeeping): the allocation stack has only ld.so frames, and LSan reports
+# them as "direct leaks" at exit with the default fast unwinder
+# (container-manager-unittest dlopens a fake liblxc; 80 bytes, SDK v0.1.8).
+# Not aember's memory: it disappears with fast_unwind_on_malloc=0.
+leak:ld-linux-x86-64.so.2

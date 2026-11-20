@@ -176,7 +176,7 @@ resources/<arch>/rootfs rootfs overlay: configs tracked, *.squashfs images from 
 tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (SDK compilers, sysroot, flags)
 tools/scripts/          init.sh (postStart), prerequisites.sh, bashrc.d/
 vcpkg/                  SUBMODULE (fork) incl. x64/aarch64-poky-linux triplets
-tools/triplets/         overlay triplets not in the submodule (arm-poky-linux),
+tools/triplets/         overlay triplets not in the submodule (arm-poky-linux, riscv64-poky-linux),
                         passed as VCPKG_OVERLAY_TRIPLETS by ConfigureStep
 vcpkg.json              cli11, gtest, nlohmann-json, spdlog
 doc/                    Doxyfile, changelog/ (written by `aember changelog`)
@@ -361,7 +361,10 @@ does **not** read `modules.builtin`, so the C++ `ModuleLoader` checks
 
 `aember qemu launch` boots `build/package/<arch>/<BuildType>/` in
 `qemu-system-x86_64` / `qemu-system-aarch64 -machine virt` /
-`qemu-system-arm -machine virt,highmem=off -cpu cortex-a15`, in xterm windows
+`qemu-system-arm -machine virt,highmem=off -cpu cortex-a15` /
+`qemu-system-riscv64 -machine virt` (OpenSBI, console ttyS0; aarch64 runs on
+a Cortex-A53, the SDK's generic ARMv8.0-A tune since aember-resources
+v0.1.8), in xterm windows
 (Debug also starts GDB). **`aember qemu launch --headless --timeout 30`**
 runs QEMU in the current terminal with the serial console on stdout, for
 checks without a display. aember is PID 1 and never exits, so the timeout is
@@ -556,7 +559,7 @@ same image, `.github/workflows/ci.yml`).
 |---|---|
 | `aember test [--build] [--root]` | CLI tests + every C++ suite (x64 Debug); `--root` runs them through `sudo -n` so the root-only tests (mounts, loop devices, namespaces, the full root switch) run too |
 | `aember test --coverage [--root]` | builds the `Debug-coverage` variant, runs, reports per library/service: `build/coverage/index.html`, `components.json` (gcovr with the SDK's gcov; template instantiations merged per line) |
-| `aember test --sanitize asan\|tsan [--root]` | `Debug-asan` (Address + Leak + UndefinedBehavior) or `Debug-tsan` variant; the first report fails the suite (`SANITIZER_ENV`). Needs aember-resources v0.1.8+ (the SDK's gcc-sanitizers) |
+| `aember test --sanitize asan\|tsan [--root]` | `Debug-asan` (Address + Leak + UndefinedBehavior) or `Debug-tsan` variant; the first report fails the suite (`SANITIZER_ENV`). Needs aember-resources v0.1.8+ (the SDK's gcc-sanitizers). `tools/sanitizers/lsan.supp` (via `LSAN_OPTIONS`) hides only the dynamic loader's own allocations |
 | `aember test --valgrind` | every suite under memcheck (errors and definite leaks fail; `tools/valgrind/aember.supp`) |
 | `aember analyze [--update-baseline]` | clang-tidy (`.clang-tidy`) and cppcheck over the Debug compile database; findings beyond `tools/analysis/*-baseline.txt` fail |
 | `aember mutate -k <suite> [-n N]` | mutation testing: one operator at a time changed in the library's sources, its suite rebuilt and run; survivors = lines no test checks (`build/mutation/<suite>.json`) |
