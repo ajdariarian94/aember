@@ -1,0 +1,19 @@
+{
+  "modules": [
+    "llc",
+    "stp",
+    "ipv6",
+    "bridge",
+    "veth",
+    "br_netfilter",
+    "backlight",
+    "virtio_dma_buf",
+    "drm_exec",
+    "drm_kms_helper",
+    "drm_shmem_helper",
+    "drm_client_lib",
+    "virtio-gpu",
+    "virtio_input",
+    "overlay"
+  ]
+}
