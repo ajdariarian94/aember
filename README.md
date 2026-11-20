@@ -60,6 +60,7 @@ kernel ─► initramfs /init = aember        mounts, loads modules, finds the r
 | `arm-poky-linux` | ARMv7-A hard-float NEON | QEMU `virt` (Cortex-A15) |
 | `riscv64-poky-linux` | RISC-V RV64GC | QEMU `virt` (OpenSBI) |
 | `x64-poky-linux-musl` | x86-64, musl libc (opt-in) | as x64: ~35% smaller initramfs; no sanitizers |
+| `aarch64-poky-linux-musl` | ARMv8.0-A, musl libc (opt-in) | as aarch64 (QEMU `virt`): ~28% smaller initramfs |
 
 The kernel, BusyBox, LXC and the cross toolchains (Poky SDK, GCC 15) come
 prebuilt from [aember-resources](https://github.com/ajdariarian94/aember-resources);

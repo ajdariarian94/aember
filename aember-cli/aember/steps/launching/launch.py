@@ -123,6 +123,17 @@ QEMU_PROFILES: dict[str, QemuProfile] = {
         root="root=/dev/vda1",
         display=("-device", "virtio-gpu-pci", "-display", "gtk"),
     ),
+    "aarch64-poky-linux-musl": QemuProfile(
+        binary="qemu-system-aarch64",
+        machine="virt",
+        # The SDK targets generic ARMv8.0-A (Cortex-A53, aember-resources
+        # v0.1.8); test on the smallest core it supports.
+        cpu="cortex-a53",
+        drive="if=virtio,format=raw",
+        console="console=tty0 console=ttyAMA0,115200",
+        root="root=/dev/vda1",
+        display=("-device", "virtio-gpu-pci", "-display", "gtk"),
+    ),
 }
 
 # Maps architecture → GDB binary and extra setup commands
@@ -146,6 +157,10 @@ GDB_PROFILES: dict[str, dict] = {
     "riscv64-poky-linux": {
         "binary": "gdb-multiarch",
         "setup": ["-ex", "set architecture riscv:rv64"],
+    },
+    "aarch64-poky-linux-musl": {
+        "binary": "gdb-multiarch",
+        "setup": ["-ex", "set architecture aarch64"],
     },
 }
 
