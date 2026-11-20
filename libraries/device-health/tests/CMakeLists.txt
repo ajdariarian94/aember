@@ -33,22 +33,22 @@ install(
 )
 
 add_executable(
-  aember-monitor-unittest
-  src/aember-monitor.cpp
+  status-unittest
+  src/status.cpp
 )
 
 target_link_libraries(
-  aember-monitor-unittest
+  status-unittest
   PRIVATE aember-libs::device-health
           GTest::gtest_main
 )
 
 add_test(
-  NAME aember-monitor-unittest
-  COMMAND aember-monitor-unittest
+  NAME status-unittest
+  COMMAND status-unittest
 )
 
 install(
-  TARGETS aember-monitor-unittest
+  TARGETS status-unittest
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
 )

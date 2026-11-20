@@ -518,46 +518,7 @@ bool ContainerManager::Create(ContainerEntry& e) {
       !e.lxc->set_config_item(e.lxc, "lxc.signal.halt", "SIGTERM")) {
     log_.warn("'{}': lxc.signal.halt = SIGTERM rejected", e.config.name);
   }
-
-  // Settings for every container from the environment aember runs in (e.g.
-  // the chroot launcher passes the X11 display through). Optional file.
-  if (std::ifstream extra{extra_config_path_}; extra.is_open()) {
-    std::stringstream text;
-    text << extra.rdbuf();
-    for (const auto& [key, value] : ParseExtraConfig(text.str())) {
-      if (!e.lxc->set_config_item(e.lxc, key.c_str(), value.c_str())) {
-        log_.warn(
-            "'{}': extra config {} = {} rejected", e.config.name, key, value);
-      } else {
-        log_.debug("'{}': extra config {} = {}", e.config.name, key, value);
-      }
-    }
-  }
   return true;
-}
-
-std::vector<std::pair<std::string, std::string>>
-ContainerManager::ParseExtraConfig(std::string_view text) {
-  // "key = value" per line, like lxc.container.conf; '#' starts a comment.
-  const auto trim = [](std::string_view v) {
-    const auto b = v.find_first_not_of(" \t\r");
-    if (b == std::string_view::npos) return std::string_view{};
-    const auto e = v.find_last_not_of(" \t\r");
-    return v.substr(b, e - b + 1);
-  };
-  std::vector<std::pair<std::string, std::string>> items;
-  for (const auto line_range : std::views::split(text, '\n')) {
-    const std::string_view line{line_range.begin(), line_range.end()};
-    const auto content = trim(line);
-    if (content.empty() || content.front() == '#') continue;
-    const auto eq = content.find('=');
-    if (eq == std::string_view::npos) continue;
-    const auto key = trim(content.substr(0, eq));
-    const auto value = trim(content.substr(eq + 1));
-    if (key.empty()) continue;
-    items.emplace_back(std::string{key}, std::string{value});
-  }
-  return items;
 }
 
 bool ContainerManager::Start(ContainerEntry& e) {

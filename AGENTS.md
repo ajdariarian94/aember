@@ -205,7 +205,7 @@ under `include/aember-libs/<lib>/`, CMake target `aember-libs::<lib>`.
 | `process-manager`   | Spawns and tracks native processes (optionally with an ipc channel on fd 3) |
 | `child-supervisor`  | Tracks service pids; `ReapZombies()` is PID 1's only reaper (see below) |
 | `service-manager`   | PID 1's service supervisor: dependency order, readiness, stop order |
-| `device-health`     | Heartbeat + `AemberMonitor` runtime stats |
+| `device-health`     | Heartbeat + `StatusReporter`: PID 1's status file `/var/log/aember-status.json` (read by the aember-stats container) |
 | `utils/*`           | config, ipc (service channels), logging (spdlog), module, mount, netlink (rtnetlink), process, root, shell, signal (signalfd + epoll) |
 
 Services (`services/<name>/`, not libraries): `netd` (interfaces, DHCP,
@@ -298,9 +298,19 @@ Runtime config lives in the overlay at
 `resources/<arch>/rootfs/etc/aember/{services,containers,modules,network}.json`;
 container images under `rootfs/var/lib/aember/<name>/`.
 
+The status display is two containers from sibling repos, `../aember-stats`
+(collector, JSON lines on `/run/aember-stats/stats.sock`) and
+`../aember-monitor` (minimal Qt 6 viewer), installed into an overlay with
+`aember-cli/run.py install -a <arch> ../aember` there. aember's part is only
+PID 1's status file `/var/log/aember-status.json` (`StatusReporter`, read at
+`/host-logs/aember-status.json` in containers): keep its format compatible
+with aember-stats' (it embeds it unchanged). The old Qt monitor container,
+its per-second console box and the X11/lxc-extra.conf passthrough are gone;
+don't bring them back.
+
 The overlay's text files (the JSON configs, `lxc.container.conf`) are
 **tracked in git**; edit them here and commit. The container
-images (`*.squashfs`, e.g. the Qt-based `aember-monitor`) are git-ignored and
+images (`*.squashfs`) are git-ignored and
 come from aember's own release `v<project VERSION>` as
 `aember-resources-v<V>.tar.gz` (public, plain HTTPS). `CheckResources`
 (`utils/check_resources.py`) downloads it when no image is present and
@@ -382,13 +392,10 @@ privileged helper container of the dev image (`steps/launching/chroot.py`).
   modules (they'd go into the WSL kernel).
 - Network: Docker's eth0 already has an address, and aember keeps any
   existing address instead of running DHCP (general rule, also for `ip=`).
-- Screen: the WSLg X11 socket is bound to /tmp/.X11-unix and
-  `/etc/aember/lxc-extra.conf` (applied by ContainerManager to every
-  container) passes `DISPLAY`, `QT_QPA_PLATFORM=xcb` and software
-  rendering (no GPU in the container), so the Qt monitor opens as a window
-  ("Aember Monitor") on the Windows desktop. On a device the platform is
-  `linuxfb` (`lxc.environment` in its lxc.container.conf; the fb0/dri
-  binds are `optional`).
+- No display passthrough: containers get no X11 socket (the old Qt
+  monitor's xcb passthrough and `/etc/aember/lxc-extra.conf` are gone).
+  The aember-monitor container draws offscreen without /dev/fb0; its
+  `--screenshot` shows the frame.
 - WSL's kernel can't mount zstd SquashFS (`CONFIG_SQUASHFS_ZSTD` off): zstd
   container images are repacked once with xz into `build/chroot-cache/<arch>/`
   and bind-mounted over the originals inside the chroot.
@@ -496,8 +503,8 @@ and of its daemons is muted (`set_console_logging`, passed on to netd and
 containerd over ipc); the file logs keep everything
 (`/var/log/aember-init.log`, `aember-netd.log`, `aember-containerd.log`). In headless
 QEMU, type into the terminal (or pipe into `docker exec -i`). Headless keeps the virtual
-GPU (`-display none`, not `-vga none`): the `aember-monitor` container binds
-`/dev/dri` and `/dev/fb0` and fails without them. Serial logs go to
+GPU (`-display none`, not `-vga none`), so /dev/fb0 exists for the
+aember-monitor container (`linuxfb`). Serial logs go to
 `build/logging/<arch>/`.
 
 Debugging a container that fails `lxc start`: its LXC log is in the VM's

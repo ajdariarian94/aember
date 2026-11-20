@@ -29,13 +29,11 @@ Left:
 ## Running without QEMU
 
 Done (2026-11-17): `aember app launch --chroot` runs the packed system as
-PID 1 in a chroot on the host kernel (privileged helper container), with
-the Qt monitor on the WSLg desktop through X11. Left:
+PID 1 in a chroot on the host kernel (privileged helper container). The
+X11 passthrough for the old Qt monitor was removed (2026-11-20). Left:
 
 - [ ] aarch64/arm32 containers can't run in the chroot (qemu-user can't
   clone namespaces); only aember, services and network do.
-- [ ] The X11 window has no input checks yet (keyboard/mouse into the Qt
-  app untested).
 
 ## PID 1 robustness
 
@@ -172,8 +170,7 @@ BusyBox init / s6 / runit / dinit.
 - [x] **Container output** (2026-11-19): the init wrapper sends the app's
   output to the container console (it was LXC's `/dev/null`);
   aember-build-helper keeps it with `lxc.console.logfile`. The overlay's
-  own containers (aember-echo, aember-monitor) have no console log file
-  in their LXC config yet.
+  own aember-echo container has no console log file in its LXC config yet.
 
 ## AppImage
 
@@ -213,6 +210,18 @@ first:
 - [x] musl for every target (aember-resources v0.1.9-v0.1.12): x64,
   aarch64, arm32, riscv64; initramfs 24-35% smaller.
 - [ ] A CI job for the musl unit tests; the Pi SD image is glibc-only.
+
+## Status display (aember-stats + aember-monitor)
+
+- [x] Split from aember (2026-11-20): aember-stats (collector) and
+  aember-monitor (slim Qt 6 viewer) in their own repositories, talking over
+  `/run/aember-stats/stats.sock`; PID 1 writes `/var/log/aember-status.json`;
+  the old 162 MB Qt monitor, its console box and the X11 passthrough are
+  gone. x64 overlay: both containers, checked in QEMU (connect + samples).
+- [ ] Their images for the other seven targets once the Qt SDKs
+  (aember-resources v0.1.13) are released, and in aember's release tarball.
+- [ ] Monitor input (touch/keys) for pages: needs libinput/evdev in the
+  SDK's Qt (`PACKAGECONFIG:pn-qtbase`).
 
 ## Smaller cleanups / known issues
 

@@ -44,9 +44,7 @@ fi
 #    FUSE mount of another user): the helper and slirp4netns in a private
 #    temp dir, the payload by its offset in the AppImage file.
 W=$(mktemp -d "${TMPDIR:-/tmp}/aember-appimage.XXXXXX")
-GRANTED=""
 cleanup() {
-  [ -n "$GRANTED" ] && xhost -si:localuser:root >/dev/null 2>&1 || true
   rm -rf "$W"
 }
 trap cleanup EXIT
@@ -63,15 +61,8 @@ if [ -z "$OFFSET" ]; then
   IMAGE=""  # an unpacked AppDir: the helper uses it directly
 fi
 
-# 3. Containers draw on this display (the Qt monitor), if we may grant it.
-DISPLAY_NAME=${DISPLAY:-}
-if [ -n "$DISPLAY_NAME" ] && command -v xhost >/dev/null 2>&1; then
-  xhost +si:localuser:root >/dev/null 2>&1 && GRANTED=1 || true
-fi
-[ -n "$GRANTED" ] || DISPLAY_NAME=""
-
 echo "aember: starting the init system in its own namespaces (needs root)"
-set -- "$W/aember-sandbox" "$IMAGE" "$OFFSET" "$APPDIR" "$DISPLAY_NAME" "$W/slirp4netns"
+set -- "$W/aember-sandbox" "$IMAGE" "$OFFSET" "$APPDIR" "$W/slirp4netns"
 STATUS=0
 if [ "$(id -u)" -eq 0 ]; then
   "$@" || STATUS=$?

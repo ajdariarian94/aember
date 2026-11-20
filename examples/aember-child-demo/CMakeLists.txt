@@ -18,7 +18,6 @@ find_package(
   aember-libs
   REQUIRED
   COMPONENTS utils
-             device-health
 )
 
 set(CMAKE_EXE_LINKER_FLAGS
@@ -32,8 +31,7 @@ add_executable(
 
 target_link_libraries(
   ${PROJECT_NAME}
-  PRIVATE aember-libs::device-health
-          aember-libs::utils::logging
+  PRIVATE aember-libs::utils::logging
 )
 
 target_include_directories(

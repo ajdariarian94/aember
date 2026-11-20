@@ -87,11 +87,18 @@ class ScriptsTest(unittest.TestCase):
         self.assertIn("CONSOLE=$(tty", text)
         self.assertIn('"$CONSOLE" <&0 &', text)
 
-    def test_apprun_keeps_helper_outside_fuse_and_revokes_x(self):
+    def test_apprun_keeps_helper_outside_fuse(self):
         text = (FILES / "AppRun").read_text()
         self.assertIn("--appimage-offset", text)
-        self.assertIn("xhost -si:localuser:root", text)
         self.assertIn('rm -rf "$W"', text)
+
+    def test_containers_get_no_x11_display(self):
+        # The X11 passthrough was for the old Qt monitor container; the
+        # aember-monitor container draws on /dev/fb0 or offscreen.
+        for name in ("AppRun", "aember-sandbox"):
+            text = (FILES / name).read_text()
+            for gone in ("xhost", "lxc-extra.conf", "X11-unix", "xcb"):
+                self.assertNotIn(gone, text, f"{gone} in {name}")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ set(${COMPONENT}_${PROJECT_NAME}_VERSION
 add_library(
   ${COMPONENT}
   STATIC
-  src/aember-monitor.cpp
+  src/status.cpp
   src/heartbeat.cpp
 )
 

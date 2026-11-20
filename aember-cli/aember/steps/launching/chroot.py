@@ -1,7 +1,6 @@
 """
 Run the packed system without QEMU: aember as PID 1 in a chroot of the
-rootfs image, on the host kernel, with the containers drawing on the host's
-X server (WSLg).
+rootfs image, on the host kernel.
 
 A privileged helper container from the dev image (like the guestfish step)
 gives aember its own PID, mount, network, UTS and IPC namespaces. Inside it:
@@ -10,10 +9,8 @@ gives aember its own PID, mount, network, UTS and IPC namespaces. Inside it:
   can leave the ext4 journal needing replay, which a read-only mount can't
   do) with a tmpfs overlay on top, so a run never changes the image;
 - /proc, /sys, /dev (the helper's, so /dev/console is this terminal), /tmp
-  with the X11 socket and /run are prepared before aember starts; aember
-  skips mounts that already exist;
-- /etc/aember/lxc-extra.conf passes the display into every container
-  (ContainerManager applies it), /etc/resolv.conf comes from Docker;
+  and /run are prepared before aember starts; aember skips mounts that
+  already exist; /etc/resolv.conf comes from Docker;
 - `exec chroot <root> /usr/bin/aember --root --chroot`: aember is PID 1 and
   loads no kernel modules (they would go into the host kernel).
 
@@ -45,7 +42,6 @@ HOST_ARCH = "x64-poky-linux"
 # Run on the build host without qemu-user
 NATIVE_ARCHS = (HOST_ARCH, "x64-poky-linux-musl")
 CONTAINER_ROOT = "/aember_ws/aember"
-X11_HOST_DIR = "/tmp/.X11-unix"
 
 # binfmt_misc magic/mask for ELF executables (from QEMU's
 # scripts/qemu-binfmt-conf.sh), \\x-escaped as the register file expects.
@@ -75,18 +71,6 @@ _BINFMT = {
         r"\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff",
     ),
 }
-
-# Every container gets the host's X server (Qt via xcb).
-LXC_EXTRA_X11 = """\
-# Written by `aember app launch --chroot`: draw on the host's X server.
-lxc.mount.entry = /tmp/.X11-unix tmp/.X11-unix none bind,create=dir,optional 0 0
-lxc.environment = DISPLAY={display}
-lxc.environment = QT_QPA_PLATFORM=xcb
-# No GPU in the container: no GLX/EGL, software rendering (as on linuxfb).
-lxc.environment = QT_XCB_GL_INTEGRATION=none
-lxc.environment = QT_QUICK_BACKEND=software
-lxc.environment = LIBGL_ALWAYS_SOFTWARE=1
-"""
 
 
 def first_partition_offset(image: Path) -> int:
@@ -151,11 +135,8 @@ done
 """
 
 
-def helper_script(
-    image: str, offset: int, architecture: str, display: str, cache_dir: str
-) -> str:
+def helper_script(image: str, offset: int, architecture: str, cache_dir: str) -> str:
     """Runs as root in the helper container and ends as aember (PID 1)."""
-    extra = LXC_EXTRA_X11.format(display=display)
     return f"""set -eu
 {binfmt_script(architecture)}
 R=/aember/root; L=/aember/lower; U=/aember/rw
@@ -173,16 +154,6 @@ mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs $R/tmp
 mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs $R/run
 cp /etc/resolv.conf $R/etc/resolv.conf
 {squashfs_script(cache_dir)}
-
-if [ -S /x11/X0 ] || [ -n "$(ls -A /x11 2>/dev/null)" ]; then
-  mkdir -p $R/tmp/.X11-unix
-  mount --bind /x11 $R/tmp/.X11-unix
-  cat > $R/etc/aember/lxc-extra.conf <<'EOF'
-{extra}EOF
-  echo "aember: X11 display {display} passed to the containers"
-else
-  echo "aember: no X11 socket, containers run without a display"
-fi
 
 exec chroot $R /usr/bin/aember --root --chroot
 """
@@ -204,7 +175,6 @@ class ChrootLaunchStep(Step):
             )
         offset = first_partition_offset(image)
         image_in_helper = f"{CONTAINER_ROOT}/{image.relative_to(ctx.root)}"
-        display = os.environ.get("DISPLAY", ":0")
         name = f"aember-chroot-{ctx.architecture}-{os.getpid()}"
 
         log_dir = ctx.root / "build" / "logging" / ctx.architecture
@@ -228,8 +198,6 @@ class ChrootLaunchStep(Step):
             *(["-t"] if interactive else []),
             "-v",
             f"{HOST_ROOT_PATH}:{CONTAINER_ROOT}",
-            "-v",
-            f"{X11_HOST_DIR}:/x11",
             get_running_container_image(),
             "bash",
             "-c",
@@ -237,7 +205,6 @@ class ChrootLaunchStep(Step):
                 image_in_helper,
                 offset,
                 ctx.architecture,
-                display,
                 f"{CONTAINER_ROOT}/build/chroot-cache/{ctx.architecture}",
             ),
         ]
