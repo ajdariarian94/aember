@@ -559,6 +559,7 @@ same image, `.github/workflows/ci.yml`).
 |---|---|
 | `aember test [--build] [--root]` | CLI tests + every C++ suite (x64 Debug); `--root` runs them through `sudo -n` so the root-only tests (mounts, loop devices, namespaces, the full root switch) run too |
 | `aember test --coverage [--root]` | builds the `Debug-coverage` variant, runs, reports per library/service: `build/coverage/index.html`, `components.json` (gcovr with the SDK's gcov; template instantiations merged per line) |
+| `aember test --arch x64-poky-linux-musl` | the unit tests of the musl variant (aember-resources v0.1.9+), run natively through the SDK's `ld-musl`; no `--coverage`/`--sanitize` there |
 | `aember test --sanitize asan\|tsan [--root]` | `Debug-asan` (Address + Leak + UndefinedBehavior) or `Debug-tsan` variant; the first report fails the suite (`SANITIZER_ENV`). Needs aember-resources v0.1.8+ (the SDK's gcc-sanitizers). `tools/sanitizers/lsan.supp` (via `LSAN_OPTIONS`) hides only the dynamic loader's own allocations |
 | `aember test --valgrind` | every suite under memcheck (errors and definite leaks fail; `tools/valgrind/aember.supp`) |
 | `aember analyze [--update-baseline]` | clang-tidy (`.clang-tidy`) and cppcheck over the Debug compile database; findings beyond `tools/analysis/*-baseline.txt` fail |

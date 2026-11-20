@@ -13,7 +13,7 @@ from aember.steps.cmake.configure import ConfigureStep
 from aember.steps.resources.fetch_resources import FetchResources
 from aember.steps.testing.coverage import CoverageReport, ResetCoverage
 from aember.steps.testing.run_cli_tests import RunCliTests
-from aember.steps.testing.run_tests import RunTests
+from aember.steps.testing.run_tests import NATIVE_TEST_ARCHS, RunTests
 
 
 class Sanitizer(str, Enum):
@@ -50,6 +50,13 @@ def test(
         "--root",
         help="Run the suites as root (sudo), so root-only tests run too",
     ),
+    arch: Architecture = typer.Option(
+        Architecture.x64_linux.value,
+        "--arch",
+        "-a",
+        help="x64-poky-linux, or x64-poky-linux-musl for the musl variant "
+        "(both run on the build host)",
+    ),
     build: bool = typer.Option(
         None,
         "--build/--no-build",
@@ -69,9 +76,14 @@ def test(
     if valgrind and sanitize:
         raise typer.BadParameter("valgrind can't run sanitizer builds")
     instrument = "coverage" if coverage else (sanitize.value if sanitize else None)
+    if arch.value not in NATIVE_TEST_ARCHS:
+        raise typer.BadParameter(f"--arch must be one of {NATIVE_TEST_ARCHS}")
+    if arch.value != Architecture.x64_linux.value and instrument:
+        # GCC's sanitizers don't support musl; coverage stays on glibc.
+        raise typer.BadParameter("--coverage and --sanitize are x64-poky-linux only")
 
     ctx = Context(
-        architecture=Architecture.x64_linux.value,
+        architecture=arch.value,
         build_type=BuildType.debug.value,
         build_tests=True,
         instrument=instrument,

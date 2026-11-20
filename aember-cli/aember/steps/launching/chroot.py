@@ -42,6 +42,8 @@ from aember.steps.packaging.docker import get_running_container_image
 log = logging.getLogger("aember.launch.chroot")
 
 HOST_ARCH = "x64-poky-linux"
+# Run on the build host without qemu-user
+NATIVE_ARCHS = (HOST_ARCH, "x64-poky-linux-musl")
 CONTAINER_ROOT = "/aember_ws/aember"
 X11_HOST_DIR = "/tmp/.X11-unix"
 
@@ -89,7 +91,7 @@ def first_partition_offset(image: Path) -> int:
 
 def binfmt_script(architecture: str) -> str:
     """Shell snippet registering qemu-user for a foreign architecture."""
-    if architecture == HOST_ARCH:
+    if architecture in NATIVE_ARCHS:
         return ""
     if architecture not in _BINFMT:
         raise RuntimeError(f"No binfmt magic known for {architecture}")
@@ -181,7 +183,7 @@ class ChrootLaunchStep(Step):
         if not image.exists():
             raise FileNotFoundError(f"{image} not found; run `aember app pack` first.")
 
-        if ctx.architecture != HOST_ARCH:
+        if ctx.architecture not in NATIVE_ARCHS:
             log.warning(
                 "%s runs through qemu-user: aember, its services and the "
                 "network work, LXC containers don't (qemu-user can't create "

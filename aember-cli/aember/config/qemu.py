@@ -1,6 +1,7 @@
 # Maps build system architecture → qemu-user-static binary for cross-execution
 QEMU_RUNNER_MAP: dict[str, list[str]] = {
     "x64-poky-linux": [],  # native — no qemu needed
+    "x64-poky-linux-musl": [],
     "aarch64-poky-linux": ["qemu-aarch64-static"],
     "arm-poky-linux": ["qemu-arm-static"],
     "riscv64-poky-linux": ["qemu-riscv64-static"],
