@@ -88,6 +88,23 @@ class FilesTest(unittest.TestCase):
             self.assertEqual(src.read_text(), "original")
             self.assertFalse((Path(t) / "a.cpp.mutate-backup").exists())
 
+    def test_regression_restored_file_is_newer_than_the_mutant(self):
+        import os
+        import time
+
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "a.cpp"
+            src.write_text("original")
+            backup = Path(t) / ("a.cpp" + mutate.BACKUP_SUFFIX)
+            backup.write_text("original")
+            old = time.time() - 100
+            os.utime(backup, (old, old))
+            src.write_text("mutant")  # compiled now
+            mutant_mtime = src.stat().st_mtime
+            mutate.restore(backup, src)
+            self.assertEqual(src.read_text(), "original")
+            self.assertGreaterEqual(src.stat().st_mtime, mutant_mtime)
+
     def test_suite_sources_and_build_dir(self):
         with tempfile.TemporaryDirectory() as t:
             root = Path(t)

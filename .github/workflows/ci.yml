@@ -81,6 +81,13 @@ jobs:
         env:
           AEMBER_CI_CACHE: ${{ runner.temp }}/cache
         run: tools/ci/run.sh aember analyze --no-build
+      - name: Output of failed suites
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: test-logs-${{ github.job }}
+          path: build/test-logs/
+          if-no-files-found: ignore
       - name: Give the cache back to the runner
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cache"
@@ -111,6 +118,13 @@ jobs:
         env:
           AEMBER_CI_CACHE: ${{ runner.temp }}/cache
         run: tools/ci/run.sh aember test --coverage --root --no-cli
+      - name: Output of failed suites
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: test-logs-${{ github.job }}
+          path: build/test-logs/
+          if-no-files-found: ignore
       - name: Summary
         if: always()
         run: |
@@ -152,3 +166,10 @@ jobs:
         env:
           AEMBER_CI_CACHE: ${{ runner.temp }}/cache
         run: tools/ci/run.sh aember test --build --valgrind --no-cli
+      - name: Output of failed suites
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: test-logs-${{ github.job }}
+          path: build/test-logs/
+          if-no-files-found: ignore
