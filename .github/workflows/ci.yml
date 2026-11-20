@@ -44,6 +44,8 @@ jobs:
         run: tools/ci/free-disk.sh
       - name: Pull the dev image
         run: docker pull "$AEMBER_DEV_IMAGE"
+      - name: Hand the workspace to the image's user
+        run: sudo chown -R 1000:1000 "$GITHUB_WORKSPACE"
       - name: Lint (ruff, black, clang-format, cmake-format, cmakelint)
         run: tools/ci/run.sh aember lint --check
       - name: CLI tests
