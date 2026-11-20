@@ -220,5 +220,12 @@ BusyBox init / s6 / runit / dinit.
 - [ ] `pid1::Finish` has no test: remounting / read-only and reboot(2)
   can't run safely outside a VM. A QEMU system test (`kill -USR2 1`) covers
   it; make that part of a scripted system-test suite.
-- [ ] Remaining clang-tidy/cppcheck baseline (tools/analysis/): fix and
-  shrink it.
+- [x] clang-tidy at 0 findings (strerror -> system_category().message(),
+  NOLINT only where one thread runs); cppcheck keeps 10 style findings
+  (raw loops, the deliberate local mutex for stop-token waits) in its
+  baseline.
+- [ ] Mutation testing for every library (`aember mutate -k <suite>`):
+  process-manager 76% -> 84% (its 4 survivors are equivalent mutants:
+  same behaviour by another path); the rest is still to run. Each run
+  rebuilds per mutant: run them when the machine is idle (an SDK build
+  next to it ran out of memory once).

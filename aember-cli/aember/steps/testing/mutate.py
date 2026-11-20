@@ -22,6 +22,7 @@ write tests for. Slow by nature: --max limits the mutants per run.
 
 import json
 import logging
+import os
 import random
 import re
 import shutil
@@ -146,13 +147,21 @@ def score(results: list[Result]) -> float | None:
     return round(100.0 * killed / len(results), 1)
 
 
+def restore(backup: Path, path: Path) -> None:
+    """Put the original back with a new mtime. shutil.move keeps the
+    backup's (older) mtime, and make then kept the object compiled from the
+    last mutant: a mutant stayed in the normal build."""
+    shutil.move(backup, path)
+    os.utime(path)
+
+
 def restore_backups(paths: list[Path]) -> None:
     """Put back originals a killed earlier run left behind."""
     for path in paths:
         backup = path.with_name(path.name + BACKUP_SUFFIX)
         if backup.exists():
             log.warning("Restoring %s from an interrupted run", path)
-            shutil.move(backup, path)
+            restore(backup, path)
 
 
 def suite_sources(root: Path, suite: str) -> list[Path]:
@@ -265,7 +274,7 @@ class MutateStep(Step):
                 else:
                     status = self._run_suite(root, binary)
             finally:
-                shutil.move(backup, path)
+                restore(backup, path)
             results.append(Result(mutant, status))
             log.info(
                 "[%d/%d] %-11s %s:%d %s",

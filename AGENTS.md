@@ -560,6 +560,7 @@ same image, `.github/workflows/ci.yml`).
 | `aember test --valgrind` | every suite under memcheck (errors and definite leaks fail; `tools/valgrind/aember.supp`) |
 | `aember analyze [--update-baseline]` | clang-tidy (`.clang-tidy`) and cppcheck over the Debug compile database; findings beyond `tools/analysis/*-baseline.txt` fail |
 | `aember mutate -k <suite> [-n N]` | mutation testing: one operator at a time changed in the library's sources, its suite rebuilt and run; survivors = lines no test checks (`build/mutation/<suite>.json`) |
+
 | `aember lint [--check]` | ruff, black, clang-format, cmake-format, cmakelint; `--check` changes nothing and fails on anything to fix (CI) |
 
 - **Variants** (`Context.instrument`, `tools/toolchains/instrument.cmake`,
@@ -604,6 +605,18 @@ same image, `.github/workflows/ci.yml`).
   `/usr/bin/aember`; `AEMBER_TEST_BUSYBOX` comes from `aember test`).
 - **Regression tests** carry a comment starting `Regression:` saying which
   bug they pin down.
+- **Mutation testing** edits the real sources one mutant at a time (a
+  `.mutate-backup` next to the file; a killed run is repaired by the next
+  one, or by moving the backup back). Restoring touches the file, or make
+  keeps the last mutant's object in the normal build. Tests must never
+  write to relative paths: a mutated chdir then drops files in the repo.
+  Some survivors are equivalent mutants (same behaviour another way):
+  judge each one, don't chase 100%.
+- **valgrind**: forked children that `_exit` leave their heap behind, so
+  only the test process's own leaks count; a signal sent between fork and
+  exec can get lost under valgrind (tests wait for the exec first,
+  `WaitForExec`). A failing suite's whole output is in `build/test-logs/`
+  (CI uploads it as an artifact).
 - **nlohmann::json pitfall**: a one-element braced list becomes that
   element, not an array (`{x}` → `x`). Build arrays with
   `nlohmann::json::array(...)` or from a `std::vector`.

@@ -46,6 +46,20 @@ bool Alive(pid_t pid) {
   return kill(pid, 0) == 0;
 }
 
+/// Wait until @p pid runs @p program (its exec happened). A signal sent in
+/// the window between fork and exec can get lost under valgrind, which then
+/// runs its own code in the child.
+bool WaitForExec(pid_t pid, const std::string& program) {
+  for (int i = 0; i < 200; ++i) {
+    std::ifstream comm{"/proc/" + std::to_string(pid) + "/comm"};
+    std::string name;
+    std::getline(comm, name);
+    if (name == program) return true;
+    std::this_thread::sleep_for(10ms);
+  }
+  return false;
+}
+
 // No reaper running: Stop() collects the child itself and still updates
 // the bookkeeping through HandleExit.
 TEST(ProcessManagerTest, StopWithoutReaper) {
@@ -87,6 +101,7 @@ TEST(ProcessManagerTest, StopWithReaperReturnsPromptly) {
   const auto pid = pm.Start("sleeper");
   ASSERT_TRUE(pid.has_value());
   supervisor.AddChild(*pid, "sleeper");
+  ASSERT_TRUE(WaitForExec(*pid, "sleep"));
 
   const auto t0 = std::chrono::steady_clock::now();
   EXPECT_TRUE(pm.Stop("sleeper"));
@@ -254,8 +269,10 @@ TEST(ProcessManagerLifecycleTest, ArgsEnvironmentAndWorkingDirectory) {
   ProcessManager::ProcessConfig cfg;
   cfg.name = "env";
   cfg.executable = "/bin/sh";
-  cfg.args = {"-c", "echo \"$GREETING $1 $(pwd)\" > out", "sh", "arg1"};
-  cfg.environment = {{"GREETING", "hello"}};
+  // An absolute output path: a broken chdir (e.g. under `aember mutate`)
+  // must fail the check, not drop a file wherever the test runs.
+  cfg.args = {"-c", "echo \"$GREETING $1 $(pwd)\" > \"$OUT\"", "sh", "arg1"};
+  cfg.environment = {{"GREETING", "hello"}, {"OUT", (dir / "out").string()}};
   cfg.working_directory = dir.string();
   ASSERT_TRUE(pm.AddProcess(cfg));
   const auto pid = pm.Start("env");
@@ -349,6 +366,67 @@ TEST(ProcessManagerRestartTest, GivesUpAfterMaxRestarts) {
   EXPECT_EQ(pm.GetState("flaky"), State::Failed);
   std::this_thread::sleep_for(200ms);
   EXPECT_EQ(restarts.load(), 2);
+}
+
+// Found by `aember mutate`: nothing checked how the exit status is recorded.
+// Any unrequested exit restarts (restart_on_failure: "on unexpected exit"),
+// so the status shows in the state without restarts: exit 0 is Stopped,
+// anything else Failed.
+TEST(ProcessManagerRestartTest, ExitStatusDecidesStoppedOrFailed) {
+  for (const auto& [code, expected] :
+       {std::pair{0, State::Stopped}, std::pair{3, State::Failed}}) {
+    ProcessManager pm;
+    auto cfg = SleepConfig("exiting");  // restart_on_failure false
+    cfg.executable = "/bin/sh";
+    cfg.args = {"-c", "exit " + std::to_string(code)};
+    ASSERT_TRUE(pm.AddProcess(cfg));
+    const auto pid = pm.Start("exiting");
+    ASSERT_TRUE(pid);
+    int status = 0;
+    ASSERT_EQ(::waitpid(*pid, &status, 0), *pid);
+    ASSERT_TRUE(pm.HandleExit(*pid, status));
+    EXPECT_EQ(pm.GetState("exiting"), expected) << "exit " << code;
+  }
+}
+
+TEST(ProcessManagerRestartTest, EveryUnrequestedExitIsRestarted) {
+  for (const int code : {0, 3}) {
+    ProcessManager pm;
+    std::atomic<int> restarts{0};
+    pm.SetRestartCallback([&](const std::string&) { ++restarts; });
+    auto cfg = SleepConfig("exiting");
+    cfg.executable = "/bin/sh";
+    cfg.args = {"-c", "exit " + std::to_string(code)};
+    cfg.restart_on_failure = true;
+    cfg.restart_delay = 10ms;
+    ASSERT_TRUE(pm.AddProcess(cfg));
+    const auto pid = pm.Start("exiting");
+    ASSERT_TRUE(pid);
+    int status = 0;
+    ASSERT_EQ(::waitpid(*pid, &status, 0), *pid);
+    ASSERT_TRUE(pm.HandleExit(*pid, status));
+    for (int i = 0; i < 20 && restarts.load() == 0; ++i) {
+      std::this_thread::sleep_for(20ms);
+    }
+    EXPECT_EQ(restarts.load(), 1) << "exit " << code;
+  }
+}
+
+// Found by `aember mutate`: nothing checked that a restart waits for its
+// restart_delay.
+TEST(ProcessManagerRestartTest, RestartWaitsForItsDelay) {
+  ProcessManager pm;
+  std::atomic<bool> restarted{false};
+  pm.SetRestartCallback([&](const std::string&) { restarted = true; });
+  auto cfg = SleepConfig("delayed");
+  cfg.restart_on_failure = true;
+  cfg.restart_delay = 600ms;
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  pm.ScheduleRestart("delayed");
+  std::this_thread::sleep_for(300ms);
+  EXPECT_FALSE(restarted.load()) << "restarted before its delay";
+  for (int i = 0; i < 40 && !restarted; ++i) std::this_thread::sleep_for(50ms);
+  EXPECT_TRUE(restarted.load());
 }
 
 }  // namespace
