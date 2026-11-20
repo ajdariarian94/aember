@@ -203,15 +203,18 @@ first:
   `--gc-sections`) against the shared 2.5 MB for aember's few binaries.
 - [ ] Kernel modules and firmware: drop what an image ships but never
   loads (per-target `modules.json` audit).
-- [ ] **musl as an opt-in extra, not a replacement**: `-musl` targets
-  (e.g. `x64-poky-linux-musl`) next to the glibc ones, for developers who
-  need the last MBs (~2.5 MB on x64, ~0.8 MB on arm32: one ~0.7 MB
-  `libc.so` instead of libc + libm + loader). glibc stays the default
-  with the full tooling: ASan/TSan/LSan don't support musl and valgrind
-  only partly. aember needs explicit thread stack sizes there (musl's
-  default is 128 KB: hub, reaper, watchdog threads). Needs the musl SDKs
-  from aember-resources first; CI/tests for the variant too.
+- [x] **musl as an opt-in extra, not a replacement** (2026-11-20):
+  `x64-poky-linux-musl` (aember-resources v0.1.9) next to the glibc
+  targets. initramfs 4.32 -> 2.80 MB compressed (-35%: one libc.so instead
+  of libc + libm + loader, and a 1.2 MB static BusyBox). glibc stays the
+  default with the full tooling (no ASan/TSan on musl). Threads get 1 MB
+  stacks (`-Wl,-z,stack-size`, musl's default is 128 KB). Unit tests run
+  with `aember test --arch x64-poky-linux-musl`.
+- [ ] musl for aarch64/arm32/riscv64 when someone needs it (an
+  aember-resources build each, then the same toolchain/triplet/overlay
+  here), and a CI job for the musl tests.
 
+## Smaller cleanups / known issues
 
 - [x] `aember qemu build` cleans only with `--with-tests` (the condition
   was always true, 2026-11-18).

@@ -31,6 +31,9 @@ from aember.core.step import Step
 log = logging.getLogger("aember.test")
 
 TEST_ARCH = "x64-poky-linux"
+# Architectures whose test binaries run on the x86-64 build host directly
+# (through the SDK's loader): glibc, and musl's opt-in variant.
+NATIVE_TEST_ARCHS = ("x64-poky-linux", "x64-poky-linux-musl")
 TEST_BUILD_TYPE = "Debug"
 _PASSED = re.compile(r"^\[  PASSED  \] (\d+) test", re.MULTILINE)
 _FAILED = re.compile(r"^\[  FAILED  \] (\S+\.\S+)", re.MULTILINE)
@@ -76,11 +79,11 @@ def valgrind_leaked(output: str) -> int:
     )
 
 
-def test_env(root: Path) -> dict[str, str]:
+def test_env(root: Path, arch: str = TEST_ARCH) -> dict[str, str]:
     """What the tests may use besides the system: the static BusyBox from
     aember-resources (root-manager's pivot test execs it in a new root)."""
     return {
-        "AEMBER_TEST_BUSYBOX": str(busybox_dir(root, TEST_ARCH) / "busybox"),
+        "AEMBER_TEST_BUSYBOX": str(busybox_dir(root, arch) / "busybox"),
         # The dynamic loader's own allocations (tools/sanitizers/lsan.supp)
         "LSAN_OPTIONS": "suppressions="
         + str(root / "tools" / "sanitizers" / "lsan.supp")
@@ -88,8 +91,10 @@ def test_env(root: Path) -> dict[str, str]:
     }
 
 
-def tests_dir(root: Path, variant: str = TEST_BUILD_TYPE) -> Path:
-    return root / "build" / "install" / TEST_ARCH / variant / "bin" / "tests"
+def tests_dir(
+    root: Path, variant: str = TEST_BUILD_TYPE, arch: str = TEST_ARCH
+) -> Path:
+    return root / "build" / "install" / arch / variant / "bin" / "tests"
 
 
 @dataclass
@@ -123,15 +128,16 @@ class RunTests(Step):
         self.allow_empty = allow_empty
         self.no_aslr = False  # set from ctx.instrument in run()
 
-    def _command(self, root: Path, binary: Path) -> list[str]:
-        sysroot = sdk_dir(root, TEST_ARCH) / "sysroots" / SDK_SYSROOT_MAP[TEST_ARCH]
-        loader = sysroot / "lib" / ARCH_CONFIG[TEST_ARCH]["loader_name"]
+    def _command(self, root: Path, binary: Path, arch: str = TEST_ARCH) -> list[str]:
+        sysroot = sdk_dir(root, arch) / "sysroots" / SDK_SYSROOT_MAP[arch]
+        # glibc's ld.so and musl's ld-musl both take --library-path.
+        loader = sysroot / "lib" / ARCH_CONFIG[arch]["loader_name"]
         lib_path = ":".join(
             str(p)
             for p in (
                 sysroot / "lib",
                 sysroot / "usr" / "lib",
-                lxc_dir(root, TEST_ARCH) / "libs",
+                lxc_dir(root, arch) / "libs",
             )
         )
         if not loader.exists():
@@ -149,22 +155,22 @@ class RunTests(Step):
             cmd = VALGRIND + [f"--suppressions={supp}"] + cmd
         if self.as_root:
             # sudo resets the environment: pass the sanitizer options on.
-            env = {**SANITIZER_ENV, **test_env(root)}
+            env = {**SANITIZER_ENV, **test_env(root, arch)}
             cmd = ["sudo", "-n", "env"] + [f"{k}={v}" for k, v in env.items()] + cmd
         return cmd
 
-    def _env(self, root: Path) -> dict[str, str]:
-        return {**os.environ, **SANITIZER_ENV, **test_env(root)}
+    def _env(self, root: Path, arch: str = TEST_ARCH) -> dict[str, str]:
+        return {**os.environ, **SANITIZER_ENV, **test_env(root, arch)}
 
-    def _run_one(self, root: Path, binary: Path) -> SuiteResult:
+    def _run_one(self, root: Path, binary: Path, arch: str = TEST_ARCH) -> SuiteResult:
         try:
             res = subprocess.run(
-                self._command(root, binary),
+                self._command(root, binary, arch),
                 capture_output=True,
                 text=True,
                 errors="replace",  # test output can be any bytes
                 timeout=self.timeout * (10 if self.valgrind else 1),
-                env=self._env(root),
+                env=self._env(root, arch),
             )
             out, rc = res.stdout + res.stderr, res.returncode
         except subprocess.TimeoutExpired:
@@ -194,7 +200,13 @@ class RunTests(Step):
     def run(self, ctx: Context) -> None:
         variant = ctx.variant if ctx.build_type else TEST_BUILD_TYPE
         self.no_aslr = ctx.instrument == "tsan"
-        directory = tests_dir(ctx.root, variant)
+        arch = ctx.architecture or TEST_ARCH
+        if arch not in NATIVE_TEST_ARCHS:
+            raise ValueError(
+                f"Unit tests run on the build host only for {NATIVE_TEST_ARCHS}, "
+                f"not {arch}"
+            )
+        directory = tests_dir(ctx.root, variant, arch)
         binaries = sorted(p for p in directory.glob("*-unittest") if p.is_file())
         if self.filter:
             binaries = [b for b in binaries if self.filter in b.name]
@@ -211,7 +223,7 @@ class RunTests(Step):
         for round_ in range(1, self.repeat + 1):
             total = 0
             for binary in binaries:
-                r = self._run_one(ctx.root, binary)
+                r = self._run_one(ctx.root, binary, arch)
                 total += r.passed
                 status = (
                     "ok"
@@ -238,7 +250,7 @@ class RunTests(Step):
         if self.as_root:
             # Root wrote coverage counters (.gcda) into the build tree: give
             # them back, or the next run as dev can't update them.
-            build = ctx.root / "build" / "configure" / TEST_ARCH / variant
+            build = ctx.root / "build" / "configure" / arch / variant
             if build.exists():
                 subprocess.run(
                     ["sudo", "-n", "chown", "-R", f"{os.getuid()}:{os.getgid()}"]

@@ -25,6 +25,30 @@
 
 namespace aember::utils::watchdog {
 
+namespace {
+
+/// ioctl's request parameter type: glibc declares ioctl(int, unsigned long,
+/// ...), musl ioctl(int, int, ...).
+template <typename>
+struct IoctlRequestOf;
+template <typename R, typename Fd, typename Request>
+struct IoctlRequestOf<R(Fd, Request, ...)> {
+  using type = Request;
+};
+template <typename R, typename Fd, typename Request>
+struct IoctlRequestOf<R(Fd, Request, ...) noexcept> {
+  using type = Request;
+};
+using IoctlRequest = IoctlRequestOf<decltype(::ioctl)>::type;
+
+/// The watchdog requests have the direction bits set (> INT_MAX): convert
+/// them explicitly, keeping the same 32 bits, for a libc that takes an int.
+constexpr IoctlRequest Request(unsigned long request) {
+  return static_cast<IoctlRequest>(request);
+}
+
+}  // namespace
+
 std::optional<Options> OptionsFromCmdline(const std::string& path) {
   Options options;
   std::ifstream file{path};
@@ -62,15 +86,15 @@ std::unique_ptr<Watchdog> Watchdog::Open(const Options& options) {
   }
   // Opening armed it. Ask for our timeout; keep the driver's if it refuses.
   int timeout = static_cast<int>(options.timeout.count());
-  if (::ioctl(fd, WDIOC_SETTIMEOUT, &timeout) != 0) {
+  if (::ioctl(fd, Request(WDIOC_SETTIMEOUT), &timeout) != 0) {
     timeout = 0;
-    if (::ioctl(fd, WDIOC_GETTIMEOUT, &timeout) != 0 || timeout <= 0) {
+    if (::ioctl(fd, Request(WDIOC_GETTIMEOUT), &timeout) != 0 || timeout <= 0) {
       timeout = static_cast<int>(options.timeout.count());
     }
   }
   watchdog_info info{};
   std::string identity;
-  if (::ioctl(fd, WDIOC_GETSUPPORT, &info) == 0) {
+  if (::ioctl(fd, Request(WDIOC_GETSUPPORT), &info) == 0) {
     const auto* id = reinterpret_cast<const char*>(info.identity);
     identity = " (" + std::string{id, strnlen(id, sizeof(info.identity))} + ")";
   }

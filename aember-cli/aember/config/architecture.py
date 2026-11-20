@@ -6,3 +6,4 @@ class Architecture(str, Enum):
     arm_linux = "arm-poky-linux"
     x64_linux = "x64-poky-linux"
     riscv64_linux = "riscv64-poky-linux"
+    x64_linux_musl = "x64-poky-linux-musl"

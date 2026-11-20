@@ -83,6 +83,15 @@ QEMU_PROFILES: dict[str, QemuProfile] = {
         root="root=/dev/sda1",
         display=("-vga", "virtio", "-display", "gtk"),
     ),
+    "x64-poky-linux-musl": QemuProfile(
+        binary="qemu-system-x86_64",
+        machine=None,
+        cpu="max",
+        drive="if=ide,format=raw",
+        console="console=ttyS0",
+        root="root=/dev/sda1",
+        display=("-vga", "virtio", "-display", "gtk"),
+    ),
     "aarch64-poky-linux": QemuProfile(
         binary="qemu-system-aarch64",
         machine="virt",
@@ -119,6 +128,10 @@ QEMU_PROFILES: dict[str, QemuProfile] = {
 # Maps architecture → GDB binary and extra setup commands
 GDB_PROFILES: dict[str, dict] = {
     "x64-poky-linux": {
+        "binary": "gdb",
+        "setup": [],
+    },
+    "x64-poky-linux-musl": {
         "binary": "gdb",
         "setup": [],
     },

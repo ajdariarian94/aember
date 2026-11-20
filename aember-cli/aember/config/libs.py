@@ -22,6 +22,10 @@ ARCH_CONFIG = {
     "riscv64-poky-linux": {
         "loader_name": "ld-linux-riscv64-lp64d.so.1",
     },
+    # musl: the loader is libc itself (/lib/ld-musl-x86_64.so.1 -> libc.so)
+    "x64-poky-linux-musl": {
+        "loader_name": "ld-musl-x86_64.so.1",
+    },
 }
 
 # Libraries a service loads with dlopen (so not in its NEEDED), packed
@@ -33,6 +37,7 @@ SERVICE_DLOPEN_LIBS: Dict[str, List[str]] = {
 # Modules always packed on all architectures
 BASE_MODULES: Dict[str, List[str]] = {
     "x64-poky-linux": ["llc", "stp", "bridge", "veth", "br_netfilter"],
+    "x64-poky-linux-musl": ["llc", "stp", "bridge", "veth", "br_netfilter"],
     "aarch64-poky-linux": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
     "arm-poky-linux": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
     "riscv64-poky-linux": ["llc", "stp", "ipv6", "bridge", "veth", "br_netfilter"],
@@ -41,6 +46,7 @@ BASE_MODULES: Dict[str, List[str]] = {
 # Debug-only modules
 DEBUG_ONLY_MODULES: Dict[str, List[str]] = {
     "x64-poky-linux": ["netconsole"],
+    "x64-poky-linux-musl": ["netconsole"],
     "aarch64-poky-linux": [],
     "arm-poky-linux": [],
     "riscv64-poky-linux": [],
