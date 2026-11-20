@@ -144,6 +144,16 @@ QEMU_PROFILES: dict[str, QemuProfile] = {
         root="root=/dev/vda1",
         display=("-device", "virtio-gpu-pci", "-display", "gtk"),
     ),
+    "riscv64-poky-linux-musl": QemuProfile(
+        binary="qemu-system-riscv64",
+        # virt loads its built-in OpenSBI firmware (-bios default)
+        machine="virt",
+        cpu="rv64",  # RV64GC, like the SDK
+        drive="if=virtio,format=raw",
+        console="console=tty0 console=ttyS0,115200",
+        root="root=/dev/vda1",
+        display=("-device", "virtio-gpu-pci", "-display", "gtk"),
+    ),
 }
 
 # Maps architecture → GDB binary and extra setup commands
@@ -175,6 +185,10 @@ GDB_PROFILES: dict[str, dict] = {
     "arm-poky-linux-musl": {
         "binary": "gdb-multiarch",
         "setup": ["-ex", "set architecture arm"],
+    },
+    "riscv64-poky-linux-musl": {
+        "binary": "gdb-multiarch",
+        "setup": ["-ex", "set architecture riscv:rv64"],
     },
 }
 

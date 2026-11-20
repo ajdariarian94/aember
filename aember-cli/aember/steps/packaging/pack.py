@@ -25,6 +25,7 @@ KERNEL_IMAGE_NAMES: dict[str, str] = {
     "x64-poky-linux-musl": "bzImage",
     "aarch64-poky-linux-musl": "Image",
     "arm-poky-linux-musl": "zImage",
+    "riscv64-poky-linux-musl": "Image",
 }
 
 

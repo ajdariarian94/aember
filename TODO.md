@@ -210,10 +210,9 @@ first:
   default with the full tooling (no ASan/TSan on musl). Threads get 1 MB
   stacks (`-Wl,-z,stack-size`, musl's default is 128 KB). Unit tests run
   with `aember test --arch x64-poky-linux-musl`.
-- [ ] musl for riscv64 (aarch64: v0.1.10, arm32: v0.1.11 done;
-  the Pi SD image is still glibc-only) (an
-  aember-resources build each, then the same toolchain/triplet/overlay
-  here), and a CI job for the musl tests.
+- [x] musl for every target (aember-resources v0.1.9-v0.1.12): x64,
+  aarch64, arm32, riscv64; initramfs 24-35% smaller.
+- [ ] A CI job for the musl unit tests; the Pi SD image is glibc-only.
 
 ## Smaller cleanups / known issues
 

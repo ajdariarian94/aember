@@ -7,6 +7,7 @@ QEMU_RUNNER_MAP: dict[str, list[str]] = {
     "riscv64-poky-linux": ["qemu-riscv64-static"],
     "aarch64-poky-linux-musl": ["qemu-aarch64-static"],
     "arm-poky-linux-musl": ["qemu-arm-static"],
+    "riscv64-poky-linux-musl": ["qemu-riscv64-static"],
 }
 
 # Maps build system architecture → LD_LIBRARY_PATH for qemu user-static
@@ -16,4 +17,5 @@ QEMU_LD_MAP: dict[str, str] = {
     "riscv64-poky-linux": "/usr/riscv64-linux-gnu/lib",
     "aarch64-poky-linux-musl": "/usr/aarch64-linux-gnu/lib",
     "arm-poky-linux-musl": "/usr/arm-linux-gnueabihf/lib",
+    "riscv64-poky-linux-musl": "/usr/riscv64-linux-gnu/lib",
 }
