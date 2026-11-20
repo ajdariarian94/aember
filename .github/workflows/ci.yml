@@ -1,0 +1,152 @@
+# aember CI on GitHub's hosted runners (free for public repositories).
+#
+# Every job runs in the published dev image (ghcr.io/ajdariarian94/aember-dev)
+# through tools/ci/run.sh, with the repo at /aember_ws/aember like the dev
+# container, so CI runs exactly the commands developers run:
+#
+#   lint        aember lint, the CLI tests
+#   test        x64 Debug with tests as root, static analysis
+#   coverage    per-library coverage report (artifact + job summary)
+#   valgrind    every suite under memcheck (nightly and by hand)
+#
+# The image (~10 GB) and the SDK (~3.6 GB) need more disk than a runner has
+# free: the preinstalled toolchains aember doesn't use are removed first.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 2 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AEMBER_DEV_IMAGE: ghcr.io/ajdariarian94/aember-dev:latest
+  # A hosted runner has 4 cores and 16 GB.
+  AEMBER_BUILD_JOBS: "4"
+
+jobs:
+  lint:
+    name: Lint and CLI tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Free disk space
+        run: tools/ci/free-disk.sh
+      - name: Pull the dev image
+        run: docker pull "$AEMBER_DEV_IMAGE"
+      - name: Lint (ruff, black, clang-format, cmake-format, cmakelint)
+        run: tools/ci/run.sh aember lint --check
+      - name: CLI tests
+        run: tools/ci/run.sh aember test -k cli
+
+  test:
+    name: Unit tests (root) and static analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+      - name: Free disk space
+        run: tools/ci/free-disk.sh
+      - name: vcpkg binary cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ${{ runner.temp }}/cache/vcpkg
+          key: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-${{ github.sha }}
+          restore-keys: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-
+      - name: Pull the dev image
+        run: docker pull "$AEMBER_DEV_IMAGE"
+      - name: Hand the workspace to the image's user
+        run: |
+          mkdir -p "$RUNNER_TEMP/cache"
+          sudo chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP/cache"
+      - name: Build and run all tests as root
+        env:
+          AEMBER_CI_CACHE: ${{ runner.temp }}/cache
+        run: tools/ci/run.sh aember test --build --root
+      - name: Static analysis (clang-tidy, cppcheck)
+        env:
+          AEMBER_CI_CACHE: ${{ runner.temp }}/cache
+        run: tools/ci/run.sh aember analyze --no-build
+      - name: Give the cache back to the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cache"
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+      - name: Free disk space
+        run: tools/ci/free-disk.sh
+      - name: vcpkg binary cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ${{ runner.temp }}/cache/vcpkg
+          key: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-${{ github.sha }}
+          restore-keys: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-
+      - name: Pull the dev image
+        run: docker pull "$AEMBER_DEV_IMAGE"
+      - name: Hand the workspace to the image's user
+        run: |
+          mkdir -p "$RUNNER_TEMP/cache"
+          sudo chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP/cache"
+      - name: Coverage build and run as root
+        env:
+          AEMBER_CI_CACHE: ${{ runner.temp }}/cache
+        run: tools/ci/run.sh aember test --coverage --root --no-cli
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f build/ci-summary.md ]; then cat build/ci-summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: coverage
+          path: build/coverage/
+          if-no-files-found: ignore
+      - name: Give the cache back to the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cache"
+
+  valgrind:
+    name: Valgrind (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+      - name: Free disk space
+        run: tools/ci/free-disk.sh
+      - name: vcpkg binary cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ runner.temp }}/cache/vcpkg
+          key: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-${{ github.sha }}
+          restore-keys: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-
+      - name: Pull the dev image
+        run: docker pull "$AEMBER_DEV_IMAGE"
+      - name: Hand the workspace to the image's user
+        run: |
+          mkdir -p "$RUNNER_TEMP/cache"
+          sudo chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP/cache"
+      - name: All suites under valgrind memcheck
+        env:
+          AEMBER_CI_CACHE: ${{ runner.temp }}/cache
+        run: tools/ci/run.sh aember test --build --valgrind --no-cli
