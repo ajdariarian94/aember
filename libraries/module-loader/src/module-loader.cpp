@@ -17,6 +17,7 @@
 #include <fstream>
 #include <ranges>
 #include <sstream>
+#include <system_error>
 
 #include <fcntl.h>
 #include <sys/syscall.h>
@@ -98,8 +99,10 @@ ModuleLoader::Result<> ModuleLoader::Load(std::string_view name) {
   for (const auto& rel : order) {
     const int rc = LoadFile(modules_dir_ / rel);
     if (rc == 0 || rc == -EEXIST) { continue; }
-    const Error err{std::format("finit_module {}: {}", rel, strerror(-rc)),
-                    ModuleErrorCode::LoadFailed};
+    const Error err{
+        std::format(
+            "finit_module {}: {}", rel, std::system_category().message(-rc)),
+        ModuleErrorCode::LoadFailed};
     results_.push_back(
         {std::string{name}, ModuleStatus::Failed, err.code, err.message});
     log_.error("Failed to load module '{}': {}", name, err.message);

@@ -28,6 +28,8 @@ namespace aember::containerd {
 
 struct ContainerdOptions {
   std::string containers_json = "/etc/aember/containers.json";
+  /// Everything containerd logs (also while a debug shell mutes the console).
+  std::string log_file = "/var/log/aember-containerd.log";
 };
 
 /// Bridges from the "bridges" list of @p containers_json (name, address

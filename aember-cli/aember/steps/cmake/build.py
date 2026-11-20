@@ -17,10 +17,10 @@ class BuildStep(Step):
     # ---- Derived paths -------------------------------------------------
 
     def build_dir(self, ctx: Context) -> Path:
-        return ctx.root / "build" / "configure" / ctx.architecture / ctx.build_type
+        return ctx.root / "build" / "configure" / ctx.architecture / ctx.variant
 
     def install_dir(self, ctx: Context) -> Path:
-        return ctx.root / "build" / "install" / ctx.architecture / ctx.build_type
+        return ctx.root / "build" / "install" / ctx.architecture / ctx.variant
 
     def toolchain_file(self, ctx: Context) -> Path:
         return ctx.root / "tools" / "toolchains" / f"{ctx.architecture}.cmake"
@@ -40,7 +40,7 @@ class BuildStep(Step):
         cmd = [
             "cmake",
             "--build",
-            f"build/configure/{ctx.architecture}/{ctx.build_type}",
+            str(self.build_dir(ctx)),
             "--parallel",
             str(build_jobs()),
         ]
@@ -54,7 +54,7 @@ class BuildStep(Step):
         log.debug("Architecture: %s", ctx.architecture)
         log.debug("Build type:   %s", ctx.build_type)
 
-        build_dir   = self.build_dir(ctx)
+        build_dir = self.build_dir(ctx)
         install_dir = self.install_dir(ctx)
 
         log.debug("Build directory:   %s", build_dir)
@@ -62,10 +62,10 @@ class BuildStep(Step):
 
         build_dir.mkdir(parents=True, exist_ok=True)
 
-        ctx.data["build_dir"]   = build_dir
+        ctx.data["build_dir"] = build_dir
         ctx.data["install_dir"] = install_dir
 
-        sdk_env   = self.sdk_env(ctx)
+        sdk_env = self.sdk_env(ctx)
         cmake_cmd = " ".join(self.cmake_command(ctx))
         # WSL crashes when a build uses every core (config/build.py)
         jobs = build_jobs()

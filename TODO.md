@@ -191,11 +191,34 @@ BusyBox init / s6 / runit / dinit.
 
 - [x] `aember qemu build` cleans only with `--with-tests` (the condition
   was always true, 2026-11-18).
-- [ ] Dev Dockerfile has Yocto-era leftovers (GNU tar 1.34 downgrade,
-  gcc-12/14 PPA, gcc cross packages); drop them on the next image rebuild.
+- [x] Dev Dockerfile: the Yocto-era leftovers (GNU tar 1.34 downgrade,
+  gcc-12/14 PPA, gcc cross packages) are gone (2026-11-19).
 - [x] `aember changelog --since v<last version>` counts from the last
   release tag instead of `main` (2026-11-19).
 - [x] `merge_compile_command.py` skips its own output and keeps one entry
   per file (2026-11-18).
 - [x] `utils/fetch_artifact.py`: the unused gh download helpers are gone
   (2026-11-18).
+
+## Testing and analysis
+
+- [x] **Test infrastructure** (2026-11-19): `aember test --coverage /
+  --sanitize asan|tsan / --valgrind / --root`, `aember analyze`
+  (clang-tidy, cppcheck, baseline), `aember mutate`, `aember lint --check`,
+  warnings as errors, GitHub Actions CI. Coverage 65.5% → 84.4% of lines
+  with the new tests (aember-init 2% → 64%, containerd 53% → 82% with a
+  fake liblxc, netd 70% → 87%); 317 tests in 28 suites as root.
+- [ ] Coverage gaps: aember-init's StartInitramfs (needs a real
+  initramfs: the QEMU boots cover it), root-manager's switch (tested, but
+  exec loses the counters), executables/aember/main.cpp, containerd's
+  SquashFS/overlay mounts with the fake liblxc (needs root).
+- [x] A fake liblxc (`SetLxcForTesting`, container-lifecycle-unittest):
+  start with/without the init wrapper, graceful/forced/failed stop,
+  adopt, exits and restarts, without root (2026-11-19).
+- [ ] `MountManager::UnmountAll` forgets mounts whose unmount failed (it
+  clears its list regardless).
+- [ ] `pid1::Finish` has no test: remounting / read-only and reboot(2)
+  can't run safely outside a VM. A QEMU system test (`kill -USR2 1`) covers
+  it; make that part of a scripted system-test suite.
+- [ ] Remaining clang-tidy/cppcheck baseline (tools/analysis/): fix and
+  shrink it.

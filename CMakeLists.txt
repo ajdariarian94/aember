@@ -25,6 +25,13 @@ project(
 # ##############################################################################
 include(ExternalProject)
 
+# Forwarded to every sub-project (tools/cmake/AemberWarnings.cmake)
+option(
+  AEMBER_WERROR
+  "Treat aember's compiler warnings as errors"
+  ON
+)
+
 ExternalProject_Add(
   aember-libs
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libraries
@@ -39,6 +46,8 @@ ExternalProject_Add(
              -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+             -DAEMBER_INSTRUMENT=${AEMBER_INSTRUMENT}
+             -DAEMBER_WERROR=${AEMBER_WERROR}
              -DBUILD_TESTS=${BUILD_TESTS}
              -DVERSION=${PROJECT_VERSION}
              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
@@ -58,6 +67,8 @@ ExternalProject_Add(
              -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+             -DAEMBER_INSTRUMENT=${AEMBER_INSTRUMENT}
+             -DAEMBER_WERROR=${AEMBER_WERROR}
              -DVERSION=${PROJECT_VERSION}
              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 )
@@ -79,6 +90,8 @@ ExternalProject_Add(
              -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+             -DAEMBER_INSTRUMENT=${AEMBER_INSTRUMENT}
+             -DAEMBER_WERROR=${AEMBER_WERROR}
              -DARCHITECTURE=${ARCHITECTURE}
              -DBUILD_TESTS=${BUILD_TESTS}
              -DVERSION=${PROJECT_VERSION}
@@ -99,6 +112,8 @@ ExternalProject_Add(
              -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}
              -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+             -DAEMBER_INSTRUMENT=${AEMBER_INSTRUMENT}
+             -DAEMBER_WERROR=${AEMBER_WERROR}
              -DVERSION=${PROJECT_VERSION}
              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 )

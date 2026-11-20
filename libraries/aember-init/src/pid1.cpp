@@ -12,9 +12,11 @@
 #include <aember-libs/utils/logging/logging.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <string>
+#include <thread>
 #include <tuple>
 
 #include <pthread.h>
@@ -73,6 +75,7 @@ void BlockInitSignals() {
   // debug shell). Must be async-signal-safe: sigprocmask only.
   pthread_atfork(nullptr, nullptr, [] {
     const sigset_t s = InitSignalSet();
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): atfork child handler: one thread
     sigprocmask(SIG_UNBLOCK, &s, nullptr);
   });
 }
@@ -98,6 +101,7 @@ void InstallTerminateHandler() {
       try {
         std::rethrow_exception(ep);
       } catch (const std::exception& e) { what = e.what(); } catch (...) {
+        what = "unknown exception (not derived from std::exception)";
       }
     } else {
       what = "std::terminate without an active exception";
@@ -126,7 +130,10 @@ void ReapForever() {
   BlockAllSignals();
   for (;;) {
     int status = 0;
-    if (::waitpid(-1, &status, 0) < 0 && errno == ECHILD) { ::sleep(1); }
+    if (::waitpid(-1, &status, 0) < 0 && errno == ECHILD) {
+      std::this_thread::sleep_for(
+          std::chrono::seconds{1});  // nanosleep: MT-safe
+    }
   }
 }
 
@@ -153,9 +160,11 @@ void Finish(ShutdownAction action) {
   ::mount(nullptr, "/", nullptr, MS_REMOUNT | MS_RDONLY, nullptr);
   ::sync();
 
-  const int cmd = action == ShutdownAction::kPowerOff ? RB_POWER_OFF
-                  : action == ShutdownAction::kHalt   ? RB_HALT_SYSTEM
-                                                      : RB_AUTOBOOT;
+  // The RB_* constants are unsigned magic numbers; reboot(2) takes an int.
+  const int cmd =
+      static_cast<int>(action == ShutdownAction::kPowerOff ? RB_POWER_OFF
+                       : action == ShutdownAction::kHalt   ? RB_HALT_SYSTEM
+                                                           : RB_AUTOBOOT);
   ::reboot(cmd);
 
   Critical("reboot(2) failed: errno=" + std::to_string(errno) +

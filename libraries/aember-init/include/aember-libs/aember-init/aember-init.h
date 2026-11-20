@@ -44,6 +44,12 @@ struct InitOptions {
   /// modules (they would go into the host kernel); everything else as on a
   /// device.
   bool chroot = false;
+  /// Where services.json and modules.json are.
+  std::string config_dir = "/etc/aember";
+  /// Where aember-init.log and aember-monitor.json go.
+  std::string log_dir = "/var/log";
+  /// The debug shell's console.
+  std::string console = "/dev/console";
 };
 
 class AemberInit {

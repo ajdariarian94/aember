@@ -24,6 +24,8 @@ namespace aember::netd {
 
 struct NetdOptions {
   std::string network_json = "/etc/aember/network.json";
+  /// Everything netd logs (also while a debug shell mutes the console).
+  std::string log_file = "/var/log/aember-netd.log";
 };
 
 /// Run the netd role; returns the process exit code.

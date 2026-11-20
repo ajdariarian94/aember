@@ -213,4 +213,29 @@ TEST_F(ChildSupervisorTest, ReapZombiesDoesNotStealFromSynchronousWaiter) {
   EXPECT_EQ(failures, 0);
 }
 
+// Regression: a tracked child collected by someone else (ProcessManager::Stop
+// waiting for its own child first) stayed tracked forever.
+TEST_F(ChildSupervisorTest, ForgetsTrackedChildReapedElsewhere) {
+  const pid_t pid = ::fork();
+  if (pid == 0) ::_exit(0);
+  supervisor_->AddChild(pid, "collected-elsewhere");
+  int status = 0;
+  ASSERT_EQ(::waitpid(pid, &status, 0), pid);  // not the supervisor
+  EXPECT_TRUE(supervisor_->ReapZombies().empty());
+  EXPECT_FALSE(supervisor_->IsTracked(pid));
+}
+
+TEST_F(ChildSupervisorTest, KeepsTrackingARunningChild) {
+  const pid_t pid = ::fork();
+  if (pid == 0) {
+    ::pause();
+    ::_exit(0);
+  }
+  supervisor_->AddChild(pid, "running");
+  EXPECT_TRUE(supervisor_->ReapZombies().empty());
+  EXPECT_TRUE(supervisor_->IsTracked(pid));
+  ::kill(pid, SIGKILL);
+  ::waitpid(pid, nullptr, 0);
+}
+
 }  // namespace aember_test::child_supervisor

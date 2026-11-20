@@ -81,6 +81,18 @@ TEST(WatchdogTest, OptionsFromCmdline) {
   EXPECT_TRUE(wd::OptionsFromCmdline("/nonexistent/cmdline").has_value());
 }
 
+// Regression: a value that isn't a number is skipped, not the end of the
+// command line: what comes after it still counts.
+TEST(WatchdogTest, LaterValueAfterABadOneStillCounts) {
+  auto o =
+      wd::OptionsFromCmdline(Cmdline("aember.watchdog=abc aember.watchdog=20"));
+  ASSERT_TRUE(o.has_value());
+  EXPECT_EQ(o->timeout, 20s);
+  EXPECT_FALSE(
+      wd::OptionsFromCmdline(Cmdline("aember.watchdog=abc aember.watchdog=0"))
+          .has_value());
+}
+
 TEST(WatchdogTest, NoDeviceIsNull) {
   EXPECT_EQ(wd::Watchdog::Open({.device = "/nonexistent/watchdog"}), nullptr);
 }

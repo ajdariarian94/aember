@@ -46,11 +46,18 @@ const Loaded& Load() {
   return loaded;
 }
 
+const LxcApi* g_test_api = nullptr;
+
 }  // namespace
 
 const LxcApi* Lxc() {
+  if (g_test_api != nullptr) return g_test_api;
   const auto& l = Load();
   return l.ok ? &l.api : nullptr;
+}
+
+void SetLxcForTesting(const LxcApi* api) {
+  g_test_api = api;
 }
 
 std::string LxcLoadError() {

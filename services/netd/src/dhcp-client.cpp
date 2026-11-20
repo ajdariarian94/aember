@@ -16,6 +16,7 @@
 #include <cstring>
 #include <format>
 #include <random>
+#include <system_error>
 
 #include <arpa/inet.h>
 #include <linux/if_ether.h>
@@ -394,18 +395,22 @@ struct RawChannel {
     const int ifindex = static_cast<int>(::if_nametoindex(interface.c_str()));
     if (ifindex == 0) return std::format("no interface {}", interface);
     fd = ::socket(AF_PACKET, SOCK_DGRAM | SOCK_CLOEXEC, htons(ETH_P_IP));
-    if (fd < 0) return std::format("packet socket: {}", std::strerror(errno));
+    if (fd < 0)
+      return std::format("packet socket: {}",
+                         std::system_category().message(errno));
     sockaddr_ll local{};
     local.sll_family = AF_PACKET;
     local.sll_protocol = htons(ETH_P_IP);
     local.sll_ifindex = ifindex;
     if (::bind(fd, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
-      return std::format("bind {}: {}", interface, std::strerror(errno));
+      return std::format(
+          "bind {}: {}", interface, std::system_category().message(errno));
     }
     const auto m = InterfaceMac(fd, interface);
     if (!m) {
-      return std::format(
-          "no MAC address for {}: {}", interface, std::strerror(errno));
+      return std::format("no MAC address for {}: {}",
+                         interface,
+                         std::system_category().message(errno));
     }
     mac = *m;
     broadcast = local;
@@ -454,8 +459,8 @@ std::expected<Lease, std::string> DhcpClient::Acquire(
   while (std::chrono::steady_clock::now() < deadline) {
     const std::uint32_t xid = rng();
     if (!ch.Send(BuildDiscover(xid, ch.mac))) {
-      return std::unexpected(
-          std::format("send DISCOVER: {}", std::strerror(errno)));
+      return std::unexpected(std::format(
+          "send DISCOVER: {}", std::system_category().message(errno)));
     }
     const auto round_end =
         std::min(deadline, std::chrono::steady_clock::now() + kResend);
@@ -465,8 +470,8 @@ std::expected<Lease, std::string> DhcpClient::Acquire(
 
     if (!ch.Send(BuildRequest(
             xid, ch.mac, offer->lease.address, offer->lease.server))) {
-      return std::unexpected(
-          std::format("send REQUEST: {}", std::strerror(errno)));
+      return std::unexpected(std::format(
+          "send REQUEST: {}", std::system_category().message(errno)));
     }
     const auto ack =
         Receive(ch.fd,
@@ -494,8 +499,10 @@ std::expected<Lease, RenewError> DhcpClient::Confirm(
   while (std::chrono::steady_clock::now() < deadline) {
     const std::uint32_t xid = rng();
     if (!ch.Send(BuildInitReboot(xid, ch.mac, address))) {
-      return std::unexpected(RenewError{
-          false, std::format("send REQUEST: {}", std::strerror(errno))});
+      return std::unexpected(
+          RenewError{false,
+                     std::format("send REQUEST: {}",
+                                 std::system_category().message(errno))});
     }
     const auto reply =
         Receive(ch.fd,
@@ -522,7 +529,9 @@ std::expected<Lease, RenewError> DhcpClient::Renew(
   // The interface has its address: a plain UDP socket on port 68 of this
   // interface; the kernel does ARP and routing.
   const int fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-  if (fd < 0) return fail(std::format("udp socket: {}", std::strerror(errno)));
+  if (fd < 0)
+    return fail(
+        std::format("udp socket: {}", std::system_category().message(errno)));
   struct Closer {
     int fd;
     ~Closer() { ::close(fd); }
@@ -535,15 +544,16 @@ std::expected<Lease, RenewError> DhcpClient::Renew(
                    SO_BINDTODEVICE,
                    interface_.c_str(),
                    static_cast<socklen_t>(interface_.size())) != 0) {
-    return fail(
-        std::format("bind to {}: {}", interface_, std::strerror(errno)));
+    return fail(std::format(
+        "bind to {}: {}", interface_, std::system_category().message(errno)));
   }
   sockaddr_in local{};
   local.sin_family = AF_INET;
   local.sin_port = htons(kClientPort);
   local.sin_addr.s_addr = htonl(INADDR_ANY);  // unicast and broadcast replies
   if (::bind(fd, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
-    return fail(std::format("bind :{}: {}", kClientPort, std::strerror(errno)));
+    return fail(std::format(
+        "bind :{}: {}", kClientPort, std::system_category().message(errno)));
   }
 
   Mac mac{};
@@ -573,7 +583,8 @@ std::expected<Lease, RenewError> DhcpClient::Renew(
                  0,
                  reinterpret_cast<sockaddr*>(&server),
                  sizeof(server)) < 0) {
-      return fail(std::format("send REQUEST: {}", std::strerror(errno)));
+      return fail(std::format("send REQUEST: {}",
+                              std::system_category().message(errno)));
     }
     const auto round_end =
         std::min(deadline, std::chrono::steady_clock::now() + kResend);

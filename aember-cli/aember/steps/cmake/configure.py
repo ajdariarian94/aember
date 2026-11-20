@@ -16,10 +16,10 @@ class ConfigureStep(Step):
     # ---- Derived paths -------------------------------------------------
 
     def build_dir(self, ctx: Context) -> Path:
-        return ctx.root / "build" / "configure" / ctx.architecture / ctx.build_type
+        return ctx.root / "build" / "configure" / ctx.architecture / ctx.variant
 
     def install_dir(self, ctx: Context) -> Path:
-        return ctx.root / "build" / "install" / ctx.architecture / ctx.build_type
+        return ctx.root / "build" / "install" / ctx.architecture / ctx.variant
 
     def toolchain_file(self, ctx: Context) -> Path:
         return ctx.root / "tools" / "toolchains" / f"{ctx.architecture}.cmake"
@@ -64,6 +64,7 @@ class ConfigureStep(Step):
             f"-DVCPKG_OVERLAY_TRIPLETS={ctx.root / 'tools' / 'triplets'}",
             f"-DVCPKG_INSTALLED_DIR={vcpkg_installed_path}",
             f"-DBUILD_TESTS={ctx.build_tests}",
+            f"-DAEMBER_INSTRUMENT={ctx.instrument or ''}",
             "-DVCPKG_MANIFEST_MODE=ON",
             "-B",
             str(build_dir),

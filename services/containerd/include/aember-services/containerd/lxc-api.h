@@ -34,4 +34,9 @@ const LxcApi* Lxc();
 /// Why Lxc() returned nullptr ("" if it didn't).
 std::string LxcLoadError();
 
+/// Tests: make Lxc() return @p api (a fake liblxc) instead of the real one;
+/// nullptr goes back to liblxc. Not thread-safe: set it before anything
+/// calls Lxc().
+void SetLxcForTesting(const LxcApi* api);
+
 }  // namespace aember::containerd

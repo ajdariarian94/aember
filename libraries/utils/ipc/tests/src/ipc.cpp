@@ -189,11 +189,14 @@ class HubTest : public ::testing::Test {
     });
   }
 
-  ipc::Hub hub_;
   std::mutex mutex_;
   std::condition_variable cv_;
   std::vector<std::pair<std::string, std::string>> messages_;
   std::vector<std::string> closed_;
+  // Regression: last, so it is destroyed (its thread stopped) first. It was
+  // first, and its thread could still push into closed_ after closed_ was
+  // gone (valgrind: a "leak" from a vector written after destruction).
+  ipc::Hub hub_;
 };
 
 TEST_F(HubTest, RoutesMessagesByChannelName) {
@@ -305,7 +308,9 @@ TEST_F(HubTest, PublishNeverBlocks) {
   for (int i = 0; i < 10000; ++i) {
     hub_.Publish("console", ipc::Console(i % 2 == 0));
   }
-  EXPECT_LT(std::chrono::steady_clock::now() - t0, 2s);
+  // A blocked Publish would hang for good once the socket buffer is full;
+  // 10 s leaves room for valgrind (~3 s) and slow CI machines.
+  EXPECT_LT(std::chrono::steady_clock::now() - t0, 10s);
 }
 
 TEST(ControlTest, ApplyControlMutesTheConsoleLog) {

@@ -67,6 +67,18 @@ def _clang_format_file(args: tuple[str, bool]) -> bool:
     return result.returncode == 0
 
 
+def _cmake_files(root: Path) -> list[Path]:
+    """CMakeLists.txt in root + CPP_SCAN_FOLDERS."""
+    files = []
+    if (root / "CMakeLists.txt").is_file():
+        files.append(root / "CMakeLists.txt")
+    for subfolder in CPP_SCAN_FOLDERS:
+        folder = root / subfolder
+        if folder.is_dir():
+            files.extend(folder.rglob("CMakeLists.txt"))
+    return files
+
+
 def _format_cmake_files(root: Path) -> None:
     """Format CMakeLists.txt in root + CPP_SCAN_FOLDERS."""
     files = []
@@ -149,6 +161,13 @@ class LintStep(Step):
         try:
             if fix:
                 _format_cmake_files(cmake_root)
+            else:
+                files = _cmake_files(cmake_root)
+                if files and not _run(
+                    "cmake-format --check " + " ".join(map(str, files))
+                ):
+                    exit_code |= 1
+                    log.warning("cmake-format reported issues")
             if not _run(f"cmakelint {root}"):
                 exit_code |= 1
                 log.warning("cmakelint reported issues")
@@ -157,6 +176,6 @@ class LintStep(Step):
             log.exception("CMake linting failed")
 
         if exit_code:
-            log.warning("Linting completed with issues (exit_code=%d)", exit_code)
-        else:
-            log.info("Linting completed successfully")
+            # Fails the command (and CI): it used to only log this.
+            raise RuntimeError("Linting found issues (see above)")
+        log.info("Linting completed successfully")

@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <cstring>
 #include <format>
+#include <system_error>
 #include <vector>
 
 #include <fcntl.h>
@@ -44,7 +45,8 @@ Channel& Channel::operator=(Channel&& other) noexcept {
 std::expected<std::pair<Channel, Channel>, std::string> Channel::Pair() {
   int fds[2] = {-1, -1};
   if (::socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, fds) != 0) {
-    return std::unexpected(std::format("socketpair: {}", std::strerror(errno)));
+    return std::unexpected(
+        std::format("socketpair: {}", std::system_category().message(errno)));
   }
   return std::pair{Channel{fds[0]}, Channel{fds[1]}};
 }

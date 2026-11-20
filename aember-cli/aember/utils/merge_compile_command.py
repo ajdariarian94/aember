@@ -17,7 +17,7 @@ class CompileCommandsMerger:
         build directory (one per ExternalProject sub-build) into a single
         file inside that same build directory so clangd can index everything.
         """
-        build_dir = ctx.root / "build" / "configure" / ctx.architecture / ctx.build_type
+        build_dir = ctx.root / "build" / "configure" / ctx.architecture / ctx.variant
 
         output = build_dir / "compile_commands.json"
         # The output sits where the superbuild's own file is: never merge it

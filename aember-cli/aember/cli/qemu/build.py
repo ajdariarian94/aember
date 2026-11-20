@@ -33,7 +33,7 @@ def build_qemu(
     # Tests always require x64 Debug
     if build_tests:
         architecture = Architecture.x64_linux
-        build_type   = BuildType.debug
+        build_type = BuildType.debug
 
     ctx = Context(
         architecture=architecture.value,

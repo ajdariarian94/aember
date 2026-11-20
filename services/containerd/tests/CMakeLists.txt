@@ -68,3 +68,53 @@ install(
   TARGETS init-wrapper-unittest
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
 )
+
+# The daemon end to end: RunContainerd() in a forked child with a channel on fd
+# 3
+add_executable(
+  containerd-daemon-unittest
+  src/containerd.cpp
+)
+
+target_link_libraries(
+  containerd-daemon-unittest
+  PRIVATE aember-containerd-core
+          GTest::gtest_main
+)
+
+add_test(
+  NAME containerd-daemon-unittest
+  COMMAND containerd-daemon-unittest
+)
+
+install(
+  TARGETS containerd-daemon-unittest
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
+)
+
+# ContainerManager's LXC lifecycle against a fake liblxc (no root, no mounts)
+add_executable(
+  container-lifecycle-unittest
+  src/container-lifecycle.cpp
+)
+
+target_include_directories(
+  container-lifecycle-unittest
+  PRIVATE ${LXC_INCLUDE_DIR}
+)
+
+target_link_libraries(
+  container-lifecycle-unittest
+  PRIVATE aember-containerd-core
+          GTest::gtest_main
+)
+
+add_test(
+  NAME container-lifecycle-unittest
+  COMMAND container-lifecycle-unittest
+)
+
+install(
+  TARGETS container-lifecycle-unittest
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
+)

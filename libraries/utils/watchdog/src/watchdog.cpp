@@ -16,6 +16,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <system_error>
 
 #include <fcntl.h>
 #include <linux/watchdog.h>
@@ -41,7 +42,11 @@ std::optional<Options> OptionsFromCmdline(const std::string& path) {
       if (used == value.size() && seconds > 0) {
         options.timeout = std::chrono::seconds{seconds};
       }
-    } catch (const std::exception&) {}  // keep the default
+    } catch (const std::exception&) {
+      // Not a number (aember.watchdog=abc): keep the timeout so far; a
+      // later aember.watchdog= on the command line still counts.
+      continue;
+    }
   }
   return options;
 }
@@ -50,7 +55,9 @@ std::unique_ptr<Watchdog> Watchdog::Open(const Options& options) {
   aember::utils::logging::Logger log{"watchdog"};
   const int fd = ::open(options.device.c_str(), O_WRONLY | O_CLOEXEC);
   if (fd < 0) {
-    log.info("No watchdog ({}: {})", options.device, std::strerror(errno));
+    log.info("No watchdog ({}: {})",
+             options.device,
+             std::system_category().message(errno));
     return nullptr;
   }
   // Opening armed it. Ask for our timeout; keep the driver's if it refuses.

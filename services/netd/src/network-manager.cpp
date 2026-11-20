@@ -24,6 +24,7 @@
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -206,7 +207,9 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
     return false;
   }
   if (const int rc = netlink::SetLinkUp(idx); rc != 0) {
-    log_.error("{}: could not set link up: {}", iface.name, strerror(-rc));
+    log_.error("{}: could not set link up: {}",
+               iface.name,
+               std::system_category().message(-rc));
     return false;
   }
 
@@ -240,7 +243,7 @@ bool NetworkManager::ConfigureStatic(const InterfaceConfig& iface, int idx) {
     log_.error("{}: could not assign {}: {}",
                iface.name,
                iface.address,
-               strerror(-rc));
+               std::system_category().message(-rc));
     return false;
   }
 
@@ -254,7 +257,7 @@ bool NetworkManager::ConfigureStatic(const InterfaceConfig& iface, int idx) {
       log_.warn("{}: default route via {} failed: {}",
                 iface.name,
                 iface.gateway,
-                strerror(-rc));
+                std::system_category().message(-rc));
     }
   }
   WriteResolvConf(iface.dns_servers);
@@ -305,7 +308,7 @@ bool NetworkManager::ApplyLease(const InterfaceConfig& iface, int idx,
                iface.name,
                ip,
                prefix,
-               strerror(-rc));
+               std::system_category().message(-rc));
     return false;
   }
 
@@ -316,7 +319,7 @@ bool NetworkManager::ApplyLease(const InterfaceConfig& iface, int idx,
       log_.warn("{}: default route via {} failed: {}",
                 iface.name,
                 router,
-                strerror(-rc));
+                std::system_category().message(-rc));
     }
   }
 
@@ -559,7 +562,7 @@ int NetworkManager::PingOnce(std::string_view target_ip, int timeout_ms) {
   FD_ZERO(&wfds);
   FD_SET(sock, &wfds);
   struct timeval tv {
-    timeout_ms / 1000, (timeout_ms % 1000) * 1000
+    timeout_ms / 1000, static_cast<suseconds_t>(timeout_ms % 1000) * 1000
   };
 
   if (select(sock + 1, nullptr, &wfds, nullptr, &tv) <= 0) {
@@ -595,21 +598,26 @@ NetworkManager::NetworkInfo NetworkManager::GetNetworkInfo() {
     strncpy(ifr.ifr_name, iface.name.c_str(), IFNAMSIZ - 1);
 
     char buf[INET_ADDRSTRLEN]{};
+    // ifreq's sockaddr fields hold a sockaddr_in: copy it out instead of
+    // casting (sockaddr_in needs more alignment than sockaddr on 32-bit ARM).
+    const auto ipv4 = [](const sockaddr& sa) {
+      sockaddr_in sin{};
+      std::memcpy(&sin, &sa, sizeof(sin));
+      return sin.sin_addr;
+    };
 
     if (ioctl(sock, SIOCGIFADDR, &ifr) == 0) {
-      inet_ntop(AF_INET,
-                &reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_addr)->sin_addr,
-                buf,
-                sizeof(buf));
+      const in_addr addr = ipv4(ifr.ifr_addr);
+      inet_ntop(AF_INET, &addr, buf, sizeof(buf));
       info.ip_address = buf;
     }
 
     if (ioctl(sock, SIOCGIFNETMASK, &ifr) == 0) {
-      auto* sa = reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_netmask);
-      inet_ntop(AF_INET, &sa->sin_addr, buf, sizeof(buf));
+      const in_addr netmask = ipv4(ifr.ifr_netmask);
+      inet_ntop(AF_INET, &netmask, buf, sizeof(buf));
       info.netmask = buf;
 
-      uint32_t mask = ntohl(sa->sin_addr.s_addr);
+      uint32_t mask = ntohl(netmask.s_addr);
       int prefix = 0;
       while (mask & 0x80000000u) {
         ++prefix;
@@ -619,11 +627,8 @@ NetworkManager::NetworkInfo NetworkManager::GetNetworkInfo() {
     }
 
     if (ioctl(sock, SIOCGIFBRDADDR, &ifr) == 0) {
-      inet_ntop(
-          AF_INET,
-          &reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_broadaddr)->sin_addr,
-          buf,
-          sizeof(buf));
+      const in_addr broadcast = ipv4(ifr.ifr_broadaddr);
+      inet_ntop(AF_INET, &broadcast, buf, sizeof(buf));
       info.broadcast = buf;
     }
 

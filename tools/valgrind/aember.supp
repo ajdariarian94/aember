@@ -1,0 +1,3 @@
+# valgrind suppressions for `aember test --valgrind`.
+# Only for findings that are not aember's: add one with a comment saying why.
+# Generate a candidate with --gen-suppressions=all.

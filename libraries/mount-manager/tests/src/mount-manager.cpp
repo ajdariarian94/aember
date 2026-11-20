@@ -1,7 +1,9 @@
 #include <filesystem>
 
+#include <fcntl.h>
 #include <sched.h>
 #include <sys/mount.h>
+#include <unistd.h>
 
 #include <aember-libs-tests/mount-manager/mount-manager.h>
 
@@ -266,6 +268,114 @@ TEST(LoopTest, MountingNonSquashfsFailsAsRoot) {
   EXPECT_FALSE(mm.IsMounted(target.string()));
   std::filesystem::remove(img);
   std::filesystem::remove_all(target);
+}
+
+// ---------------------------------------------------------------------------
+// As root, in the private mount namespace
+// ---------------------------------------------------------------------------
+
+/// A real SquashFS (mksquashfs) is mounted read-only via a loop device with
+/// a writable tmpfs on its tmp/, tracked, and unmounted again in reverse.
+TEST(SquashfsTest, MountsReadOnlyWithAWritableTmpAndUnmountsAll) {
+  if (::geteuid() != 0) GTEST_SKIP() << "needs root";
+  AEMBER_REQUIRE_PRIVATE_MOUNTS();
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("aember-sqfs-" + std::to_string(::getpid()));
+  std::filesystem::create_directories(dir / "tree" / "tmp");
+  { std::ofstream{dir / "tree" / "hello"} << "from squashfs"; }
+  const auto image = dir / "image.squashfs";
+  const auto cmd = "mksquashfs " + (dir / "tree").string() + " " +
+                   image.string() + " -quiet -noappend >/dev/null 2>&1";
+  if (std::system(cmd.c_str()) != 0) {
+    std::filesystem::remove_all(dir);
+    GTEST_SKIP() << "no mksquashfs";
+  }
+  const auto target = (dir / "mnt").string();
+  {
+    MountManager mm;
+    ASSERT_TRUE(mm.MountSquashFS(image.string(), target));
+    EXPECT_TRUE(mm.IsMounted(target));
+    EXPECT_TRUE(mm.IsMounted(target + "/tmp"));
+    {
+      std::ifstream in{target + "/hello"};  // closed again: not busy later
+      std::string text;
+      std::getline(in, text);
+      EXPECT_EQ(text, "from squashfs");
+    }
+    // Read-only image, writable tmp.
+    EXPECT_FALSE(std::ofstream{target + "/new"}.good());
+    EXPECT_TRUE(std::ofstream{target + "/tmp/new"}.good());
+    // Mounting again is a no-op.
+    EXPECT_TRUE(mm.MountSquashFS(image.string(), target));
+    mm.UnmountAll();
+    EXPECT_FALSE(mm.IsMounted(target + "/tmp"));
+    EXPECT_FALSE(mm.IsMounted(target));
+  }
+  std::filesystem::remove_all(dir);
+}
+
+TEST(MountPointTest, PathsWithSpacesAreRecognised) {
+  if (::geteuid() != 0) GTEST_SKIP() << "needs root";
+  AEMBER_REQUIRE_PRIVATE_MOUNTS();
+  const auto target = std::filesystem::temp_directory_path() /
+                      ("aember mount " + std::to_string(::getpid()));
+  MountManager mm;
+  ASSERT_TRUE(mm.Mount({.source = "tmpfs",
+                        .target = target.string(),
+                        .fstype = "tmpfs",
+                        .flags = 0,
+                        .data = "size=1m"}));
+  // /proc/mounts writes the space as \040.
+  EXPECT_TRUE(mm.IsMounted(target.string()));
+  EXPECT_TRUE(mm.Unmount(target.string()));
+  EXPECT_FALSE(mm.IsMounted(target.string()));
+  std::filesystem::remove(target);
+}
+
+TEST(MountPointTest, BadFilesystemTypeFails) {
+  if (::geteuid() != 0) GTEST_SKIP() << "needs root";
+  AEMBER_REQUIRE_PRIVATE_MOUNTS();
+  const auto target = std::filesystem::temp_directory_path() /
+                      ("aember-badfs-" + std::to_string(::getpid()));
+  MountManager mm;
+  EXPECT_FALSE(mm.Mount({.source = "none",
+                         .target = target.string(),
+                         .fstype = "aember-no-such-fs"}));
+  EXPECT_FALSE(mm.IsMounted(target.string()));
+  std::filesystem::remove(target);
+}
+
+TEST(MountPointTest, BusyMountIsNotUnmounted) {
+  if (::geteuid() != 0) GTEST_SKIP() << "needs root";
+  AEMBER_REQUIRE_PRIVATE_MOUNTS();
+  const auto target = std::filesystem::temp_directory_path() /
+                      ("aember-busy-" + std::to_string(::getpid()));
+  MountManager mm;
+  ASSERT_TRUE(mm.Mount(
+      {.source = "tmpfs", .target = target.string(), .fstype = "tmpfs"}));
+  {
+    // An open file keeps it busy: a plain unmount must fail and say so.
+    std::ofstream busy{target / "open"};
+    ASSERT_TRUE(busy.good());
+    const int fd = ::open((target / "open").c_str(), O_RDONLY);
+    EXPECT_FALSE(mm.Unmount(target.string()));
+    ::close(fd);
+  }
+  EXPECT_TRUE(mm.Unmount(target.string()));
+  std::filesystem::remove(target);
+}
+
+TEST(BootMountsTest, InitramfsAndEarlyPhasesSucceedAsRoot) {
+  if (::geteuid() != 0) GTEST_SKIP() << "needs root";
+  AEMBER_REQUIRE_PRIVATE_MOUNTS();
+  // Everything already mounted is skipped; the rest (tmpfs on /tmp, /run,
+  // /mnt ...) goes into this test's own namespace only.
+  MountManager mm;
+  EXPECT_TRUE(mm.MountInitramfsFilesystems());
+  EXPECT_TRUE(mm.MountEarlyFilesystems());
+  for (const char* target : {"/proc", "/sys", "/dev", "/tmp", "/run", "/mnt"}) {
+    EXPECT_TRUE(mm.IsMounted(target)) << target;
+  }
 }
 
 }  // namespace aember_test::mount_manager

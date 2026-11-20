@@ -149,16 +149,24 @@ machine's network; closing the window ends it and cleans up.
 | `aember app pack` | Initramfs, root filesystem image, kernel into `build/package/` |
 | `aember app launch` | Boot in QEMU (`--headless`, `--timeout`, `--debug-shell`, `--append`, `--chroot`) |
 | `aember qemu build --with-tests` | x64 Debug build with the unit tests |
-| `aember test` | Run the CLI and C++ unit tests (`-k <name>` to filter, `-n <N>` to repeat) |
+| `aember test` | Run the CLI and C++ unit tests (`-k <name>` to filter, `-n <N>` to repeat, `--root` for the root-only tests) |
+| `aember test --coverage` / `--sanitize asan\|tsan` / `--valgrind` | Coverage report per library, sanitizer builds, memcheck |
+| `aember analyze` | Static analysis (clang-tidy, cppcheck) against a baseline |
+| `aember mutate -k <suite>` | Mutation testing of one library's tests |
 | `aember rpi image` / `flash` / `launch` | Raspberry Pi 4 SD card image |
 | `aember usb image` / `flash` / `launch` | x86-64 PC USB stick image (UEFI) |
 | `aember fetch-resources` | Download kernel, BusyBox, LXC and SDK only |
-| `aember lint` | ruff, black, clang-format, cmake-format, cmakelint |
+| `aember lint [--check]` | ruff, black, clang-format, cmake-format, cmakelint |
 | `aember generate-docs` / `view-docs` | Doxygen documentation |
 | `aember appimage` | x86-64 AppImage: aember isolated on a Linux desktop |
 | `aember changelog` / `release` / `publish` | Version bump, release archives, GitHub release |
 
 `aember --help` and `aember <command> --help` list every option.
+
+Every push and pull request runs the same commands on GitHub Actions
+(`.github/workflows/ci.yml`): lint, all tests as root, static analysis and
+the coverage report; valgrind runs nightly. AGENTS.md ("Testing, coverage
+and analysis") has the details.
 
 ## Configuration
 
