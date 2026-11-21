@@ -6,7 +6,7 @@
  */
 
 #include <aember-libs/aember-init/aember-init.h>
-#include <aember-libs/device-health/aember-monitor.h>
+#include <aember-libs/device-health/status.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -122,10 +122,10 @@ void AemberInit::StartRoot() {
   log_.info("Starting Aember in root mode{}",
             options_.chroot ? " (chroot)" : "");
 
-  // Create heartbeat JSON file early — needed for aember-monitor container
-  // mount
+  // The status file exists from the start, so a container that reads it
+  // (aember-stats, through /host-logs) never finds it missing.
   {
-    std::ofstream file{options_.log_dir + "/aember-monitor.json"};
+    std::ofstream file{options_.log_dir + "/aember-status.json"};
     file << "{}";
   }
 
@@ -175,9 +175,9 @@ void AemberInit::StartRoot() {
     log_.error("No service manager: no services");
   }
 
-  Guarded(log_, "Monitor and heartbeat", [this] {
-    // AemberMonitor reads PID1 stats from /proc.
-    monitor_ = std::make_unique<aember::device_health::AemberMonitor>();
+  Guarded(log_, "Status and heartbeat", [this] {
+    // StatusReporter reads PID1 stats from /proc.
+    status_ = std::make_unique<aember::device_health::StatusReporter>();
     heartbeat_.emplace([this](const nlohmann::json& p) { OnHeartbeat(p); });
     heartbeat_->Start();
   });
@@ -221,7 +221,7 @@ void AemberInit::Stop() {
     heartbeat_->Stop();
     heartbeat_.reset();
   }
-  monitor_.reset();
+  status_.reset();
 
   // Destroy in reverse construction order.
   service_manager_.reset();
@@ -526,10 +526,10 @@ void AemberInit::RunLoop() {
 // ---------------------------------------------------------------------------
 
 void AemberInit::OnHeartbeat(const nlohmann::json& base) {
-  if (!monitor_) return;
+  if (!status_) return;
 
   // Collect PID1 stats via /proc.
-  auto payload = monitor_->Snapshot();
+  auto payload = status_->Snapshot();
 
   // Network status and container states as the daemons last reported them.
   nlohmann::json containers = nlohmann::json::array();
@@ -560,9 +560,7 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
   // Merge heartbeat base fields (timestamp, status).
   payload.merge_patch(base);
 
-  // Log the enriched dashboard.
-  monitor_->Log(payload);
-  monitor_->LogToFile(payload, options_.log_dir + "/aember-monitor.json");
+  status_->WriteFile(payload, options_.log_dir + "/aember-status.json");
 }
 
 void AemberInit::OnServiceStateChange(const std::string& name,

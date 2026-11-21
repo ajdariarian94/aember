@@ -185,7 +185,7 @@ The root filesystem overlay is `resources/<arch>/rootfs/`; aember reads:
 | `/etc/aember/modules.json` | Kernel modules to load |
 
 Logs: `/var/log/aember-init.log`, `aember-netd.log`, `aember-containerd.log`
-(rotating), and the heartbeat in `/var/log/aember-monitor.json`. A
+(rotating), and PID 1's status in `/var/log/aember-status.json`. A
 container's output goes to its console; with `lxc.console.logfile` in its
 LXC config it is kept, e.g. `/var/log/aember-container-<name>.log`.
 
@@ -199,6 +199,21 @@ Docker image, or a CMake install with the libraries from the aember SDK),
 then its `aember` CLI (`aember-cli/run.py build`, then
 `aember-cli/run.py install <this repo>`) puts the SquashFS image, its LXC
 config and the `containers.json` entry into the board's overlay.
+
+## Status display: aember-stats and aember-monitor
+
+Two containers from their own repositories show what a device is doing:
+[aember-stats](https://github.com/ajdariarian94/aember-stats) collects CPU,
+memory, network, disk, temperatures and PID 1's status
+(`/var/log/aember-status.json`, all services and containers) and serves them
+as JSON lines on `/run/aember-stats/stats.sock`;
+[aember-monitor](https://github.com/ajdariarian94/aember-monitor) draws them
+full screen with a minimal Qt 6 (on `/dev/fb0`). The socket directory is the
+only link between them (an LXC pre-start hook creates it on the device).
+Both are built with the aember-resources SDKs for every target and installed
+into an overlay with `aember-cli/run.py install -a <arch> <this repo>` in
+their repos. The x64 overlay has them (2.1 MB + 9.5 MB, instead of the old
+162 MB Qt monitor).
 
 ## Writing a service
 

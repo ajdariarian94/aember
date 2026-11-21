@@ -15,12 +15,12 @@
 # Closing the window (SIGHUP) or any exit kills the namespace's PID 1: the
 # kernel stops everything in it and drops its mounts and network.
 #
-# Usage: aember-sandbox <appimage|""> <offset|""> <appdir> <display|""> <slirp4netns>
+# Usage: aember-sandbox <appimage|""> <offset|""> <appdir> <slirp4netns>
 set -eu
 
 if [ "${AEMBER_SANDBOX_STAGE:-1}" = 2 ]; then
   # ---- Stage 2: PID 1 of the new namespaces, until it execs aember ----
-  IMAGE=$1 OFFSET=$2 APPDIR=$3 DISPLAY_NAME=$4 CONSOLE=$5
+  IMAGE=$1 OFFSET=$2 APPDIR=$3 CONSOLE=$4
   B=/mnt  # private mount namespace: a tmpfs here is invisible outside
   mount -t tmpfs -o mode=0755 tmpfs $B
   mkdir -p $B/payload $B/rw $B/root
@@ -69,20 +69,6 @@ if [ "${AEMBER_SANDBOX_STAGE:-1}" = 2 ]; then
   echo "nameserver 10.0.2.3" >$R/etc/resolv.conf  # slirp4netns' DNS
   hostname aember
 
-  if [ -n "$DISPLAY_NAME" ] && [ -d /tmp/.X11-unix ]; then
-    mkdir -p $R/tmp/.X11-unix
-    mount --bind /tmp/.X11-unix $R/tmp/.X11-unix
-    cat >$R/etc/aember/lxc-extra.conf <<EOF
-# Written by the aember AppImage: containers draw on your display.
-lxc.mount.entry = /tmp/.X11-unix tmp/.X11-unix none bind,create=dir,optional 0 0
-lxc.environment = DISPLAY=$DISPLAY_NAME
-lxc.environment = QT_QPA_PLATFORM=xcb
-lxc.environment = QT_XCB_GL_INTEGRATION=none
-lxc.environment = QT_QUICK_BACKEND=software
-lxc.environment = LIBGL_ALWAYS_SOFTWARE=1
-EOF
-  fi
-
   # slirp4netns adds eth0 from outside; aember's network service wants it.
   i=0
   while [ ! -e /sys/class/net/eth0 ] && [ $i -lt 50 ]; do
@@ -95,7 +81,7 @@ EOF
 fi
 
 # ---- Stage 1: on the host, as root ----
-IMAGE=$1 OFFSET=$2 APPDIR=$3 DISPLAY_NAME=$4 SLIRP=$5
+IMAGE=$1 OFFSET=$2 APPDIR=$3 SLIRP=$4
 # The terminal (the window): aember's /dev/console. Determined here: the
 # background job below would get /dev/null as stdin otherwise.
 CONSOLE=$(tty 2>/dev/null || true)
@@ -145,7 +131,7 @@ export AEMBER_SANDBOX_STAGE=2
 run_once() {
   unshare --mount --propagation private --pid --net --cgroup --uts --ipc \
     --fork --kill-child=SIGKILL \
-    "$0" "$IMAGE" "$OFFSET" "$APPDIR" "$DISPLAY_NAME" "$CONSOLE" <&0 &
+    "$0" "$IMAGE" "$OFFSET" "$APPDIR" "$CONSOLE" <&0 &
   UPID=$!
 
   # The namespace's PID 1, as the host sees it.

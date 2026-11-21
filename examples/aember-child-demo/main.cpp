@@ -1,27 +1,18 @@
-#include <aember-libs/device-health/aember-monitor.h>
+/**
+ * @file main.cpp
+ * @brief aember-child-demo: the smallest supervised service. It logs a line
+ *        every few seconds and exits cleanly on SIGTERM/SIGINT, so PID 1's
+ *        restart and stop handling can be watched.
+ */
 #include <aember-libs/utils/logging/logging.h>
 
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <mutex>
-#include <string_view>
 
-// ---------------------------------------------------------------------------
-// Monitored fields of AemberMonitorClient::SelfStats, logged at startup.
-// Keep in sync with the SelfStats definition in aember-monitor.h.
-// ---------------------------------------------------------------------------
-
-constexpr std::string_view kMonitorClientName = "AemberMonitorClient";
-
-constexpr std::array<std::string_view, 5> kSelfStatsFields{
-    "pid", "ppid", "vm_rss_kb", "uptime_s", "pid1_rss_kb"};
-
-// ---------------------------------------------------------------------------
-// Graceful shutdown via SIGTERM / SIGINT
-// ---------------------------------------------------------------------------
+#include <unistd.h>
 
 static std::mutex g_mtx;
 static std::condition_variable g_cv;
@@ -33,35 +24,22 @@ static void handle_signal(int) {
 }
 
 int main() {
-  // Install signal handlers — process exits cleanly on SIGTERM/SIGINT
-  // so PID1 receives SIGCHLD immediately and can restart us.
+  // Exit cleanly on SIGTERM/SIGINT so PID 1 sees SIGCHLD at once.
   std::signal(SIGTERM, handle_signal);
   std::signal(SIGINT, handle_signal);
 
   aember::utils::logging::Logger log_{"aember-child-demo"};
-
   aember::utils::logging::enable_console_silence();
   aember::utils::logging::enable_file_logging("/var/log/aember-child-demo.log");
 
-  aember::device_health::AemberMonitorClient monitor{"aember-child-demo"};
-
-  log_.info("Monitor type: {}", kMonitorClientName);
-
-  log_.info("Monitored fields:");
-  for (std::size_t i = 0; i < kSelfStatsFields.size(); ++i) {
-    log_.info("  {} {}",
-              i + 1 < kSelfStatsFields.size() ? "├─" : "└─",
-              kSelfStatsFields[i]);
-  }
-
-  monitor.Report();
-
+  log_.info(
+      "aember-child-demo started (pid {}, parent {})", ::getpid(), ::getppid());
+  long ticks = 0;
   while (g_running) {
     std::unique_lock lock{g_mtx};
-    g_cv.wait_for(lock, std::chrono::seconds(1));
-    if (g_running) { monitor.Report(); }
+    g_cv.wait_for(lock, std::chrono::seconds(10));
+    if (g_running) log_.info("alive ({} s)", (++ticks) * 10);
   }
-
   log_.info("aember-child-demo shutting down gracefully");
   return 0;
 }

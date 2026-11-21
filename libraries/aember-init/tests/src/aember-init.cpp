@@ -214,7 +214,7 @@ struct Sandbox {
 
   nlohmann::json Monitor() const {
     try {
-      return nlohmann::json::parse(ReadFile(dir / "aember-monitor.json"));
+      return nlohmann::json::parse(ReadFile(dir / "aember-status.json"));
     } catch (...) { return {}; }
   }
 
@@ -372,7 +372,7 @@ TEST(AemberInitTest, FailingServiceIsRestartedUpToMaxRestarts) {
 TEST(AemberInitTest, DaemonMessagesReachTheHeartbeat) {
   // An ipc service talks to init over fd 3 (one JSON message per packet):
   // readiness, then the network status and a container state, which the
-  // heartbeat (aember-monitor.json) must show.
+  // heartbeat (aember-status.json) must show.
   const auto error = InChild([] {
     Sandbox box;
     const std::string script =

@@ -9,8 +9,8 @@
 
 #include <aember-libs/aember-init/pid1.h>
 #include <aember-libs/child-supervisor/child-supervisor.h>
-#include <aember-libs/device-health/aember-monitor.h>
 #include <aember-libs/device-health/heartbeat.h>
+#include <aember-libs/device-health/status.h>
 #include <aember-libs/module-loader/module-loader.h>
 #include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/process-manager/process-manager.h>
@@ -46,7 +46,7 @@ struct InitOptions {
   bool chroot = false;
   /// Where services.json and modules.json are.
   std::string config_dir = "/etc/aember";
-  /// Where aember-init.log and aember-monitor.json go.
+  /// Where aember-init.log and aember-status.json go.
   std::string log_dir = "/var/log";
   /// The debug shell's console.
   std::string console = "/dev/console";
@@ -151,7 +151,7 @@ class AemberInit {
 
   std::unique_ptr<aember::root_manager::RootManager> root_manager_;
 
-  std::unique_ptr<aember::device_health::AemberMonitor> monitor_;
+  std::unique_ptr<aember::device_health::StatusReporter> status_;
   // ---------------------------------------------------------------------------
   // Service stack — order matters: process_manager_ and dependency_resolver_
   // must outlive service_manager_

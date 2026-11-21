@@ -162,7 +162,6 @@ class ContainerLifecycleTest : public ::testing::Test {
         [this](const std::string& name, State, State to) {
           transitions_.emplace_back(name, to);
         });
-    cm_->SetExtraConfigPath((dir_ / "lxc-extra.conf").string());
   }
   void TearDown() override {
     cm_.reset();
@@ -226,14 +225,6 @@ TEST_F(ContainerLifecycleTest, StartRunsTheAppUnderTheInitWrapper) {
   EXPECT_EQ(f.argv[5], "/usr/bin/app");
   // `lxc shutdown` must send SIGTERM, which the wrapper passes on.
   EXPECT_EQ(f.config.at("lxc.signal.halt"), "SIGTERM");
-}
-
-TEST_F(ContainerLifecycleTest, ExtraConfigItemsAreApplied) {
-  std::ofstream{dir_ / "lxc-extra.conf"}
-      << "# from the chroot launcher\nlxc.environment = DISPLAY=:0\n";
-  ASSERT_TRUE(cm_->AddContainer(Config("extra")));
-  ASSERT_TRUE(cm_->StartContainer("extra"));
-  EXPECT_EQ(Fakes()["extra"].config.at("lxc.environment"), "DISPLAY=:0");
 }
 
 TEST_F(ContainerLifecycleTest, StopIsGracefulWithTheConfiguredTimeout) {

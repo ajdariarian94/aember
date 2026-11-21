@@ -122,20 +122,7 @@ class ContainerManager {
 
   void SetStateCallback(StateCallback callback);
 
-  /// LXC settings applied to every container after its own config, one
-  /// "key = value" per line (default /etc/aember/lxc-extra.conf; a missing
-  /// file means none). Used e.g. to pass a display into containers.
-  void SetExtraConfigPath(std::string path) {
-    extra_config_path_ = std::move(path);
-  }
-
-  /// Parse "key = value" lines ('#' comments, blank lines and lines without
-  /// '=' are skipped).
-  static std::vector<std::pair<std::string, std::string>> ParseExtraConfig(
-      std::string_view text);
-
  private:
-  std::string extra_config_path_{"/etc/aember/lxc-extra.conf"};
   /// Static BusyBox bind mounted into containers as their init wrapper.
   std::string host_busybox_{"/bin/busybox"};
   // ---------------------------------------------------------------------------
