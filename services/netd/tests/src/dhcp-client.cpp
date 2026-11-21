@@ -647,4 +647,58 @@ TEST(DhcpLeaseMaintenanceTest, RebindThenNakAsRoot) {
   nm.Stop();
 }
 
+// No link at start (the server's veth end is down, like Wi-Fi before it
+// associated): a DHCP interface that isn't required waits instead of
+// spending its DHCP attempts, Start doesn't block on it, and MaintainLeases
+// brings it up once the link is there.
+TEST(DhcpWaitForLinkTest, WaitsForTheLinkThenGetsALeaseAsRoot) {
+  AEMBER_REQUIRE_PRIVATE_NET();
+  FakeDhcpServer server{[](std::uint8_t type) {
+    return type == 1 ? dhcp::MessageType::kOffer : dhcp::MessageType::kAck;
+  }};
+  ASSERT_TRUE(server.ok());
+  ASSERT_EQ(netlink::SetLinkDown(netlink::InterfaceIndex("aembersrv1")), 0);
+
+  aember::netd::NetworkManager nm{nlohmann::json::parse(R"({
+    "ping_target": "127.0.0.1", "ping_interval_ms": 60000,
+    "dhcp_timeout_ms": 3000, "dhcp_retries": 3,
+    "interfaces": [{"name": "aembercli1", "mode": "dhcp", "required": false}]
+  })")};
+  const auto t0 = std::chrono::steady_clock::now();
+  nm.Start();
+  // Only the short wait for a link, not 3 DHCP timeouts (9 s).
+  EXPECT_LT(std::chrono::steady_clock::now() - t0, 6s);
+  EXPECT_EQ(nm.StateOf("aembercli1"), aember::netd::InterfaceState::kWaiting);
+  EXPECT_EQ(server.requests.load(), 0);
+
+  nm.MaintainLeases();  // still no link: nothing happens
+  EXPECT_EQ(nm.StateOf("aembercli1"), aember::netd::InterfaceState::kWaiting);
+
+  ASSERT_EQ(netlink::SetLinkUp(netlink::InterfaceIndex("aembersrv1")), 0);
+  for (int i = 0; i < 30 && !netlink::FirstIPv4Address("aembercli1"); ++i) {
+    std::this_thread::sleep_for(100ms);  // carrier takes a moment
+    nm.MaintainLeases();
+  }
+  EXPECT_EQ(nm.StateOf("aembercli1"), aember::netd::InterfaceState::kUp);
+  ASSERT_TRUE(netlink::FirstIPv4Address("aembercli1").has_value());
+  EXPECT_EQ(Str(*netlink::FirstIPv4Address("aembercli1")), "10.0.2.15");
+  nm.Stop();
+}
+
+// A required interface keeps the old behaviour: its DHCP attempts run at
+// boot (and fail here: no link), and Start throws.
+TEST(DhcpWaitForLinkTest, RequiredInterfaceWithoutLinkFailsAsRoot) {
+  AEMBER_REQUIRE_PRIVATE_NET();
+  FakeDhcpServer server{[](std::uint8_t) { return dhcp::MessageType::kAck; }};
+  ASSERT_TRUE(server.ok());
+  ASSERT_EQ(netlink::SetLinkDown(netlink::InterfaceIndex("aembersrv1")), 0);
+  aember::netd::NetworkManager nm{nlohmann::json::parse(R"({
+    "ping_target": "127.0.0.1", "ping_interval_ms": 60000,
+    "dhcp_timeout_ms": 500, "dhcp_retries": 1,
+    "interfaces": [{"name": "aembercli1", "mode": "dhcp", "required": true}]
+  })")};
+  EXPECT_THROW(nm.Start(), std::runtime_error);
+  nm.Stop();
+}
+
 }  // namespace

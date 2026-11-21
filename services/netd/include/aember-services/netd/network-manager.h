@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <map>
@@ -87,8 +88,12 @@ class NetworkManager {
   /// Keep the DHCP leases alive: renew after T1 (unicast), rebind after
   /// T2 (broadcast), start over on a NAK or at expiry. Call it regularly
   /// (netd: every status report); each call does at most one exchange per
-  /// interface, so it returns within a few seconds.
+  /// interface, so it returns within a few seconds. It also brings up the
+  /// interfaces that aren't up yet (RetryPendingInterfaces).
   void MaintainLeases();
+
+  /// State of interface @p name (kDown for an unknown name).
+  [[nodiscard]] InterfaceState StateOf(std::string_view name) const;
 
  private:
   // ---------------------------------------------------------------------------
@@ -102,7 +107,13 @@ class NetworkManager {
   // ---------------------------------------------------------------------------
 
   void BringUpInterfaces();
-  bool BringUpInterface(const InterfaceConfig& iface);
+  /// kUp, kFailed, or kWaiting: a DHCP interface that isn't required and
+  /// has no link (carrier) gets no DHCP attempts yet.
+  InterfaceState BringUpInterface(const InterfaceConfig& iface,
+                                  int dhcp_attempts = -1);
+  /// Interfaces not up: a waiting one as soon as its link is up, a failed
+  /// one (not required) every kRetryFailed; one DHCP attempt each.
+  void RetryPendingInterfaces();
   /// Address (+ default route, DNS) from network.json, via rtnetlink.
   bool ConfigureStatic(const InterfaceConfig& iface, int ifindex);
   /// Address, default route and DNS from a DHCP lease (built-in client).
@@ -139,7 +150,10 @@ class NetworkManager {
   // ---------------------------------------------------------------------------
 
   NetworkConfig config_;
-  std::vector<InterfaceState> iface_states_;
+  /// Written by netd's main thread (Start, MaintainLeases), read by the
+  /// monitor thread (FirstUpInterface).
+  std::vector<std::atomic<InterfaceState>> iface_states_;
+  std::vector<std::chrono::steady_clock::time_point> next_retry_;
 
   struct DhcpState {
     InterfaceConfig iface;

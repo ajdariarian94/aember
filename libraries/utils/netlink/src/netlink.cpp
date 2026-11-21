@@ -167,6 +167,16 @@ int SetLinkUp(int ifindex) {
   return Transact(req);
 }
 
+int SetLinkDown(int ifindex) {
+  Request req;
+  auto* ifi = req.Init<ifinfomsg>(RTM_NEWLINK, 0);
+  ifi->ifi_family = AF_UNSPEC;
+  ifi->ifi_index = ifindex;
+  ifi->ifi_flags = 0;
+  ifi->ifi_change = IFF_UP;
+  return Transact(req);
+}
+
 int AddAddress(int ifindex, in_addr addr, int prefix_len) {
   if (prefix_len < 0 || prefix_len > 32) return -EINVAL;
   Request req;

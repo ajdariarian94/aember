@@ -76,7 +76,12 @@ image at all. A crash in them never takes PID 1 down.
   dependencies aren't running wait and start as soon as they are (also on
   restart). `StopAll` stops dependents first (containerd before netd).
 - netd: brings up the interfaces (keeps existing addresses), reports
-  status on change and every 10 s; on SIGTERM it exits and leaves the
+  status on change and every 10 s; a DHCP interface that isn't
+  `required` and has no link (not `IFF_RUNNING`) after 3 s waits (`kWaiting`)
+  instead of spending its DHCP attempts, and `MaintainLeases` (every
+  10 s) brings it up once the link appears (Wi-Fi after it associated, a
+  cable plugged in later); a failed one that isn't required is retried
+  every 60 s. A required interface keeps its DHCP attempts at boot; on SIGTERM it exits and leaves the
   kernel's network configuration, so a restart doesn't drop the network.
 - containerd: creates the container bridges (`"bridges"` in
   containers.json, `netlink::EnsureBridge`; network.json no longer has

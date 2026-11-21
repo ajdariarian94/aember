@@ -25,6 +25,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -46,6 +47,37 @@ namespace {
 
 namespace netlink = aember::utils::netlink;
 
+/// A waiting interface is tried again on the next MaintainLeases with a link;
+/// a failed one only this often.
+constexpr auto kRetryFailed = std::chrono::seconds{60};
+/// How long bring-up waits for a link before it calls the interface waiting
+/// (NICs need a moment for autonegotiation after link up).
+constexpr auto kCarrierWait = std::chrono::seconds{3};
+
+/// The link is up and usable (cable, Wi-Fi after the WPA handshake): the
+/// interface is IFF_RUNNING (operational state up). An ioctl on a socket,
+/// not /sys/class/net, which shows the network namespace /sys was mounted
+/// in, not ours.
+bool HasCarrier(std::string_view name) {
+  const int fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) return false;
+  ifreq ifr{};
+  name.copy(ifr.ifr_name, IFNAMSIZ - 1);
+  const bool running = ::ioctl(fd, SIOCGIFFLAGS, &ifr) == 0 &&
+                       (ifr.ifr_flags & IFF_RUNNING) != 0;
+  ::close(fd);
+  return running;
+}
+
+bool WaitForCarrier(std::string_view name, std::chrono::milliseconds timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (!HasCarrier(name)) {
+    if (std::chrono::steady_clock::now() >= deadline) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds{100});
+  }
+  return true;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -56,7 +88,10 @@ NetworkManager::NetworkManager(const nlohmann::json& config,
                                StatusCallback on_status)
     : on_status_(std::move(on_status)) {
   ParseConfig(config);
-  iface_states_.assign(config_.interfaces.size(), InterfaceState::kDown);
+  // Value-initialized: every state starts as kDown (0).
+  iface_states_ =
+      std::vector<std::atomic<InterfaceState>>(config_.interfaces.size());
+  next_retry_.assign(config_.interfaces.size(), {});
 }
 
 NetworkManager::~NetworkManager() {
@@ -180,23 +215,60 @@ void NetworkManager::BringUpInterfaces() {
   for (auto [i, iface] : std::views::enumerate(config_.interfaces)) {
     iface_states_[i] = InterfaceState::kBringingUp;
 
-    const bool ok = BringUpInterface(iface);
-    iface_states_[i] = ok ? InterfaceState::kUp : InterfaceState::kFailed;
+    const auto state = BringUpInterface(iface);
+    iface_states_[i] = state;
+    next_retry_[i] = std::chrono::steady_clock::now() + kRetryFailed;
 
-    if (!ok) {
+    if (state == InterfaceState::kFailed) {
       if (iface.required) {
         throw std::runtime_error(std::format(
             "NetworkManager: required interface '{}' failed to come up",
             iface.name));
       }
-      log_.warn("Interface {} failed (not required, continuing)", iface.name);
+      log_.warn("Interface {} failed (not required, retried later)",
+                iface.name);
+    } else if (state == InterfaceState::kWaiting) {
+      log_.info("Interface {}: no link yet, brought up when it appears",
+                iface.name);
     } else {
       log_.info("Interface {} is up", iface.name);
     }
   }
 }
 
-bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
+void NetworkManager::RetryPendingInterfaces() {
+  const auto now = std::chrono::steady_clock::now();
+  for (auto [i, iface] : std::views::enumerate(config_.interfaces)) {
+    const auto state = iface_states_[i].load();
+    if (state != InterfaceState::kWaiting && state != InterfaceState::kFailed) {
+      continue;
+    }
+    // A waiting interface is tried as soon as it has a link; a failed one
+    // (no such interface, DHCP gave up) only every kRetryFailed.
+    if (state == InterfaceState::kWaiting ? !HasCarrier(iface.name)
+                                          : now < next_retry_[i]) {
+      continue;
+    }
+    next_retry_[i] = now + kRetryFailed;
+    log_.info("Interface {}: trying again", iface.name);
+    const auto next = BringUpInterface(iface, 1);
+    iface_states_[i] = next;
+    if (next == InterfaceState::kUp) {
+      log_.info("Interface {} is up", iface.name);
+    }
+  }
+}
+
+NetworkManager::InterfaceState NetworkManager::StateOf(
+    std::string_view name) const {
+  for (auto [i, iface] : std::views::enumerate(config_.interfaces)) {
+    if (iface.name == name) return iface_states_[i].load();
+  }
+  return InterfaceState::kDown;
+}
+
+NetworkManager::InterfaceState NetworkManager::BringUpInterface(
+    const InterfaceConfig& iface, int dhcp_attempts) {
   const auto mode_str =
       iface.mode == aember::netd::IpMode::kDhcp ? "dhcp" : "static";
   log_.info("Bringing up interface: {} (mode={})", iface.name, mode_str);
@@ -204,13 +276,13 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
   const int idx = netlink::InterfaceIndex(iface.name);
   if (idx < 0) {
     log_.error("{}: no such interface", iface.name);
-    return false;
+    return InterfaceState::kFailed;
   }
   if (const int rc = netlink::SetLinkUp(idx); rc != 0) {
     log_.error("{}: could not set link up: {}",
                iface.name,
                std::system_category().message(-rc));
-    return false;
+    return InterfaceState::kFailed;
   }
 
   // Already configured (a container runtime like Docker, the kernel's ip=
@@ -223,13 +295,22 @@ bool NetworkManager::BringUpInterface(const InterfaceConfig& iface) {
     if (iface.mode == aember::netd::IpMode::kDhcp) {
       AdoptAddress(iface, idx, *existing);
     }
-    return true;
+    return InterfaceState::kUp;
   }
 
+  const auto result = [](bool ok) {
+    return ok ? InterfaceState::kUp : InterfaceState::kFailed;
+  };
   if (iface.mode == aember::netd::IpMode::kStatic) {
-    return ConfigureStatic(iface, idx);
+    return result(ConfigureStatic(iface, idx));
   }
-  return ConfigureDhcp(iface, idx);
+  // DHCP needs a link: without one (Wi-Fi before it associated, no cable)
+  // it would only time out. A required interface keeps its DHCP attempts
+  // (boot waits for it); any other waits for its link.
+  if (!iface.required && !WaitForCarrier(iface.name, kCarrierWait)) {
+    return InterfaceState::kWaiting;
+  }
+  return result(ConfigureDhcp(iface, idx, dhcp_attempts));
 }
 
 bool NetworkManager::ConfigureStatic(const InterfaceConfig& iface, int idx) {
@@ -373,6 +454,7 @@ void NetworkManager::AdoptAddress(const InterfaceConfig& iface, int idx,
 }
 
 void NetworkManager::MaintainLeases() {
+  RetryPendingInterfaces();
   using Phase = dhcp::LeaseTimer::Phase;
   const auto now = std::chrono::steady_clock::now();
   for (auto& [name, state] : leases_) {
