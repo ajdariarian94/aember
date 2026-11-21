@@ -25,7 +25,7 @@ from aember.config.resources import kernel_dir
 from aember.core.context import Context
 from aember.core.step import Step
 from aember.steps.packaging.rootfs import SIZE_EXTRA_MB, SIZE_MARGIN, _tree_size
-from aember.steps.packaging.rootfs import run_guestfish
+from aember.steps.packaging.rootfs import run_guestfish, tar_in_commands
 from aember.steps.releasing.get_version_from_cmake import get_version_from_cmake
 
 log = logging.getLogger("aember.rpi.image")
@@ -133,6 +133,7 @@ class RpiImageStep(Step):
             f.truncate(total_mb * 1024 * 1024)
 
         boot_end = rpi.BOOT_START + rpi.BOOT_SECTORS - 1
+        tars = root / "build" / "rpi" / "rootfs-tars"
         script = [
             f"add {img}",
             "run",
@@ -144,17 +145,7 @@ class RpiImageStep(Step):
             f"mkfs vfat /dev/sda1 label:{rpi.BOOT_LABEL}",
             f"mkfs ext4 /dev/sda2 label:{rpi.ROOT_LABEL}",
             "mount /dev/sda2 /",
-            *[f"copy-in {e} /" for e in initramfs_root.iterdir()],
-            *(
-                [f"copy-in {e} /" for e in services_root.iterdir()]
-                if services_root.exists()
-                else []
-            ),
-            *(
-                [f"copy-in {e} /" for e in overlay.iterdir()]
-                if overlay.exists()
-                else []
-            ),
+            *tar_in_commands([initramfs_root, services_root, overlay], tars),
             "umount /",
             "mount /dev/sda1 /",
             *[f"copy-in {e} /" for e in boot.iterdir()],
@@ -162,7 +153,10 @@ class RpiImageStep(Step):
             "exit",
         ]
         log.info("Building %s (%d MiB)", img, total_mb)
-        run_guestfish(script, what=str(img))
+        try:
+            run_guestfish(script, what=str(img))
+        finally:
+            shutil.rmtree(tars, ignore_errors=True)
 
         log.info("Raspberry Pi 4 image: %s", img)
         host_path = str(HOST_ROOT_PATH) + str(img).removeprefix(str(root))

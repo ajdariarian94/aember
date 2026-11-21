@@ -43,6 +43,7 @@ target_link_libraries(
          aember-libs::utils::config
          aember-libs::utils::ipc
          aember-libs::utils::logging
+         aember-libs::utils::netlink
          aember-libs::utils::shell
          aember-libs::utils::signal
          aember-libs::utils::watchdog

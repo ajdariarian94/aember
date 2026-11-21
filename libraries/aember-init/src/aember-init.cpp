@@ -7,6 +7,7 @@
 
 #include <aember-libs/aember-init/aember-init.h>
 #include <aember-libs/device-health/status.h>
+#include <aember-libs/utils/netlink/netlink.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -14,6 +15,7 @@
 #include <fstream>
 #include <ranges>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 
 #include <sys/wait.h>
@@ -114,6 +116,20 @@ void AemberInit::StartInitramfs() {
 // StartRoot
 // ---------------------------------------------------------------------------
 
+void AemberInit::BringUpLoopback() {
+  namespace netlink = aember::utils::netlink;
+  const int index = netlink::InterfaceIndex("lo");
+  if (index < 0) {
+    log_.warn("No loopback interface");
+    return;
+  }
+  if (const int rc = netlink::SetLinkUp(index); rc < 0) {
+    log_.warn("Cannot bring up lo: {}", std::system_category().message(-rc));
+    return;
+  }
+  log_.info("Loopback up");
+}
+
 void AemberInit::StartRoot() {
   if (running_.exchange(true)) return;
 
@@ -135,6 +151,12 @@ void AemberInit::StartRoot() {
       return {};
     });
   });
+
+  // Loopback is PID 1's job, not the network service's: every board has it,
+  // whatever manages the network (aember-netd, ConnMan or nothing), and
+  // local clients (SSH to 127.0.0.1, D-Bus over TCP, ...) hang while it is
+  // down. Idempotent, so a chroot (already up) is fine.
+  Guarded(log_, "Loopback", [this] { BringUpLoopback(); });
 
   // Signals and the reaper come before any service starts, so exits during
   // StartAll are collected and a shutdown request works from here on.

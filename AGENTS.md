@@ -290,6 +290,10 @@ BusyBox stays in the image for the debug shell and interactive use.
   countdown), so `aember rpi launch` boots with `aember.watchdog=0`.
   Reset check: `aember app launch --headless --append aember.watchdog=0`,
   then `echo 1 > /dev/watchdog` from the debug shell: the VM reboots.
+- **Loopback:** PID 1 brings `lo` up in root mode before any service
+  starts (`BringUpLoopback`, rtnetlink): it's not the network service's
+  job (a board may run ConnMan or nothing), and local clients such as SSH
+  to 127.0.0.1 hang while it's down.
 - The file logs `/var/log/aember-{init,netd,containerd}.log` rotate
   (1 MiB × 3 each).
 
@@ -369,7 +373,10 @@ everyday build command.
    above); tests into `tests_root` (rootfs only);
    `aember-initramfs.cpio.gz`; `aember-rootfs.img` built with
    guestfish in a `docker run` of the current dev image (bind mount via
-   `HOST_ROOT_PATH`)
+   `HOST_ROOT_PATH`). Trees go in with `tar-in` from tars whose entries are uid/gid 0
+   (`rootfs.tar_in_commands`, also for the Pi and USB images): `copy-in`
+   kept the build user's uid 1000, and ownership checks on the device
+   (an SSH server's `/root`) failed
 
 Every name in `resources/<arch>/rootfs/etc/aember/modules.json` must exist in
 the aember-resources kernel, as a `.ko` or listed in `modules.builtin`
