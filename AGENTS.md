@@ -77,7 +77,7 @@ image at all. A crash in them never takes PID 1 down.
   restart). `StopAll` stops dependents first (containerd before netd).
 - netd: brings up the interfaces (keeps existing addresses), reports
   status on change and every 10 s; a DHCP interface that isn't
-  `required` and has no link (carrier) after 3 s waits (`kWaiting`)
+  `required` and has no link (not `IFF_RUNNING`) after 3 s waits (`kWaiting`)
   instead of spending its DHCP attempts, and `MaintainLeases` (every
   10 s) brings it up once the link appears (Wi-Fi after it associated, a
   cable plugged in later); a failed one that isn't required is retried

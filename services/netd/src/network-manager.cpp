@@ -54,12 +54,19 @@ constexpr auto kRetryFailed = std::chrono::seconds{60};
 /// (NICs need a moment for autonegotiation after link up).
 constexpr auto kCarrierWait = std::chrono::seconds{3};
 
-/// The link is up (cable, associated Wi-Fi): /sys/class/net/<name>/carrier
-/// is "1". Reading it fails while the interface is down.
+/// The link is up and usable (cable, Wi-Fi after the WPA handshake): the
+/// interface is IFF_RUNNING (operational state up). An ioctl on a socket,
+/// not /sys/class/net, which shows the network namespace /sys was mounted
+/// in, not ours.
 bool HasCarrier(std::string_view name) {
-  std::ifstream f{std::format("/sys/class/net/{}/carrier", name)};
-  char c = 0;
-  return f.get(c) && c == '1';
+  const int fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) return false;
+  ifreq ifr{};
+  name.copy(ifr.ifr_name, IFNAMSIZ - 1);
+  const bool running = ::ioctl(fd, SIOCGIFFLAGS, &ifr) == 0 &&
+                       (ifr.ifr_flags & IFF_RUNNING) != 0;
+  ::close(fd);
+  return running;
 }
 
 bool WaitForCarrier(std::string_view name, std::chrono::milliseconds timeout) {
