@@ -34,6 +34,9 @@ int FirstIPv4Prefix(std::string_view name);
 /// `ip link set <idx> up`
 int SetLinkUp(int ifindex);
 
+/// `ip link set <idx> down`
+int SetLinkDown(int ifindex);
+
 /// `ip addr replace <addr>/<prefix> dev <idx>` (also sets the broadcast).
 int AddAddress(int ifindex, in_addr addr, int prefix_len);
 

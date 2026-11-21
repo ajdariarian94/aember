@@ -19,7 +19,9 @@ enum class InterfaceState {
   kDown,        ///< Interface not yet brought up
   kBringingUp,  ///< Getting a DHCP lease / applying static config
   kUp,          ///< Interface is up and has an address
-  kFailed,      ///< Failed to come up after all retries
+  kWaiting,     ///< No link yet (Wi-Fi not associated, no cable): retried
+                ///< as soon as the link is up
+  kFailed,      ///< Failed to come up (not required: retried later)
 };
 
 }  // namespace aember::netd
