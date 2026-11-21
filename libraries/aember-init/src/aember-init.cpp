@@ -10,12 +10,12 @@
 #include <aember-libs/utils/netlink/netlink.h>
 
 #include <algorithm>
-#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <ranges>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 
 #include <sys/wait.h>
@@ -124,7 +124,7 @@ void AemberInit::BringUpLoopback() {
     return;
   }
   if (const int rc = netlink::SetLinkUp(index); rc < 0) {
-    log_.warn("Cannot bring up lo: {}", std::strerror(-rc));
+    log_.warn("Cannot bring up lo: {}", std::system_category().message(-rc));
     return;
   }
   log_.info("Loopback up");
