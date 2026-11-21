@@ -88,9 +88,9 @@ NetworkManager::NetworkManager(const nlohmann::json& config,
                                StatusCallback on_status)
     : on_status_(std::move(on_status)) {
   ParseConfig(config);
+  // Value-initialized: every state starts as kDown (0).
   iface_states_ =
       std::vector<std::atomic<InterfaceState>>(config_.interfaces.size());
-  for (auto& state : iface_states_) state = InterfaceState::kDown;
   next_retry_.assign(config_.interfaces.size(), {});
 }
 
