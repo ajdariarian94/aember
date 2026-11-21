@@ -200,6 +200,10 @@ then its `aember` CLI (`aember-cli/run.py build`, then
 `aember-cli/run.py install <this repo>`) puts the SquashFS image, its LXC
 config and the `containers.json` entry into the board's overlay.
 
+Only what a board lists goes into its image: the services in
+`services.json` and the containers in `containers.json`. Remove an entry
+and the next `aember app pack` leaves that program or container image out.
+
 ## Status display: aember-stats and aember-monitor
 
 Two containers from their own repositories show what a device is doing:
@@ -240,8 +244,7 @@ heartbeat, and is told when a debug shell owns the console. See
 ```
 libraries/     PID 1 as static libraries (aember-libs)
 executables/   the aember binary
-services/      aember-netd, aember-containerd, your services
-examples/      demo programs
+services/      aember-netd, aember-containerd, a demo service, your own
 aember-cli/    the aember command (Python)
 resources/     root filesystem overlays per architecture
 tools/         toolchain files, dev container scripts

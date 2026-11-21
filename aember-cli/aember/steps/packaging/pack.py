@@ -12,6 +12,7 @@ from .busybox import install_busybox
 from .initramfs import create_initramfs_tree, pack_initramfs
 from .libs import copy_runtime_libs, strip_libs
 from .modules import copy_kernel_modules
+from .overlay import stage_overlay
 from .rootfs import create_rootfs_image
 
 log = logging.getLogger("aember.pack")
@@ -141,7 +142,7 @@ class PackStep(Step):
             exe = Path(str(entry.get("executable", "")))
             src = built / exe.name
             if exe.parent != Path("/usr/bin") or not src.is_file():
-                continue  # not one of ours (examples, BusyBox, ...)
+                continue  # not one of ours (BusyBox, ConnMan, ...)
             dst = services_root / "usr" / "bin" / exe.name
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
@@ -154,18 +155,6 @@ class PackStep(Step):
             ", ".join(available) or "none",
         )
         return packed
-
-    def copy_examples(self, ctx: Context, initramfs_root: Path) -> None:
-        install_dir = ctx.data.get("install_dir")
-        if install_dir is None:
-            log.debug("install_dir not found, skipping examples")
-            return
-
-        self._copy_tree_into(
-            install_dir / "examples",
-            initramfs_root / "usr" / "bin",
-            "examples",
-        )
 
     def copy_kernel(self, ctx: Context, package_dir: Path) -> Path:
         log.info("Copying kernel image")
@@ -202,6 +191,13 @@ class PackStep(Step):
 
         self.prepare_dirs(package_dir, initramfs_root)
 
+        # Only the containers containers.json lists (also for the Pi/USB
+        # images and the AppImage, which use this tree). First, so a missing
+        # image fails the pack before anything is built.
+        overlay_root = stage_overlay(
+            self.overlay_dir(ctx), package_dir / "overlay_root"
+        )
+
         log.info("Creating initramfs filesystem tree")
         create_initramfs_tree(initramfs_root)
 
@@ -211,7 +207,6 @@ class PackStep(Step):
         self.copy_aember(ctx, initramfs_root)
         tests_root = package_dir / "tests_root"
         self.copy_tests(ctx, tests_root)
-        self.copy_examples(ctx, initramfs_root)
         self.copy_init(ctx, initramfs_root)
 
         log.info("Copying runtime libraries")
@@ -258,7 +253,7 @@ class PackStep(Step):
         rootfs = create_rootfs_image(
             ctx=ctx,
             initramfs_root=initramfs_root,
-            overlay_dir=self.overlay_dir(ctx),
+            overlay_dir=overlay_root,
             package_dir=package_dir,
             extra_trees=[services_root, tests_root],
         )
@@ -270,6 +265,7 @@ class PackStep(Step):
                 "initramfs": initramfs,
                 "rootfs": rootfs,
                 "services_root": services_root,
+                "overlay_root": overlay_root,
             }
         )
 

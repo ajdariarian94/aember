@@ -1,5 +1,5 @@
-# Compiler warnings for aember's own code (libraries, services, executables,
-# examples and their tests). Included right after project() by each of those
+# Compiler warnings for aember's own code (libraries, services, executables
+# and their tests). Included right after project() by each of those
 # sub-projects; vcpkg's dependencies never see these flags.
 #
 # AEMBER_WERROR (default ON) turns them into errors: the code is kept

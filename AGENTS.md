@@ -12,8 +12,8 @@ real root filesystem. This repo holds:
 
 - the C++ code: `libraries/` (the init system as static libs), `executables/`
   (the `aember` binary, PID 1), `services/` (separate programs PID 1
-  starts from services.json: `aember-netd`, `aember-containerd`, and
-  whatever else you add), `examples/`
+  starts from services.json: `aember-netd`, `aember-containerd`,
+  `aember-child-demo` and whatever else you add)
 - the `aember` CLI (`aember-cli/`, plain files in this repo), which fetches
   the prebuilt resources, configures, builds, packs, launches in QEMU and
   releases the system
@@ -166,12 +166,11 @@ x64, aarch64 and arm32).
 ```
 .devcontainer/          Ubuntu 24.04 dev image (prebuilt ghcr.io/ajdariarian94/aember-dev)
 aember-cli/             the `aember` CLI (Python, Typer): cli/, steps/, config/, utils/
-CMakeLists.txt          Superbuild: ExternalProject libraries → executables, services, examples
+CMakeLists.txt          Superbuild: ExternalProject libraries → executables, services
                         project VERSION here is the app version (CLI reads it)
 libraries/              aember-libs: one static lib per dir, + utils/<x>
 executables/aember/     main.cpp → the `aember` binary (PID 1)
-services/               one dir per service program (netd, containerd), README.md
-examples/               demo binaries packed into the initramfs
+services/               one dir per service program (netd, containerd, child-demo), README.md
 resources/<arch>/rootfs rootfs overlay: configs tracked, *.squashfs images from the release
 tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (SDK compilers, sysroot, flags)
 tools/scripts/          init.sh (postStart), prerequisites.sh, bashrc.d/
@@ -313,9 +312,20 @@ The overlay's text files (the JSON configs, `lxc.container.conf`) are
 images (`*.squashfs`) are git-ignored and
 come from aember's own release `v<project VERSION>` as
 `aember-resources-v<V>.tar.gz` (public, plain HTTPS). `CheckResources`
-(`utils/check_resources.py`) downloads it when no image is present and
+(`utils/check_resources.py`) downloads it when an image that some
+board's `containers.json` lists is missing (`utils/containers.py`), and
 extracts only files that don't exist yet, so tracked configs always win.
 `aember release` packs the whole overlay into that tarball.
+
+**Only listed containers ship.** The overlay may hold more container
+directories (`var/lib/aember/<name>/`) than a board runs: `PackStep`
+stages `build/package/<arch>/<type>/overlay_root` (hard links,
+`steps/packaging/overlay.py`) without the ones `containers.json` doesn't
+list, and the rootfs image, `aember rpi image`, `aember usb image` and
+the AppImage all use that tree, never `resources/<arch>/rootfs` directly.
+A listed container whose image or `lxc.container.conf` is missing fails
+the pack. Drop a container from `containers.json` and its image is gone
+from the next image.
 
 ## From a fresh clone (x64)
 
@@ -349,13 +359,15 @@ everyday build command.
    and `VCPKG_MAX_CONCURRENCY`, and the toolchain files use it for
    `-flto=<jobs>`.
 5. `PackStep` (`steps/packaging/`): initramfs tree + BusyBox (installed with
-   `qemu-<arch>-static` when cross) + `aember` + examples/tests + `/init`
+   `qemu-<arch>-static` when cross) + `aember` + `/init`
    symlink; runtime libs resolved with `readelf -d` (NEEDED; works for every
    arch, unlike the host objdump), from the LXC libs and the SDK target
    sysroot; the services listed in services.json into `services_root`
    (rootfs only) with what they need beyond the initramfs (liblxc for
    containerd, `SERVICE_DLOPEN_LIBS`); kernel modules from `modules.json` +
-   `depmod`; `aember-initramfs.cpio.gz`; `aember-rootfs.img` built with
+   `depmod`; the overlay with only the listed containers (`overlay_root`,
+   above); tests into `tests_root` (rootfs only);
+   `aember-initramfs.cpio.gz`; `aember-rootfs.img` built with
    guestfish in a `docker run` of the current dev image (bind mount via
    `HOST_ROOT_PATH`)
 
@@ -587,7 +599,7 @@ same image, `.github/workflows/ci.yml`).
   `_exit()`. The root switch execs away, so root-manager's pivot test passes
   without being counted.
 - **Warnings**: `tools/cmake/AemberWarnings.cmake` (included by libraries,
-  services, executables, examples; not vcpkg) turns on `-Wall -Wextra
+  services, executables; not vcpkg) turns on `-Wall -Wextra
   -Wpedantic -Wshadow ...` as errors (`AEMBER_WERROR`, ON). Keep the code
   warning-free; not used: `-Wnull-dereference` (false positives inside
   libstdc++ at -O2).

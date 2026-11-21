@@ -8,6 +8,7 @@ aember's own network and container handling are services too:
 |---------------|---------------------|------------------------------------------------------|
 | `netd/`       | `aember-netd`       | Interfaces (DHCP/static), DNS, connectivity status   |
 | `containerd/` | `aember-containerd` | LXC containers from `containers.json`, their bridges |
+| `child-demo/` | `aember-child-demo` | Demo: logs every 10 s, exits cleanly on SIGTERM (the smallest service to start from) |
 
 A board that doesn't list a service doesn't get it: `aember app pack` only
 puts the services named in `services.json` into the image. A device can
