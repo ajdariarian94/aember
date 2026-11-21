@@ -8,9 +8,11 @@ git: they come from aember's own GitHub
 release v<VERSION> as aember-resources-v<VERSION>.tar.gz (packed by
 `aember release`).
 
-check_resources() downloads that tarball when an image is missing and
-extracts only files that don't exist yet, so the git-tracked configs always
-win over the (possibly older) copies in the tarball.
+check_resources() downloads that tarball when an image some board's
+containers.json lists is missing, and extracts only files that don't exist
+yet, so the git-tracked configs always win over the (possibly older) copies
+in the tarball. Images no containers.json lists aren't needed (they don't go
+into any image, see steps/packaging/overlay.py).
 """
 
 import logging
@@ -19,11 +21,10 @@ import shutil
 import tarfile
 import urllib.request
 
+from .containers import missing_images
 from .fetch_artifact import _get_repo, get_version
 
 log = logging.getLogger("aember.check_resources")
-
-IMAGE_GLOB = "*.squashfs"
 
 
 def _download(url: str, dest: Path) -> None:
@@ -50,19 +51,36 @@ def _extract_missing(tar_path: Path, root: Path) -> int:
     return count
 
 
+def _missing(resources_dir: Path) -> list[Path]:
+    """Listed images missing in any board's overlay (resources/<arch>/rootfs)."""
+    missing: list[Path] = []
+    for overlay in sorted(resources_dir.glob("*/rootfs")):
+        try:
+            missing += missing_images(overlay)
+        except ValueError as e:  # the pack step fails on it with the same error
+            log.warning("%s", e)
+    return missing
+
+
+def _names(paths: list[Path], root: Path) -> str:
+    return ", ".join(str(p.relative_to(root)) for p in paths)
+
+
 def check_resources(root: Path) -> None:
-    """Make sure resources/ has its container images; raise if that fails."""
+    """Make sure resources/ has the listed container images; raise if the
+    download fails."""
     resources_dir = root / "resources"
     version = get_version(root)
     name = f"aember-resources-v{version}.tar.gz"
     tar_path = root / "build" / "downloads" / name
 
-    if any(resources_dir.rglob(IMAGE_GLOB)):
-        log.info("Resource images present — skipping")
+    missing = _missing(resources_dir)
+    if not missing:
+        log.info("Listed container images present — skipping")
         return
 
     url = f"https://github.com/{_get_repo(root)}/releases/download/v{version}/{name}"
-    log.info("Resource images missing — fetching %s", name)
+    log.info("Missing %s — fetching %s", _names(missing, root), name)
     try:
         _download(url, tar_path)
         count = _extract_missing(tar_path, root)
@@ -73,3 +91,14 @@ def check_resources(root: Path) -> None:
         ) from e
     tar_path.unlink(missing_ok=True)
     log.info("Extracted %d file(s) from %s into resources/", count, name)
+
+    still = _missing(resources_dir)
+    if still:
+        # Not released yet (a new container): `aember app pack` fails for
+        # that board until the image is installed from its own repository.
+        log.warning(
+            "Not in %s either: %s. Install them from their repository "
+            "(aember-cli/run.py install -a <arch> <aember>).",
+            name,
+            _names(still, root),
+        )

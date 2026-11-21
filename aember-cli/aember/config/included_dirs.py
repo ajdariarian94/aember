@@ -1,1 +1,1 @@
-INCLUDED_DIRS = {"libraries", "examples", "executables"}
+INCLUDED_DIRS = {"libraries", "services", "executables"}

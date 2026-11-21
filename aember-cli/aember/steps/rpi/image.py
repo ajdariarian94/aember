@@ -72,8 +72,9 @@ class RpiImageStep(Step):
         initramfs_root = package_dir / "initramfs_root"
         # Services (aember-netd, aember-containerd, ...) are rootfs-only.
         services_root = package_dir / "services_root"
-        overlay = root / "resources" / rpi.ARCHITECTURE / "rootfs"
-        for needed in (package_dir / "kernel", initramfs_root):
+        # The overlay as `aember app pack` staged it: only listed containers.
+        overlay = package_dir / "overlay_root"
+        for needed in (package_dir / "kernel", initramfs_root, overlay):
             if not needed.exists():
                 raise FileNotFoundError(
                     f"{needed} not found: run `aember app build` and `aember app "
