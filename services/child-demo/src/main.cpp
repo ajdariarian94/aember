@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
+#include <initializer_list>
 #include <mutex>
 
 #include <unistd.h>
@@ -24,13 +25,16 @@ static void handle_signal(int) {
 }
 
 int main() {
-  // Exit cleanly on SIGTERM/SIGINT so PID 1 sees SIGCHLD at once.
-  std::signal(SIGTERM, handle_signal);
-  std::signal(SIGINT, handle_signal);
-
   aember::utils::logging::Logger log_{"aember-child-demo"};
   aember::utils::logging::enable_console_silence();
   aember::utils::logging::enable_file_logging("/var/log/aember-child-demo.log");
+
+  // Exit cleanly on SIGTERM/SIGINT so PID 1 sees SIGCHLD at once.
+  for (const int sig : {SIGTERM, SIGINT}) {
+    if (std::signal(sig, handle_signal) == SIG_ERR) {
+      log_.error("cannot handle signal {}", sig);
+    }
+  }
 
   log_.info(
       "aember-child-demo started (pid {}, parent {})", ::getpid(), ::getppid());
