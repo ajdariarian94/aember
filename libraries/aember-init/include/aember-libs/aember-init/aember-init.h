@@ -164,6 +164,9 @@ class AemberInit {
 
   std::jthread reaper_thread_;
 
+  // `ip link set lo up` (root mode, before any service starts).
+  void BringUpLoopback();
+
   // Hardware watchdog (root mode on a device): fed only while the run loop
   // and the reaper tick (steady_clock time since epoch, in ms).
   void StartWatchdog();

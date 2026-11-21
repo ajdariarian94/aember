@@ -1,8 +1,10 @@
 import logging
 import math
 import os
+import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 from aember.config.host_path import HOST_ROOT_PATH
@@ -67,6 +69,34 @@ def run_guestfish(script: list[str], what: str) -> None:
         )
 
 
+def _root_owned(info: tarfile.TarInfo) -> tarfile.TarInfo:
+    info.uid = info.gid = 0
+    info.uname = info.gname = "root"
+    return info
+
+
+def tar_in_commands(trees: list[Path], workdir: Path) -> list[str]:
+    """
+    guestfish commands that copy each tree's contents onto / of the mounted
+    file system, in order (a later tree wins), every file owned by root.
+
+    `copy-in` keeps the build user's uid/gid (1000), which breaks anything
+    that checks ownership on the device (an SSH server refuses a /root it
+    doesn't own). Each tree goes in as a tar whose entries are uid/gid 0
+    instead. The tars are written to workdir; delete it after guestfish ran.
+    """
+    shutil.rmtree(workdir, ignore_errors=True)
+    workdir.mkdir(parents=True)
+    commands = []
+    for i, tree in enumerate(t for t in trees if t.exists()):
+        tar_path = workdir / f"{i:02d}-{tree.name}.tar"
+        with tarfile.open(tar_path, "w") as tar:
+            for entry in sorted(tree.iterdir()):
+                tar.add(entry, arcname=entry.name, filter=_root_owned)
+        commands.append(f"tar-in {tar_path} /")
+    return commands
+
+
 def rootfs_size_mb(ctx: Context, *trees: Path) -> int:
     """ctx.rootfs_size, or more if the trees wouldn't fit (Debug + tests)."""
     needed = sum(_tree_size(t) for t in trees) / (1024 * 1024)
@@ -106,22 +136,20 @@ def create_rootfs_image(
         "mount /dev/sda1 /",
     ]
 
-    # Copy initramfs contents
-    guestfish_script += [f"copy-in {entry} /" for entry in initramfs_root.iterdir()]
-    for tree in extra:
-        guestfish_script += [f"copy-in {entry} /" for entry in tree.iterdir()]
-
-    # Copy overlay if it exists
+    # initramfs tree, the extra trees, then the overlay (a board's own
+    # files win), all owned by root.
     if overlay_dir.exists():
         log.info("Applying overlay from %s", overlay_dir)
-        guestfish_script += [f"copy-in {entry} /" for entry in overlay_dir.iterdir()]
-    else:
-        log.debug("No overlay directory at %s, skipping", overlay_dir)
+    tars = package_dir / "rootfs-tars"
+    guestfish_script += tar_in_commands([initramfs_root, *extra, overlay_dir], tars)
 
     guestfish_script += ["umount /", "exit"]
 
     log.info("Building rootfs image (%d MB) at %s", size_mb, rootfs_img)
-    run_guestfish(guestfish_script, what=str(rootfs_img))
+    try:
+        run_guestfish(guestfish_script, what=str(rootfs_img))
+    finally:
+        shutil.rmtree(tars, ignore_errors=True)
 
     log.info("Rootfs image created successfully: %s", rootfs_img)
     return rootfs_img
