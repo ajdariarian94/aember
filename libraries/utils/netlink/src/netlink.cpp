@@ -26,6 +26,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+// <linux/if.h> has these but clashes with <net/if.h>.
+#ifndef IFF_LOWER_UP
+#define IFF_LOWER_UP 0x10000
+#endif
+#ifndef IFF_DORMANT
+#define IFF_DORMANT 0x20000
+#endif
+
 namespace aember::utils::netlink {
 
 namespace {
@@ -138,6 +146,27 @@ std::optional<in_addr> FirstIPv4Address(std::string_view name) {
   }
   ::freeifaddrs(list);
   return found;
+}
+
+bool LinkUsable(std::string_view name) {
+  ifaddrs* list = nullptr;
+  if (::getifaddrs(&list) != 0) return false;
+  bool usable = false;
+  for (const ifaddrs* a = list; a != nullptr; a = a->ifa_next) {
+    if (a->ifa_addr == nullptr || a->ifa_addr->sa_family != AF_PACKET ||
+        a->ifa_name == nullptr || name != a->ifa_name) {
+      continue;
+    }
+    // getifaddrs asks rtnetlink (our namespace) and passes the whole
+    // ifi_flags: up, a carrier, and not dormant (Wi-Fi before the WPA
+    // handshake).
+    const unsigned flags = a->ifa_flags;
+    usable = (flags & IFF_UP) != 0 && (flags & IFF_LOWER_UP) != 0 &&
+             (flags & IFF_DORMANT) == 0;
+    break;
+  }
+  ::freeifaddrs(list);
+  return usable;
 }
 
 int FirstIPv4Prefix(std::string_view name) {

@@ -28,6 +28,11 @@ int InterfaceIndex(std::string_view name);
 /// First IPv4 address of interface @p name, if it has one.
 std::optional<in_addr> FirstIPv4Address(std::string_view name);
 
+/// The link of @p name can carry traffic: up, a carrier (IFF_LOWER_UP),
+/// and not dormant (Wi-Fi before the WPA handshake). False for an unknown
+/// interface.
+bool LinkUsable(std::string_view name);
+
 /// Prefix length of that first IPv4 address, -1 if there is none.
 int FirstIPv4Prefix(std::string_view name);
 
