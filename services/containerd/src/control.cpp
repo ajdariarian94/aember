@@ -5,10 +5,12 @@
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-services/containerd/control.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
+#include <iterator>
 #include <string>
 #include <tuple>
 
@@ -35,10 +37,12 @@ nlohmann::json HandleControlRequest(const nlohmann::json& request,
   }
   const auto op = request["op"].get<std::string>();
   if (op == "list") {
+    const auto entries = target.List();
     auto list = nlohmann::json::array();
-    for (const auto& e : target.List()) {
-      list.push_back({{"name", e.name}, {"state", e.state}});
-    }
+    std::ranges::transform(
+        entries, std::back_inserter(list), [](const auto& e) {
+          return nlohmann::json{{"name", e.name}, {"state", e.state}};
+        });
     return {{"ok", true}, {"containers", std::move(list)}};
   }
   if (op != "stop" && op != "start" && op != "restart") {

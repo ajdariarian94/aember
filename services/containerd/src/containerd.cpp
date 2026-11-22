@@ -196,13 +196,12 @@ int RunContainerd(const ContainerdOptions& options) {
           restart_at(r),
           schedule_restart(std::move(s)) {}
     [[nodiscard]] std::vector<Entry> List() const override {
-      std::vector<Entry> list;
-      list.reserve(configs.size());
-      for (const auto& cfg : configs) {
-        list.push_back(
-            {cfg.name,
-             ContainerStateToString(containers.GetContainerState(cfg.name))});
-      }
+      std::vector<Entry> list(configs.size());
+      std::ranges::transform(configs, list.begin(), [&](const auto& cfg) {
+        return Entry{
+            cfg.name,
+            ContainerStateToString(containers.GetContainerState(cfg.name))};
+      });
       return list;
     }
     [[nodiscard]] bool Has(std::string_view name) const override {
