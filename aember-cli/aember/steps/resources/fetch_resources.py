@@ -24,10 +24,12 @@ from aember.config.resources import (
     ASSET_MARKER,
     RESOURCES_VERSION,
     component_dir,
+    is_package,
     release_url,
 )
 from aember.core.context import Context
 from aember.core.step import Step
+from aember.utils.packages import listed_packages
 from aember.utils.runner import CommandRunner
 
 log = logging.getLogger("aember.resources")
@@ -106,6 +108,25 @@ class FetchResources(Step):
         file.unlink()  # keep build/downloads small; the marker records the hash
         log.info("Installed %s → %s", asset["name"], out)
 
+    def wanted(self, ctx: Context, assets: list[dict]) -> list[dict]:
+        """Kernel, BusyBox, LXC and the SDK always; an opt-in package only
+        when the board's packages.json lists it."""
+        overlay = ctx.root / "resources" / ctx.architecture / "rootfs"
+        listed = listed_packages(overlay)
+        available = {a["component"] for a in assets if is_package(a["component"])}
+        missing = [p for p in listed if p not in available]
+        if missing:
+            raise RuntimeError(
+                f"packages.json lists {', '.join(missing)}, which aember-resources "
+                f"v{RESOURCES_VERSION} doesn't have for {ctx.architecture} "
+                f"(it has: {', '.join(sorted(available)) or 'none'})"
+            )
+        return [
+            a
+            for a in assets
+            if not is_package(a["component"]) or a["component"] in listed
+        ]
+
     def run(self, ctx: Context) -> None:
         log.info(
             "Fetching aember-resources v%s for %s", RESOURCES_VERSION, ctx.architecture
@@ -120,5 +141,5 @@ class FetchResources(Step):
                 f"aember-resources v{RESOURCES_VERSION} has no assets for "
                 f"'{ctx.architecture}'"
             )
-        for asset in assets:
+        for asset in self.wanted(ctx, assets):
             self._install(ctx, asset)
