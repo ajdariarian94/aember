@@ -197,6 +197,7 @@ int RunContainerd(const ContainerdOptions& options) {
           schedule_restart(std::move(s)) {}
     [[nodiscard]] std::vector<Entry> List() const override {
       std::vector<Entry> list;
+      list.reserve(configs.size());
       for (const auto& cfg : configs) {
         list.push_back(
             {cfg.name,
