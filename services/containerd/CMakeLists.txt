@@ -36,6 +36,7 @@ aember_service(
   src/container-parser.cpp
   src/container-state.cpp
   src/containerd.cpp
+  src/control.cpp
   src/lxc-api.cpp
   LIBRARIES
   aember-libs::child-supervisor

@@ -118,3 +118,24 @@ install(
   TARGETS container-lifecycle-unittest
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
 )
+
+add_executable(
+  control-unittest
+  src/control.cpp
+)
+
+target_link_libraries(
+  control-unittest
+  PRIVATE aember-containerd-core
+          GTest::gtest_main
+)
+
+add_test(
+  NAME control-unittest
+  COMMAND control-unittest
+)
+
+install(
+  TARGETS control-unittest
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
+)
