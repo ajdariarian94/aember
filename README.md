@@ -201,7 +201,9 @@ then its `aember` CLI (`aember-cli/run.py build`, then
 config and the `containers.json` entry into the board's overlay.
 
 Only what a board lists goes into its image: the services in
-`services.json` and the containers in `containers.json`. Remove an entry
+`services.json`, the containers in `containers.json` and the opt-in
+packages in `packages.json` (SSH, ext4 tools, Wi-Fi client and access
+point; see [doc/packages.md](doc/packages.md)). Remove an entry
 and the next `aember app pack` leaves that program or container image out.
 
 ## Status display: aember-stats and aember-monitor

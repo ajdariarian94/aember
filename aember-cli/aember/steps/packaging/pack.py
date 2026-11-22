@@ -13,6 +13,7 @@ from .initramfs import create_initramfs_tree, pack_initramfs
 from .libs import copy_runtime_libs, strip_libs
 from .modules import copy_kernel_modules
 from .overlay import stage_overlay
+from .packages import package_executables, stage_packages
 from .rootfs import create_rootfs_image
 
 log = logging.getLogger("aember.pack")
@@ -156,6 +157,30 @@ class PackStep(Step):
         )
         return packed
 
+    def check_service_executables(self, ctx: Context, trees: list[Path]) -> None:
+        """Every executable services.json starts must be in the image: one
+        that isn't (an SSH server without its package) would only restart
+        forever on the device."""
+        services_json = self.overlay_dir(ctx) / "etc" / "aember" / "services.json"
+        try:
+            processes = json.loads(services_json.read_text())["processes"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return  # copy_services already warned
+        missing = []
+        for entry in processes:
+            exe = str(entry.get("executable", "")).lstrip("/")
+            if exe and not any(
+                (t / exe).exists() or (t / exe).is_symlink() for t in trees
+            ):
+                missing.append(f"{entry.get('name', exe)} (/{exe})")
+        if missing:
+            raise FileNotFoundError(
+                "services.json starts programs the image doesn't have: "
+                + ", ".join(missing)
+                + ". A program from an opt-in package needs the package in "
+                "etc/aember/packages.json."
+            )
+
     def copy_kernel(self, ctx: Context, package_dir: Path) -> Path:
         log.info("Copying kernel image")
 
@@ -197,6 +222,13 @@ class PackStep(Step):
         overlay_root = stage_overlay(
             self.overlay_dir(ctx), package_dir / "overlay_root"
         )
+        # The opt-in packages packages.json lists (rootfs only).
+        packages_root = stage_packages(
+            ctx.root,
+            ctx.architecture,
+            self.overlay_dir(ctx),
+            package_dir / "packages_root",
+        )
 
         log.info("Creating initramfs filesystem tree")
         create_initramfs_tree(initramfs_root)
@@ -229,11 +261,26 @@ class PackStep(Step):
             ],
             present_in=initramfs_root,
         )
+        # What the packages' programs need from the C library (and anything
+        # else in the SDK) that the initramfs and services don't bring: a
+        # package ships everything but the C library.
+        copy_runtime_libs(
+            ctx.architecture,
+            ctx.root,
+            packages_root,
+            binaries=package_executables(packages_root),
+            present_in=[initramfs_root, services_root],
+            extra_search=[packages_root / "lib", packages_root / "usr" / "lib"],
+        )
         if ctx.build_type == "Release":
             # Debug keeps the symbols (gdb); the SDK's glibc and libstdc++
             # come stripped already, aember-resources' liblxc doesn't.
-            for tree in (initramfs_root, services_root):
+            for tree in (initramfs_root, services_root, packages_root):
                 strip_libs(ctx.root, ctx.architecture, tree / "lib")
+
+        self.check_service_executables(
+            ctx, [initramfs_root, services_root, packages_root, overlay_root]
+        )
 
         log.info("Copying kernel modules")
         self.modules_json_path(ctx)
@@ -255,7 +302,7 @@ class PackStep(Step):
             initramfs_root=initramfs_root,
             overlay_dir=overlay_root,
             package_dir=package_dir,
-            extra_trees=[services_root, tests_root],
+            extra_trees=[services_root, packages_root, tests_root],
         )
 
         ctx.data.update(
@@ -266,6 +313,7 @@ class PackStep(Step):
                 "rootfs": rootfs,
                 "services_root": services_root,
                 "overlay_root": overlay_root,
+                "packages_root": packages_root,
             }
         )
 

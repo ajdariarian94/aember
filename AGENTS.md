@@ -132,8 +132,8 @@ aember-resources (`../aember-resources`,
 <https://github.com/ajdariarian94/aember-resources>) builds the low-level
 pieces with kas/Yocto and publishes them as assets of the GitHub release
 `v<version>`. The version aember uses is pinned in
-`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.7`;
-x64, aarch64 and arm32).
+`aember-cli/aember/config/resources.py` (`RESOURCES_VERSION`, now `0.1.14`;
+all 8 targets, with the opt-in packages).
 
 `aember fetch-resources` (also the first step of `aember qemu build`,
 `steps/resources/fetch_resources.py`):
@@ -326,6 +326,23 @@ come from aember's own release `v<project VERSION>` as
 board's `containers.json` lists is missing (`utils/containers.py`), and
 extracts only files that don't exist yet, so tracked configs always win.
 `aember release` packs the whole overlay into that tarball.
+
+**Opt-in packages** (`utils/packages.py`, `steps/packaging/packages.py`,
+user docs in `doc/packages.md`): a board's `etc/aember/packages.json`
+lists aember-resources packages (`dropbear`, `e2fsprogs`, `wifi`,
+`wifi-ap`). `FetchResources` installs only the listed ones (besides
+kernel, BusyBox, LXC, SDK) into `build/aember-resources/<arch>/packages/
+<name>/` and fails for a listed one the release doesn't have; any manifest
+component other than those four is a package (`config/resources.is_package`).
+`PackStep` stages `packages_root` (rootfs only, copies): each package's
+`rootfs/`, its `symlinks.txt` links and `dirs.txt` directories, a minimal
+`/etc/passwd`/`/etc/group`/`/root` (the overlay wins), then
+`copy_runtime_libs` for the packages' executables with the package lib
+dirs searched first: a package ships everything but the C library, so
+the C library pieces they need (glibc's `libpthread.so.0`) come from the
+SDK here. `check_service_executables` fails the pack when `services.json`
+starts a program no tree has. The Pi/USB images and the AppImage include
+`packages_root`.
 
 **Only listed containers ship.** The overlay may hold more container
 directories (`var/lib/aember/<name>/`) than a board runs: `PackStep`

@@ -91,14 +91,17 @@ def copy_runtime_libs(
     dest_root: Path,
     binaries: list[Path],
     dlopen: list[str] | None = None,
-    present_in: Path | None = None,
+    present_in: Path | list[Path] | None = None,
+    extra_search: list[Path] | None = None,
 ) -> None:
     """
     Copy what @p binaries need at run time (their NEEDED, recursively, plus
     the @p dlopen libraries and theirs) into dest_root/lib, and the dynamic
     loader where the binaries ask for it. With @p present_in (the initramfs
     tree, when packing services into the rootfs-only tree), libraries that
-    tree already has are skipped, and so is the loader.
+    tree already has are skipped, and so is the loader. @p extra_search
+    dirs are searched first (an opt-in package's own lib dirs); libraries
+    found inside dest_root itself aren't copied again.
     """
     cfg = ARCH_CONFIG.get(architecture)
     if not cfg:
@@ -121,6 +124,7 @@ def copy_runtime_libs(
     # 2. Poky SDK target sysroot (glibc, libstdc++, ...)
     # ---------------------------------------------------------------------------
     search_paths: list[Path] = [
+        *(extra_search or []),
         virt_libs,
         poky_sysroot / "lib",
         poky_sysroot / "usr/lib",
@@ -160,10 +164,16 @@ def copy_runtime_libs(
         all_libs.add(loader_path)
         log.info("Program interpreter: /%s/%s", loader_dir, loader_name)
     else:
+        trees = present_in if isinstance(present_in, list) else [present_in]
         have = {
-            p.name for d in ("lib", str(loader_dir)) for p in (present_in / d).glob("*")
+            p.name
+            for t in trees
+            for d in ("lib", str(loader_dir))
+            for p in (t / d).glob("*")
         }
         all_libs = {lib for lib in all_libs if lib.name not in have}
+    dest = dest_root.resolve()
+    all_libs = {lib for lib in all_libs if not lib.resolve().is_relative_to(dest)}
 
     log.info("Copying %d libraries to %s", len(all_libs), dest_root)
 
