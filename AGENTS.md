@@ -106,6 +106,15 @@ image at all. A crash in them never takes PID 1 down.
     is what LXC reads, and `lxc.console.logfile` in the container's
     config keeps it (aember-build-helper writes
     `/var/log/aember-container-<name>.log`, 1 MB, rotated).
+  - **Control socket** (`control.h`): `/run/aember-containerd/control.sock`
+    (directory 0700), SOCK_SEQPACKET, one JSON request per connection:
+    `{"op":"list"}`, `{"op":"stop"|"start"|"restart","name":...}`, served
+    in containerd's poll loop. A stop through it is a requested stop (a
+    pending restart is dropped, `restart_policy` doesn't restart it); a
+    failed start schedules a restart like any other. The aember-fleet
+    agent (container) binds `/run/aember-containerd` to update container
+    images: stop, swap the SquashFS, start (a start mounts the image
+    again). Any container given that directory controls all containers.
   - containerd's `pthread_atfork` child handler unblocks all signals:
     liblxc forks without exec and gives the container init the caller's
     mask, so with containerd's signalfd mask nothing in a container got

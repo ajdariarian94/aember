@@ -16,6 +16,7 @@
 #include <aember-services/containerd/container-manager.h>
 #include <aember-services/containerd/container-state.h>
 #include <aember-services/containerd/containerd.h>
+#include <aember-services/containerd/control.h>
 #include <aember-services/containerd/lxc-api.h>
 
 #include <nlohmann/json.hpp>
@@ -24,6 +25,7 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -179,6 +181,55 @@ int RunContainerd(const ContainerdOptions& options) {
     if (!containers.IsRunning(cfg.name)) schedule_restart(cfg.name);
   }
 
+  // The control socket (the aember-fleet agent): requests act like the
+  // restart logic does, a requested stop clears a pending restart.
+  struct Control final : ControlTarget {
+    ContainerManager& containers;
+    const std::vector<ContainerConfig>& configs;
+    std::map<std::string, Clock::time_point>& restart_at;
+    std::function<void(const std::string&)> schedule_restart;
+    Control(ContainerManager& c, const std::vector<ContainerConfig>& cfgs,
+            std::map<std::string, Clock::time_point>& r,
+            std::function<void(const std::string&)> s)
+        : containers(c),
+          configs(cfgs),
+          restart_at(r),
+          schedule_restart(std::move(s)) {}
+    [[nodiscard]] std::vector<Entry> List() const override {
+      std::vector<Entry> list(configs.size());
+      std::ranges::transform(configs, list.begin(), [&](const auto& cfg) {
+        return Entry{
+            cfg.name,
+            ContainerStateToString(containers.GetContainerState(cfg.name))};
+      });
+      return list;
+    }
+    [[nodiscard]] bool Has(std::string_view name) const override {
+      return containers.HasContainer(name);
+    }
+    bool Stop(std::string_view name) override {
+      restart_at.erase(std::string{name});
+      return containers.StopContainer(name);
+    }
+    bool Start(std::string_view name) override {
+      restart_at.erase(std::string{name});
+      if (containers.StartContainer(name)) return true;
+      schedule_restart(std::string{name});
+      return false;
+    }
+  } control{containers, configs, restart_at, schedule_restart};
+  int control_fd = -1;
+  if (!options.control_socket.empty()) {
+    control_fd = OpenControlSocket(options.control_socket);
+    if (control_fd < 0) {
+      log.warn("control socket {}: {}",
+               options.control_socket,
+               std::system_category().message(-control_fd));
+    } else {
+      log.info("control socket {}", options.control_socket);
+    }
+  }
+
   aember::child_supervisor::ChildSupervisor reaper;
   bool stop = false;
   while (!stop) {
@@ -189,9 +240,11 @@ int RunContainerd(const ContainerdOptions& options) {
                             .count();
       timeout_ms = std::clamp(static_cast<int>(left), 0, timeout_ms);
     }
-    // fds[1]: PID 1's channel (console mute); negative = ignored by poll.
+    // fds[1]: PID 1's channel (console mute), fds[2]: the control socket;
+    // negative = ignored by poll.
     std::vector<pollfd> fds{{sigfd, POLLIN, 0},
-                            {channel.Closed() ? -1 : channel.Fd(), POLLIN, 0}};
+                            {channel.Closed() ? -1 : channel.Fd(), POLLIN, 0},
+                            {control_fd, POLLIN, 0}};
     std::vector<std::string> names;
     for (const auto& [name, w] : watched) {
       fds.push_back({w.second, POLLIN, 0});
@@ -209,10 +262,13 @@ int RunContainerd(const ContainerdOptions& options) {
     }
 
     if (fds[1].revents != 0) ipc::ReceiveControl(channel);
+    if ((fds[2].revents & POLLIN) != 0 && !stop) {
+      ServeControlConnection(control_fd, control);
+    }
 
-    for (std::size_t i = 2; i < fds.size(); ++i) {
+    for (std::size_t i = 3; i < fds.size(); ++i) {
       if (fds[i].revents == 0) continue;
-      const auto it = watched.find(names[i - 2]);
+      const auto it = watched.find(names[i - 3]);
       log.info(
           "container '{}' init (pid {}) exited", it->first, it->second.first);
       const std::string name = it->first;
@@ -239,6 +295,10 @@ int RunContainerd(const ContainerdOptions& options) {
   }
 
   restart_at.clear();
+  if (control_fd >= 0) {
+    ::close(control_fd);
+    ::unlink(options.control_socket.c_str());
+  }
   log.info("stopping all containers");
   for (const auto& [name, w] : watched) ::close(w.second);
   containers.StopAll();

@@ -206,6 +206,19 @@ packages in `packages.json` (SSH, ext4 tools, Wi-Fi client and access
 point; see [doc/packages.md](doc/packages.md)). Remove an entry
 and the next `aember app pack` leaves that program or container image out.
 
+## Fleet: aember-auth and aember-fleet
+
+Two more containers from their own repositories connect a device to a
+fleet server and keep its containers up to date:
+[aember-auth](https://github.com/ajdariarian94/aember-auth) gives the device
+an identity (an Ed25519 key that never leaves it, enrollment with a join
+token, short-lived logins), and
+[aember-fleet](https://github.com/ajdariarian94/aember-fleet)'s agent
+installs the signed container releases the fleet server assigns, rolling
+back one that doesn't stay up. It controls the containers through
+`aember-containerd`'s control socket (`/run/aember-containerd/control.sock`:
+list, stop, start, restart).
+
 ## Status display: aember-stats and aember-monitor
 
 Two containers from their own repositories show what a device is doing:

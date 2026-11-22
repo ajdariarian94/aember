@@ -30,6 +30,8 @@ struct ContainerdOptions {
   std::string containers_json = "/etc/aember/containers.json";
   /// Everything containerd logs (also while a debug shell mutes the console).
   std::string log_file = "/var/log/aember-containerd.log";
+  /// Control socket (control.h): list/stop/start/restart; empty = none.
+  std::string control_socket = "/run/aember-containerd/control.sock";
 };
 
 /// Bridges from the "bridges" list of @p containers_json (name, address
