@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import tarfile
 from pathlib import Path
@@ -7,6 +6,7 @@ from aember.core.context import Context
 from aember.core.step import Step
 
 from .get_version_from_cmake import get_version_from_cmake
+from aember.utils.download import sha256_file
 
 log = logging.getLogger("aember.release")
 
@@ -21,9 +21,6 @@ class ReleaseStep(Step):
     Kernel, BusyBox, LXC and the SDK are not released here: they come from
     the aember-resources releases (see aember/config/resources.py).
     """
-
-    def _sha256(self, path: Path) -> str:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
 
     def _tar(self, tar_path: Path, add) -> None:
         with tarfile.open(tar_path, "w:gz") as tar:
@@ -53,7 +50,7 @@ class ReleaseStep(Step):
                 filter=lambda t: None if t.name.endswith(".gitkeep") else t,
             ),
         )
-        sha256 = self._sha256(artifact)
+        sha256 = sha256_file(artifact)
         (release_dir / f"{artifact.name}.sha256").write_text(sha256 + "\n")
         log.info("Resources hash: %s", sha256)
 

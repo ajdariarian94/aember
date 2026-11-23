@@ -183,6 +183,9 @@ The root filesystem overlay is `resources/<arch>/rootfs/`; aember reads:
 | `/etc/aember/containers.json` | Containers (SquashFS image, LXC config, `restart_policy`, `stop_timeout`) and their bridges |
 | `/etc/aember/network.json` | Interfaces (DHCP or static), DNS, connectivity check (aember-netd) |
 | `/etc/aember/modules.json` | Kernel modules to load |
+| `/etc/aember/packages.json` | Opt-in programs from aember-resources (build time) |
+
+Every key, type and default: [doc/configuration.md](doc/configuration.md).
 
 Logs: `/var/log/aember-init.log`, `aember-netd.log`, `aember-containerd.log`
 (rotating), and PID 1's status in `/var/log/aember-status.json`. A

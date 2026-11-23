@@ -15,7 +15,6 @@ created at HEAD. Assets that already exist in the release are refused unless
 clobber is set.
 """
 
-import hashlib
 import json
 import logging
 import subprocess
@@ -28,6 +27,7 @@ from aember.utils.runner import CommandRunner
 
 from .get_version_from_cmake import get_version_from_cmake
 from .images import release_images
+from aember.utils.download import sha256_file
 
 log = logging.getLogger("aember.publish")
 
@@ -36,14 +36,6 @@ def _git(root: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
     ).stdout.strip()
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 class PublishRelease(Step):
@@ -75,7 +67,7 @@ class PublishRelease(Step):
             sha_file = o.with_name(o.name + ".sha256")
             if not sha_file.is_file():
                 raise RuntimeError(f"Missing {sha_file}")
-            if sha_file.read_text().split()[0] != _sha256(o):
+            if sha_file.read_text().split()[0] != sha256_file(o):
                 raise RuntimeError(f"{o} does not match {sha_file.name}")
         overlay = overlays[0]
 
@@ -86,7 +78,7 @@ class PublishRelease(Step):
         images = release_images(root, version)
         for img in (i for i in images if i.name.endswith(".img.xz")):
             sha_file = img.with_name(img.name + ".sha256")
-            if sha_file.read_text().split()[0] != _sha256(img):
+            if sha_file.read_text().split()[0] != sha256_file(img):
                 raise RuntimeError(f"{img} does not match {sha_file.name}")
         return [
             *tarballs,

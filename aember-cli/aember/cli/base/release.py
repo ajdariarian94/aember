@@ -1,4 +1,4 @@
-# aember/cli/release.py
+# aember/cli/base/release.py
 
 import typer  # type: ignore
 from aember.config.architecture import Architecture

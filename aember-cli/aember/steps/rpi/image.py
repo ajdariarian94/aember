@@ -12,11 +12,9 @@ The image size is a power of two (QEMU's raspi machines require that for
 -sd); flashing copies it to the start of the card.
 """
 
-import hashlib
 import logging
 import math
 import shutil
-import urllib.request
 from pathlib import Path
 
 from aember.config import rpi
@@ -27,36 +25,17 @@ from aember.core.step import Step
 from aember.steps.packaging.rootfs import SIZE_EXTRA_MB, SIZE_MARGIN, _tree_size
 from aember.steps.packaging.rootfs import run_guestfish, tar_in_commands
 from aember.steps.releasing.get_version_from_cmake import get_version_from_cmake
+from aember.utils.download import fetch_pinned
 
 log = logging.getLogger("aember.rpi.image")
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def fetch_firmware(root: Path) -> Path:
     """Pinned Raspberry Pi firmware files, downloaded once and verified."""
     dest = root / "build" / "downloads" / "rpi-firmware" / rpi.FIRMWARE_TAG
-    dest.mkdir(parents=True, exist_ok=True)
     for name, sha in rpi.FIRMWARE_FILES.items():
-        path = dest / name
-        if path.exists() and _sha256(path) == sha:
-            continue
         url = rpi.FIRMWARE_URL.format(tag=rpi.FIRMWARE_TAG, name=name)
-        log.info("Downloading %s", url)
-        tmp = path.with_suffix(path.suffix + ".part")
-        with urllib.request.urlopen(url, timeout=60) as r, tmp.open("wb") as f:
-            shutil.copyfileobj(r, f)
-        got = _sha256(tmp)
-        if got != sha:
-            tmp.unlink()
-            raise RuntimeError(f"{name}: sha256 {got} != pinned {sha}")
-        tmp.replace(path)
+        fetch_pinned(url, sha, dest, name)
     return dest
 
 

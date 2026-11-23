@@ -19,7 +19,6 @@ from .base.test import test
 from .base.analyze import analyze
 from .base.mutate import mutate
 from .qemu.build import build_qemu
-from .qemu.launch import launch_qemu
 from .rpi import commands as rpi_commands
 from .usb import commands as usb_commands
 
@@ -85,7 +84,7 @@ aember_app.command("launch", help="Run the system in QEMU")(launch)
 qemu_app.command("build", help="Fetch resources, build and pack the system for QEMU")(
     build_qemu
 )
-qemu_app.command("launch", help="Boot the packed system in QEMU")(launch_qemu)
+qemu_app.command("launch", help="Boot the packed system in QEMU")(launch)
 
 
 aember.add_typer(aember_app, name="app")

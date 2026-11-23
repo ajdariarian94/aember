@@ -7,6 +7,7 @@ from aember.config.libs import SERVICE_DLOPEN_LIBS
 from aember.config.resources import kernel_dir
 from aember.core.context import Context
 from aember.core.step import Step
+from aember.steps.cmake.sdk_build import build_dir, install_dir
 
 from .busybox import install_busybox
 from .initramfs import create_initramfs_tree, pack_initramfs
@@ -34,15 +35,6 @@ KERNEL_IMAGE_NAMES: dict[str, str] = {
 class PackStep(Step):
 
     # ---- Derived paths -------------------------------------------------
-
-    def build_dir(self, ctx: Context) -> Path:
-        return ctx.root / "build" / "configure" / ctx.architecture / ctx.build_type
-
-    def install_dir(self, ctx: Context) -> Path:
-        return ctx.root / "build" / "install" / ctx.architecture / ctx.build_type
-
-    def toolchain_file(self, ctx: Context) -> Path:
-        return ctx.root / "tools" / "toolchains" / f"{ctx.architecture}.cmake"
 
     def package_dir(self, ctx: Context) -> Path:
         return ctx.root / "build" / "package" / ctx.architecture / ctx.build_type
@@ -205,11 +197,9 @@ class PackStep(Step):
     def run(self, ctx: Context) -> None:
         log.info("Packing artifacts (%s / %s)", ctx.architecture, ctx.build_type)
 
-        build_dir = self.build_dir(ctx)
-        build_dir.mkdir(parents=True, exist_ok=True)
-
-        ctx.data["build_dir"] = build_dir
-        ctx.data["install_dir"] = self.install_dir(ctx)
+        build_dir(ctx).mkdir(parents=True, exist_ok=True)
+        ctx.data["build_dir"] = build_dir(ctx)
+        ctx.data["install_dir"] = install_dir(ctx)
 
         package_dir = self.package_dir(ctx)
         initramfs_root = package_dir / "initramfs_root"

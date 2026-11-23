@@ -14,12 +14,10 @@ x64 system (`aember app build` + `aember app pack` first).
 The AppImage is the pinned uruntime followed by the AppDir as SquashFS.
 """
 
-import hashlib
 import logging
 import shutil
 import struct
 import subprocess
-import urllib.request
 import zlib
 from pathlib import Path
 
@@ -27,6 +25,7 @@ from aember.config import appimage as cfg
 from aember.core.context import Context
 from aember.core.step import Step
 from aember.steps.releasing.get_version_from_cmake import get_version_from_cmake
+from aember.utils.download import fetch_pinned
 
 log = logging.getLogger("aember.appimage")
 
@@ -42,32 +41,6 @@ Icon=aember
 Terminal=false
 Categories=Development;System;
 """
-
-
-def sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def fetch_pinned(url: str, digest: str, cache: Path) -> Path:
-    """Download once into @p cache, verified by sha256."""
-    cache.mkdir(parents=True, exist_ok=True)
-    path = cache / url.rsplit("/", 1)[1]
-    if path.exists() and sha256(path) == digest:
-        return path
-    log.info("Downloading %s", url)
-    tmp = path.with_suffix(".part")
-    with urllib.request.urlopen(url, timeout=120) as r, tmp.open("wb") as f:
-        shutil.copyfileobj(r, f)
-    got = sha256(tmp)
-    if got != digest:
-        tmp.unlink()
-        raise RuntimeError(f"{url}: sha256 {got} != pinned {digest}")
-    tmp.replace(path)
-    return path
 
 
 def bundled_libs(binary: str) -> list[Path]:
