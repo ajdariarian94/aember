@@ -1,4 +1,4 @@
-# aember/cli/configure.py
+# aember/cli/base/configure.py
 
 import typer  # type: ignore
 from aember.config.architecture import Architecture

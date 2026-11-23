@@ -11,7 +11,6 @@ manifest.json and, for every asset of ctx.architecture:
 The repo is public, so plain HTTPS downloads are used (no gh, no token).
 """
 
-import hashlib
 import json
 import logging
 from pathlib import Path
@@ -31,6 +30,7 @@ from aember.core.context import Context
 from aember.core.step import Step
 from aember.utils.packages import listed_packages
 from aember.utils.runner import CommandRunner
+from aember.utils.download import sha256_file
 
 log = logging.getLogger("aember.resources")
 
@@ -44,14 +44,6 @@ def _download(url: str, dest: Path) -> None:
     with urllib.request.urlopen(url) as resp, tmp.open("wb") as out:
         shutil.copyfileobj(resp, out, _CHUNK)
     tmp.replace(dest)
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        while chunk := f.read(_CHUNK):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _extract_zip(zip_path: Path, dest_dir: Path) -> None:
@@ -90,9 +82,9 @@ class FetchResources(Step):
             return
 
         file = self.download_dir(ctx) / asset["name"]
-        if not file.is_file() or _sha256(file) != asset["sha256"]:
+        if not file.is_file() or sha256_file(file) != asset["sha256"]:
             _download(release_url(asset["name"]), file)
-        if _sha256(file) != asset["sha256"]:
+        if sha256_file(file) != asset["sha256"]:
             raise RuntimeError(f"sha256 mismatch for downloaded {asset['name']}")
 
         shutil.rmtree(out, ignore_errors=True)

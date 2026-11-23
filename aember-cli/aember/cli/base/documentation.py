@@ -1,4 +1,4 @@
-# aember/cli/documentation.py
+# aember/cli/base/documentation.py
 
 from aember.core.pipeline import Pipeline
 from aember.steps.documentation.generate import DocsGenerateStep

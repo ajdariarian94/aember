@@ -23,7 +23,7 @@ from aember.config import usb
 from aember.config.host_path import HOST_ROOT_PATH
 from aember.core.context import Context
 from aember.core.step import Step
-from aember.steps.appimage.build import fetch_pinned
+from aember.utils.download import fetch_pinned
 from aember.steps.packaging.rootfs import SIZE_EXTRA_MB, SIZE_MARGIN, _tree_size
 from aember.steps.packaging.rootfs import run_guestfish, tar_in_commands
 from aember.steps.releasing.get_version_from_cmake import get_version_from_cmake

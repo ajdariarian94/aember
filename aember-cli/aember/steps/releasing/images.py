@@ -32,6 +32,7 @@ from aember.steps.usb.image import image_path as usb_image_path
 from aember.utils.github import get_repo
 
 from .get_version_from_cmake import get_version_from_cmake
+from aember.utils.download import sha256_file
 
 log = logging.getLogger("aember.release.images")
 
@@ -42,14 +43,6 @@ IMAGER_DEVICES = ["pi4-64bit"]
 
 def images_dir(root: Path) -> Path:
     return root / "build" / "release" / "images"
-
-
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def compress(img: Path, out_dir: Path) -> dict:
@@ -68,7 +61,7 @@ def compress(img: Path, out_dir: Path) -> dict:
         "extract_size": img.stat().st_size,
         "extract_sha256": raw.hexdigest(),
         "image_download_size": xz.stat().st_size,
-        "image_download_sha256": _sha256_file(xz),
+        "image_download_sha256": sha256_file(xz),
     }
     (out_dir / (xz.name + ".sha256")).write_text(
         f"{info['image_download_sha256']}  {xz.name}\n"

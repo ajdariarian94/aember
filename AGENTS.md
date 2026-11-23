@@ -193,7 +193,8 @@ vcpkg/                  SUBMODULE (fork) incl. x64/aarch64-poky-linux triplets
 tools/triplets/         overlay triplets not in the submodule (arm-poky-linux, riscv64-poky-linux),
                         passed as VCPKG_OVERLAY_TRIPLETS by ConfigureStep
 vcpkg.json              cli11, gtest, nlohmann-json, spdlog
-doc/                    Doxyfile, changelog/ (written by `aember changelog`)
+doc/                    Doxyfile, changelog/ (written by `aember changelog`), configuration.md
+                        (every /etc/aember/*.json key: keep it current with the parsers), packages.md
 build/                  git-ignored: aember-resources/, configure/, install/,
                         package/, downloads/, logging/, release/
 ```
@@ -379,6 +380,11 @@ everyday build command.
 
 ## Build pipeline (`aember qemu build`)
 
+Downloads that aren't release assets (Pi firmware, systemd-boot, the
+AppImage's runtime and slirp4netns) are pinned by sha256 and go through
+`utils/download.fetch_pinned`; `utils/download.sha256_file` is the one file
+hash.
+
 `aember-cli/aember/cli/qemu/build.py` runs, in order:
 
 1. `CleanStep`, `CheckResources`: fetch the overlay images (above)
@@ -393,7 +399,8 @@ everyday build command.
    (`config/build.py`, override `AEMBER_BUILD_JOBS=<n>`): using every core
    crashes WSL. Configure and build also export it as `AEMBER_BUILD_JOBS`
    and `VCPKG_MAX_CONCURRENCY`, and the toolchain files use it for
-   `-flto=<jobs>`.
+   `-flto=<jobs>`. Both (and pack) take the build/install trees and the
+   SDK shell line from `steps/cmake/sdk_build.py`.
 5. `PackStep` (`steps/packaging/`): initramfs tree + BusyBox (installed with
    `qemu-<arch>-static` when cross) + `aember` + `/init`
    symlink; runtime libs resolved with `readelf -d` (NEEDED; works for every

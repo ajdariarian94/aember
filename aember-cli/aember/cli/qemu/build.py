@@ -1,4 +1,4 @@
-# aember/cli/release.py
+# aember/cli/qemu/build.py
 
 import typer  # type: ignore
 from aember.config.architecture import Architecture
