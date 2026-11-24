@@ -24,16 +24,6 @@
       "max_restarts": 0,
       "restart_delay_ms": 2000,
       "stop_timeout_ms": 60000
-    },
-    {
-      "name": "aember-child-demo",
-      "executable": "/usr/bin/aember-child-demo",
-      "args": [],
-      "working_directory": "",
-      "environment": {},
-      "restart_on_failure": true,
-      "max_restarts": 5,
-      "restart_delay_ms": 5000
     }
   ]
 }

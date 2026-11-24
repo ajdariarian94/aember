@@ -36,7 +36,7 @@ class PackServicesTest(unittest.TestCase):
         return sorted(p.name for p in PackStep().copy_services(self.ctx, self.out))
 
     def test_only_listed_services_are_packed(self):
-        self.write_services(["/usr/bin/aember-netd", "/usr/bin/aember-child-demo"])
+        self.write_services(["/usr/bin/aember-netd", "/usr/bin/aember-hello"])
         self.assertEqual(self.packed(), ["aember-netd"])
         self.assertTrue((self.out / "usr/bin/aember-netd").is_file())
         self.assertFalse((self.out / "usr/bin/aember-containerd").exists())

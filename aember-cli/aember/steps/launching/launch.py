@@ -73,6 +73,11 @@ def extra_kernel_args(debug_shell: bool, append: str) -> str:
     return " ".join(args)
 
 
+def qmp_args(path: str | None) -> list[str]:
+    """A QMP control socket at @p path (`--qmp`), e.g. for `screendump`."""
+    return ["-qmp", f"unix:{path},server=on,wait=off"] if path else []
+
+
 QEMU_PROFILES: dict[str, QemuProfile] = {
     "x64-poky-linux": QemuProfile(
         binary="qemu-system-x86_64",
@@ -317,6 +322,7 @@ class LaunchStep(Step):
                 kernel_path, initrd_path, rootfs_img, kernel_args
             )
             cmd += serial_chardevs + ["-monitor", "none"]
+            cmd += qmp_args(ctx.data.get("qmp"))
             log.info("Launching QEMU headless (timeout=%s s)", timeout)
             try:
                 subprocess.run(cmd, timeout=timeout)

@@ -12,8 +12,8 @@ real root filesystem. This repo holds:
 
 - the C++ code: `libraries/` (the init system as static libs), `executables/`
   (the `aember` binary, PID 1), `services/` (separate programs PID 1
-  starts from services.json: `aember-netd`, `aember-containerd`,
-  `aember-child-demo` and whatever else you add)
+  starts from services.json: `aember-netd`, `aember-containerd`
+  and whatever else you add)
 - the `aember` CLI (`aember-cli/`, plain files in this repo), which fetches
   the prebuilt resources, configures, builds, packs, launches in QEMU and
   releases the system
@@ -32,8 +32,7 @@ kernel ─► initramfs /init ─► usr/bin/aember            AemberInit::Start
              mounts, modules, reaping, signals, services, heartbeat
              └─ services.json, e.g.
                 ├─ /usr/bin/aember-netd        network (services/netd)
-                ├─ /usr/bin/aember-containerd  LXC containers + bridges (services/containerd)
-                └─ /usr/bin/aember-child-demo  ...
+                └─ /usr/bin/aember-containerd  LXC containers + bridges (services/containerd)
 ```
 
 `executables/aember/main.cpp` is PID 1 only: CLI11 picks the mode
@@ -185,7 +184,7 @@ CMakeLists.txt          Superbuild: ExternalProject libraries → executables, s
                         project VERSION here is the app version (CLI reads it)
 libraries/              aember-libs: one static lib per dir, + utils/<x>
 executables/aember/     main.cpp → the `aember` binary (PID 1)
-services/               one dir per service program (netd, containerd, child-demo), README.md
+services/               one dir per service program (netd, containerd), README.md
 resources/<arch>/rootfs rootfs overlay: configs tracked, *.squashfs images from the release
 tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (SDK compilers, sysroot, flags)
 tools/scripts/          init.sh (postStart), prerequisites.sh, bashrc.d/
@@ -437,7 +436,9 @@ v0.1.8), in xterm windows
 runs QEMU in the current terminal with the serial console on stdout, for
 checks without a display. aember is PID 1 and never exits, so the timeout is
 what ends the run (or, from the debug shell, `kill -USR2 1` powers the VM
-off and QEMU ends by itself); the boot itself takes ~5 s.
+off and QEMU ends by itself); the boot itself takes ~5 s. `--qmp PATH`
+adds a QMP socket to a headless run (`screendump` grabs the virtual
+screen: aember-website's recorder films aember-monitor through it).
 
 **Without QEMU: `aember app launch --chroot`** (also `aember qemu launch
 --chroot`; `--timeout N` for unattended runs) runs the packed system on the

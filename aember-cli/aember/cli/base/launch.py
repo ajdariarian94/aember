@@ -29,6 +29,12 @@ def launch(
         "--timeout",
         help="With --headless: stop QEMU after this many seconds",
     ),
+    qmp: str = typer.Option(
+        None,
+        "--qmp",
+        help="With --headless: a QMP socket at this path (e.g. for screendump: "
+        "the website's recorder captures the screen through it)",
+    ),
     debug_shell: bool = typer.Option(
         False,
         "--debug-shell",
@@ -49,6 +55,10 @@ def launch(
 ):
     ctx = Context(architecture=architecture.value, build_type=build_type.value)
     ctx.data.update(
-        headless=headless, timeout=timeout, debug_shell=debug_shell, append=append
+        headless=headless,
+        timeout=timeout,
+        qmp=qmp,
+        debug_shell=debug_shell,
+        append=append,
     )
     (ChrootLaunchStep() if chroot else LaunchStep()).run(ctx)
