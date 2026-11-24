@@ -2,7 +2,11 @@
 
 import unittest
 
-from aember.steps.launching.launch import QEMU_PROFILES, extra_kernel_args
+from aember.steps.launching.launch import (
+    QEMU_PROFILES,
+    extra_kernel_args,
+    qmp_args,
+)
 
 
 class QemuProfileTest(unittest.TestCase):
@@ -38,6 +42,17 @@ class ExtraKernelArgsTest(unittest.TestCase):
         )
         self.assertEqual(
             extra_kernel_args(False, "aember.watchdog=30"), "aember.watchdog=30"
+        )
+
+
+class QmpArgsTest(unittest.TestCase):
+    def test_no_path_no_socket(self):
+        self.assertEqual(qmp_args(None), [])
+        self.assertEqual(qmp_args(""), [])
+
+    def test_unix_socket_that_does_not_wait(self):
+        self.assertEqual(
+            qmp_args("/tmp/q.sock"), ["-qmp", "unix:/tmp/q.sock,server=on,wait=off"]
         )
 
 
