@@ -93,6 +93,26 @@ aember app launch --chroot --timeout 60
 Other architectures: add `--architecture aarch64-poky-linux` (or
 `arm-poky-linux`) to `build`, `pack` and `launch`.
 
+### The dev container image
+
+You don't build the dev container: VS Code pulls the published image
+`ghcr.io/ajdariarian94/aember-dev:latest` (public, no login; about 2.6 GB, so the
+first pull takes a few minutes, about 4 at 100 Mbit/s). Without VS Code:
+
+```sh
+docker pull ghcr.io/ajdariarian94/aember-dev:latest
+```
+
+The image is published by `.github/workflows/dev-image.yml` whenever a
+change to `.devcontainer/Dockerfile` or what it copies (`requirements.txt`) reaches
+`main`: tags `latest` and an immutable `<YYYYMMDD>-<short sha>`. Pull
+requests that touch them only build it, so a broken Dockerfile fails the PR.
+To pick up a new image: `docker pull` it, then "Rebuild Container" in VS Code.
+
+Only when you change the Dockerfile: switch `.devcontainer/devcontainer.json`
+to its "OPTION B" (build from the Dockerfile) to try it locally, and switch
+back before you commit.
+
 ### Raspberry Pi 4
 
 ```sh

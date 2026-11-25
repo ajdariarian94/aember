@@ -178,7 +178,8 @@ all 8 targets, with the opt-in packages).
 ## Repository layout
 
 ```
-.devcontainer/          Ubuntu 24.04 dev image (prebuilt ghcr.io/ajdariarian94/aember-dev)
+.devcontainer/          Ubuntu 24.04 dev image (published as ghcr.io/ajdariarian94/aember-dev
+                        by .github/workflows/dev-image.yml; pulled, never built)
 aember-cli/             the `aember` CLI (Python, Typer): cli/, steps/, config/, utils/
 CMakeLists.txt          Superbuild: ExternalProject libraries → executables, services
                         project VERSION here is the app version (CLI reads it)
@@ -777,6 +778,13 @@ same image, `.github/workflows/ci.yml`).
 - **nlohmann::json pitfall**: a one-element braced list becomes that
   element, not an array (`{x}` → `x`). Build arrays with
   `nlohmann::json::array(...)` or from a `std::vector`.
+- **Dev image**: developers and CI pull `ghcr.io/ajdariarian94/aember-dev` and never
+  build it. `.github/workflows/dev-image.yml` publishes it (tags `latest` +
+  `<YYYYMMDD>-<sha7>`) when `.devcontainer/Dockerfile` or what it COPYs
+  changes on main; PRs touching them build only. A change to the Dockerfile's
+  inputs (e.g. a new Python package in `requirements.txt`) reaches developers
+  only after that workflow has run: tell them to `docker pull` and rebuild
+  the container.
 - **CI** (`.github/workflows/ci.yml`, GitHub's free hosted runners for
   public repos): `tools/ci/free-disk.sh` makes room, `tools/ci/run.sh`
   runs a command in the published dev image with the repo at
