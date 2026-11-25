@@ -263,6 +263,9 @@ TEST(AemberInitTest, ConstructAndDestroyWithoutStarting) {
   EXPECT_EQ(aember.RequestedShutdown(), Action::kNone);
 }
 
+// Regression: AemberInit registered only the first services.json entry
+// (AddProcess ran inside a views::filter predicate that ranges::to evaluated
+// twice; the second call failed as a duplicate).
 TEST(AemberInitTest, ServicesStartInDependencyOrderAndStopOnPowerOff) {
   const auto error = InChild([] {
     Sandbox box;
@@ -326,6 +329,8 @@ void PrintTo(const SignalCase& c, std::ostream* os) {
 class AemberInitSignalTest : public ::testing::TestWithParam<SignalCase> {};
 
 // BusyBox-compatible: SIGTERM/SIGINT reboot, SIGUSR2 power off, SIGUSR1 halt.
+// Regression: SIGTERM called Stop() on the signal thread, which joined
+// itself and crashed init.
 TEST_P(AemberInitSignalTest, ShutdownSignalSetsTheAction) {
   const auto [sig, action] = GetParam();
   const auto error = InChild([sig, action] {

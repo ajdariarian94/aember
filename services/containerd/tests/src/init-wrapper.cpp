@@ -87,6 +87,8 @@ TEST(InitWrapper, ExitsWithTheAppsStatus) {
   EXPECT_EQ(WEXITSTATUS(r.status), 7);
 }
 
+// Regression: an app that is the container's init itself never got
+// SIGTERM, so every stop ran into its timeout.
 TEST(InitWrapper, PassesSigtermToTheApp) {
   const auto r =
       RunWrapper({"/bin/sh",

@@ -185,9 +185,9 @@ TEST_F(ChildSupervisorTest, ReapZombiesWaitsGraceForUntracked) {
   EXPECT_FALSE(IsZombie(pid));
 }
 
-// The bug the reaper fixes: a blind waitpid(-1) in PID 1 stole the exit
-// status of children that other code waits for itself (system(), modprobe,
-// liblxc), so their waitpid(pid) failed with ECHILD.
+// Regression: a blind waitpid(-1) in PID 1 stole the exit status of
+// children that other code waits for itself (system(), modprobe, liblxc),
+// so their waitpid(pid) failed with ECHILD.
 TEST_F(ChildSupervisorTest, ReapZombiesDoesNotStealFromSynchronousWaiter) {
   std::atomic<bool> stop{false};
   std::thread reaper{[&] {

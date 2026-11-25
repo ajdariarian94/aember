@@ -26,6 +26,8 @@ class TarInTest(unittest.TestCase):
             (t / rel).symlink_to(target)
         return t
 
+    # Regression: guestfish copy-in kept the build user's uid 1000 on every
+    # image file, and an SSH server refused such a /root.
     def test_commands_in_order_and_root_owned(self):
         a = self.tree("initramfs_root", {"usr/bin/aember": "x"})
         b = self.tree(

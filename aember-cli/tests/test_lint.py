@@ -33,6 +33,7 @@ class LintStepTest(unittest.TestCase):
         self.formatted_cmake = fmt.called
         return commands
 
+    # Regression: lint findings were only logged; the command passed.
     def test_regression_findings_fail_the_command(self):
         self.run_step(fix=False, ok=False)
 

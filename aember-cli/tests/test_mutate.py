@@ -88,6 +88,8 @@ class FilesTest(unittest.TestCase):
             self.assertEqual(src.read_text(), "original")
             self.assertFalse((Path(t) / "a.cpp.mutate-backup").exists())
 
+    # Regression: restoring kept the backup's old mtime, so make kept the last
+    # mutant's object in the normal build.
     def test_regression_restored_file_is_newer_than_the_mutant(self):
         import os
         import time
