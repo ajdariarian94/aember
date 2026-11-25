@@ -118,6 +118,29 @@ TEST(NetlinkTest, VethPairAsRoot) {
   EXPECT_EQ(netlink::InterfaceIndex("aembervb0"), -1);  // peer goes too
 }
 
+TEST(NetlinkTest, LinkUsableUnknownInterface) {
+  EXPECT_FALSE(netlink::LinkUsable("aember-nope0"));
+}
+
+// Regression: the link state came from /sys/class/net, which shows the
+// namespace /sys was mounted in (a private namespace never saw its veth's
+// carrier), and IFF_RUNNING alone also counted a dormant Wi-Fi link.
+TEST(NetlinkTest, LinkUsableNeedsUpAndACarrierAsRoot) {
+  AEMBER_REQUIRE_PRIVATE_NET();
+  ASSERT_EQ(netlink::CreateVethPair("aemberua0", "aemberub0"), 0);
+  EXPECT_FALSE(netlink::LinkUsable("aemberua0"));  // down
+  ASSERT_EQ(netlink::SetLinkUp(netlink::InterfaceIndex("aemberua0")), 0);
+  EXPECT_FALSE(netlink::LinkUsable("aemberua0"));  // up, peer down: no carrier
+  ASSERT_EQ(netlink::SetLinkUp(netlink::InterfaceIndex("aemberub0")), 0);
+  bool usable = false;
+  for (int i = 0; i < 30 && !usable; ++i) {
+    usable = netlink::LinkUsable("aemberua0");
+    if (!usable) ::usleep(100'000);  // the carrier takes a moment
+  }
+  EXPECT_TRUE(usable);
+  EXPECT_EQ(netlink::DeleteLink("aemberua0"), 0);
+}
+
 TEST(NetlinkTest, DeleteAddressAsRoot) {
   AEMBER_REQUIRE_PRIVATE_NET();
   const char* name = "aembertest3";

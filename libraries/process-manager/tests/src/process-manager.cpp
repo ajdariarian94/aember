@@ -80,9 +80,9 @@ TEST(ProcessManagerTest, StopWithoutReaper) {
   EXPECT_FALSE(Alive(*pid));
 }
 
-// PID 1 setup: a reaper thread collects the child first. Stop() used to
-// waitpid() a child that was already gone, spin until stop_timeout and then
-// SIGKILL a pid that might belong to someone else by then.
+// Regression: with PID 1's reaper thread collecting the child first, Stop()
+// used to waitpid() a child that was already gone, spin until stop_timeout
+// and then SIGKILL a pid that might belong to someone else by then.
 TEST(ProcessManagerTest, StopWithReaperReturnsPromptly) {
   aember::child_supervisor::ChildSupervisor supervisor;
   ProcessManager pm;
@@ -115,9 +115,9 @@ TEST(ProcessManagerTest, StopWithReaperReturnsPromptly) {
   EXPECT_FALSE(supervisor.IsTracked(*pid));
 }
 
-// A restart pending at shutdown: the manager used to detach the restart
-// thread, which then ran on a destroyed manager. Now the destructor stops
-// it at once and the restart never happens.
+// Regression: a restart pending at shutdown ran on a destroyed manager (the
+// manager detached the restart thread). Now the destructor stops it at once
+// and the restart never happens.
 TEST(ProcessManagerTest, DestructorCancelsPendingRestart) {
   std::atomic<int> restarts{0};
   std::optional<ProcessManager> pm{std::in_place};

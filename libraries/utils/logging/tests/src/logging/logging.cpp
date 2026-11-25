@@ -85,8 +85,9 @@ TEST(LoggingTest, FileSinkPrefixLevelsAndConsoleMute) {
                    ("aember-logging-test-" + std::to_string(::getpid()));
   fs::remove_all(dir);
 
-  // A file that can't be created is reported, not thrown, and file logging
-  // can still be enabled afterwards.
+  // Regression: a failing log file threw (in PID 1). A file that can't be
+  // created is reported, not thrown, and file logging can still be enabled
+  // afterwards.
   EXPECT_NO_THROW(logging::enable_file_logging("/proc/aember/cannot/log"));
 
   const auto path = dir / "sub" / "test.log";

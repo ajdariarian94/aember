@@ -676,7 +676,9 @@ same image, `.github/workflows/ci.yml`).
   a writable loop device found by label, exec of a BusyBox script as
   `/usr/bin/aember`; `AEMBER_TEST_BUSYBOX` comes from `aember test`).
 - **Regression tests** carry a comment starting `Regression:` saying which
-  bug they pin down.
+  bug they pin down (`grep -rn "Regression:"` lists them). Every bug fix
+  gets one; CLI bugs with no better home go in
+  `aember-cli/tests/test_regressions.py`.
 - **TLA+ models** (`spec/tla/`, README there): `StartGraph.tla` is the
   design of start (dependency graph, parallel), restarts and shutdown.
   Change the model with the behaviour, run `spec/tla/check.sh` (Docker,

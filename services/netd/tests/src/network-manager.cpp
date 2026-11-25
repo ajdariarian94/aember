@@ -86,7 +86,8 @@ TEST(NetworkManagerTest, InvalidConfigsThrow) {
   }
 }
 
-// Stop() used to wait out a whole ping interval (the monitor slept).
+// Regression: Stop() used to wait out a whole ping interval (the monitor
+// slept).
 TEST(NetworkManagerTest, StopIsPromptWithALongPingInterval) {
   NetworkManager nm{json::parse(R"({
     "ping_target": "127.0.0.1", "ping_interval_ms": 60000, "interfaces": []

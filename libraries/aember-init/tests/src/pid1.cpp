@@ -75,9 +75,9 @@ TEST(Pid1Test, InitSignalsBlockedAndUnblockedInForkChildren) {
   EXPECT_EQ(WEXITSTATUS(status), 100);
 }
 
-// A blocked SIGTERM must not kill the process (init takes it via signalfd);
-// before BlockInitSignals ran first, a thread with it unblocked could take
-// the default action and kill init.
+// Regression: a thread started before the signalfd setup had SIGTERM/SIGUSR2
+// unblocked, took the default action and killed init. A blocked SIGTERM must
+// not kill the process (init takes it via signalfd).
 TEST(Pid1Test, BlockedSigtermDoesNotKill) {
   const pid_t child = ::fork();
   ASSERT_GE(child, 0);

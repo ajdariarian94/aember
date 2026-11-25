@@ -647,6 +647,8 @@ TEST(DhcpLeaseMaintenanceTest, RebindThenNakAsRoot) {
   nm.Stop();
 }
 
+// Regression: a DHCP interface without a link at boot spent all its DHCP
+// attempts (3 x 30 s, delaying netd's readiness) and stayed failed for good.
 // No link at start (the server's veth end is down, like Wi-Fi before it
 // associated): a DHCP interface that isn't required waits instead of
 // spending its DHCP attempts, Start doesn't block on it, and MaintainLeases

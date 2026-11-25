@@ -268,6 +268,17 @@ first:
   every failure since boot; containers count failures in a row, reset
   after `kStableRun`). Harmless while every board has `max_restarts: 0`;
   decide which meaning `max_restarts` has.
+- [x] Regression labels (2026-11-25): past bug fixes from the history got a
+  `Regression:` comment on the test that pins them; new tests for
+  LinkUsable (namespace + carrier) and the CLI bugs
+  (`aember-cli/tests/test_regressions.py`: guestfish error with exit 0,
+  image sizing, compile_commands merge, `qemu build` clean condition).
+- [ ] Past bugs still without a regression test: loopback brought up by
+  PID 1 (`AemberInit::BringUpLoopback` is private; a QEMU system test or a
+  root test in a private net namespace), containerd's pthread_atfork
+  unblocking signals for container inits (liblxc forks without exec),
+  container app output reaching the console (init wrapper inside a
+  container with a /dev/console).
 - [ ] Mutation testing for every library (`aember mutate -k <suite>`):
   process-manager 76% -> 84% (its 4 survivors are equivalent mutants:
   same behaviour by another path); the rest is still to run. Each run

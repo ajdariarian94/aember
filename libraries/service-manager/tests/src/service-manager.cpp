@@ -230,6 +230,8 @@ TEST_F(ServiceManagerTest, StartAndStopAProcess) {
   EXPECT_FALSE(processes_.GetPid("s").has_value());
 }
 
+// Regression: Stop() held the manager's mutex while stopping; the state
+// callback took it again and every stop deadlocked.
 TEST_F(ServiceManagerTest, StateCallbackSeesEveryTransition) {
   AddSleeper("s");
   ASSERT_TRUE(sm_->Start("s"));
@@ -249,6 +251,9 @@ TEST_F(ServiceManagerTest, UnknownNames) {
   EXPECT_EQ(sm_->GetState("ghost"), State::Failed);
 }
 
+// Regression: Start checked dependencies under the manager's mutex and the
+// resolver's GetState() locked it again: every service with dependencies
+// deadlocked PID 1 at boot.
 TEST_F(ServiceManagerTest, StartAllFollowsDependencies) {
   AddSleeper("app", {"db"});
   AddSleeper("db", {"net"});
