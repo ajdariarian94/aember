@@ -7,6 +7,7 @@
 #   lint        aember lint, the CLI tests
 #   test        x64 Debug with tests as root, static analysis
 #   coverage    per-library coverage report (artifact + job summary)
+#   system      x64 Release built and packed, booted in QEMU: `aember systemtest`
 #   valgrind    every suite under memcheck (nightly and by hand)
 #   tla         the TLA+ models in spec/tla checked with TLC
 #
@@ -149,6 +150,55 @@ jobs:
           name: coverage
           path: build/coverage/
           if-no-files-found: ignore
+      - name: Give the cache back to the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cache"
+
+  system:
+    name: System tests (QEMU)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+      - name: Free disk space
+        run: tools/ci/free-disk.sh
+      - name: vcpkg binary cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ${{ runner.temp }}/cache/vcpkg
+          key: vcpkg-x64-release-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-${{ github.sha }}
+          restore-keys: |
+            vcpkg-x64-release-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-
+            vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-
+      - name: Pull the dev image
+        run: docker pull "$AEMBER_DEV_IMAGE"
+      - name: Hand the workspace to the image's user
+        run: |
+          mkdir -p "$RUNNER_TEMP/cache"
+          sudo chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP/cache"
+      - name: KVM for QEMU (when the runner has it; else TCG)
+        run: |
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; echo "KVM: yes"; else echo "KVM: no"; fi
+      - name: Build and pack x64 Release
+        env:
+          AEMBER_CI_CACHE: ${{ runner.temp }}/cache
+          AEMBER_CI_DOCKER: "1"
+        run: tools/ci/run.sh bash -c "aember app build && aember app pack"
+      - name: System tests
+        run: tools/ci/run.sh aember systemtest --timeout-scale 3
+      - name: Consoles of the scenarios
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: system-tests
+          path: build/system-tests/
+          if-no-files-found: ignore
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f build/ci-summary.md ]; then cat build/ci-summary.md >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Give the cache back to the runner
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cache"

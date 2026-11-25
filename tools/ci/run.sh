@@ -11,6 +11,9 @@
 # - --privileged: the root tests use namespaces, mounts and loop devices.
 # - $AEMBER_CI_CACHE (optional) is mounted as dev's ~/.cache (vcpkg's
 #   binary cache lives there).
+# - $AEMBER_CI_DOCKER=1 (optional) passes the host's Docker socket in, with
+#   its group: `aember app pack` builds the rootfs image with guestfish in a
+#   `docker run` of this same image (HOST_ROOT_PATH is the repo's host path).
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -24,6 +27,11 @@ args=(--rm --privileged --net=host
 if [ -n "${AEMBER_CI_CACHE:-}" ]; then
   mkdir -p "$AEMBER_CI_CACHE"
   args+=(-v "$AEMBER_CI_CACHE:/home/dev/.cache")
+fi
+
+if [ "${AEMBER_CI_DOCKER:-}" = 1 ]; then
+  args+=(-v /var/run/docker.sock:/var/run/docker.sock
+    --group-add "$(stat -c %g /var/run/docker.sock)")
 fi
 
 # printf %q keeps the arguments intact through bash -c.
