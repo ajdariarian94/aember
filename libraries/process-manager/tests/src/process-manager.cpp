@@ -166,6 +166,40 @@ TEST(ProcessManagerTest, ScheduledRestartRuns) {
   }
 }
 
+// CancelRestarts (shutdown) stops a pending restart at once, and no new one
+// is scheduled until EnableRestarts.
+TEST(ProcessManagerTest, CancelRestartsStopsPendingAndNewOnes) {
+  std::atomic<int> restarts{0};
+  ProcessManager pm;
+  pm.SetRestartCallback([&](const std::string&) { ++restarts; });
+  ProcessManager::ProcessConfig cfg;
+  cfg.name = "quitter";
+  cfg.executable = "false";
+  cfg.restart_on_failure = true;
+  cfg.restart_delay = 50ms;
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  const auto crash = [&] {
+    const auto pid = pm.Start("quitter");
+    ASSERT_TRUE(pid.has_value());
+    int status = 0;
+    ASSERT_EQ(::waitpid(*pid, &status, 0), *pid);
+    pm.HandleExit(*pid, status);
+  };
+
+  crash();  // pending
+  pm.CancelRestarts();
+  crash();  // not scheduled at all
+  std::this_thread::sleep_for(200ms);
+  EXPECT_EQ(restarts.load(), 0);
+
+  pm.EnableRestarts();
+  crash();
+  for (int i = 0; i < 100 && restarts.load() == 0; ++i) {
+    std::this_thread::sleep_for(10ms);
+  }
+  EXPECT_EQ(restarts.load(), 1);
+}
+
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------

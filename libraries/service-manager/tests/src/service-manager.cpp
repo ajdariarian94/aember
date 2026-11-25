@@ -424,4 +424,40 @@ TEST_F(ServiceManagerTest, StopAllStopsDependentsFirst) {
   EXPECT_EQ(stopping, (std::vector<std::string>{"app", "containerd", "netd"}));
 }
 
+// Regression: a restart pending at shutdown still fired after StopAll and
+// started the service again (in aember-init it could also run on the
+// already destroyed ServiceManager). Found by spec/tla/StartGraph.tla
+// (NoStartAfterShutdown, model RestartDuringShutdown).
+TEST_F(ServiceManagerTest, StopAllCancelsAPendingRestart) {
+  processes_.SetRestartCallback(
+      [this](const std::string& name) { sm_->Start(name); });
+  ProcessManager::ProcessConfig cfg;
+  cfg.name = "s";
+  cfg.executable = "sleep";
+  cfg.args = {"30"};
+  cfg.restart_on_failure = true;
+  cfg.restart_delay = 300ms;
+  cfg.stop_timeout = 2s;
+  ASSERT_TRUE(processes_.AddProcess(cfg));
+  ASSERT_TRUE(sm_->AddProcess("s"));
+  ASSERT_TRUE(sm_->Start("s"));
+
+  const pid_t pid = *processes_.GetPid("s");
+  ASSERT_EQ(::kill(pid, SIGKILL), 0);
+  int status = 0;
+  ASSERT_EQ(::waitpid(pid, &status, 0), pid);
+  sm_->HandleExit(pid, status);  // a restart in 300 ms
+  ASSERT_EQ(processes_.GetState("s"), State::Restarting);
+
+  sm_->StopAll();
+  EXPECT_EQ(sm_->GetState("s"), State::Stopped);
+  std::this_thread::sleep_for(600ms);
+  EXPECT_FALSE(processes_.GetPid("s").has_value());
+  EXPECT_EQ(sm_->GetState("s"), State::Stopped);
+
+  // StartAll turns restarts back on.
+  sm_->StartAll();
+  ASSERT_TRUE(processes_.GetPid("s").has_value());
+}
+
 }  // namespace
