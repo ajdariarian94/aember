@@ -100,9 +100,10 @@ class AppImageStep(Step):
             package / "initramfs_root",
             package / "services_root",
             package / "packages_root",
+            package / "notices_root",  # third-party notices
             package / "overlay_root",  # only the containers containers.json lists
         ]
-        if not (trees[0] / "usr" / "bin" / "aember").exists() or not trees[3].exists():
+        if not (trees[0] / "usr" / "bin" / "aember").exists() or not trees[-1].exists():
             raise FileNotFoundError(
                 f"{trees[0]} has no aember: run `aember app build` and "
                 "`aember app pack` (x64) first."

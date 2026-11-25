@@ -4,15 +4,17 @@ import shutil
 from pathlib import Path
 
 from aember.config.libs import SERVICE_DLOPEN_LIBS
-from aember.config.resources import kernel_dir
+from aember.config.resources import kernel_dir, package_dir as resources_package_dir
 from aember.core.context import Context
 from aember.core.step import Step
 from aember.steps.cmake.sdk_build import build_dir, install_dir
+from aember.utils.packages import listed_packages
 
 from .busybox import install_busybox
 from .initramfs import create_initramfs_tree, pack_initramfs
 from .libs import copy_runtime_libs, strip_libs
 from .modules import copy_kernel_modules
+from .notices import write_notices
 from .overlay import stage_overlay
 from .packages import package_executables, stage_packages
 from .rootfs import create_rootfs_image
@@ -281,6 +283,28 @@ class PackStep(Step):
             build_type=ctx.build_type,
         )
 
+        # Third-party notices of what this image contains (rootfs only):
+        # /usr/share/licenses/aember/NOTICES.gz, doc/licensing/.
+        notices_root = package_dir / "notices_root"
+        if notices_root.exists():
+            shutil.rmtree(notices_root)
+        write_notices(
+            ctx.root,
+            trees=[
+                initramfs_root,
+                services_root,
+                packages_root,
+                overlay_root,
+                tests_root,
+            ],
+            package_dirs=[
+                resources_package_dir(ctx.root, ctx.architecture, name)
+                for name in listed_packages(self.overlay_dir(ctx))
+            ],
+            out_root=notices_root,
+            vcpkg_share=build_dir(ctx) / "vcpkg_installed" / ctx.architecture / "share",
+        )
+
         log.info("Packing initramfs")
         initramfs = pack_initramfs(initramfs_root, package_dir)
 
@@ -292,7 +316,7 @@ class PackStep(Step):
             initramfs_root=initramfs_root,
             overlay_dir=overlay_root,
             package_dir=package_dir,
-            extra_trees=[services_root, packages_root, tests_root],
+            extra_trees=[services_root, packages_root, tests_root, notices_root],
         )
 
         ctx.data.update(
