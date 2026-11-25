@@ -69,8 +69,13 @@ class StatusReporter {
 
   [[nodiscard]] static Pid1Stats ReadPid1Stats();
 
- private:
+  /// Children of @p pid: /proc/<pid>/task/<pid>/children, or a scan of
+  /// every /proc/<n>/status PPid: line where that file doesn't exist
+  /// (kernels without CONFIG_PROC_CHILDREN).
   static int CountChildren(pid_t pid);
+  static int CountChildrenByScan(pid_t pid);
+
+ private:
   static long ReadUptimeSeconds();
 
   std::chrono::steady_clock::time_point start_time_{

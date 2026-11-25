@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <fstream>
 
 #include <fcntl.h>
 #include <sched.h>
@@ -202,6 +203,17 @@ TEST_F(MountManagerTest, GetEarlyMountsIncludesCgroup) {
 // ---------------------------------------------------------------------------
 // MountSquashFS — test error paths without actual squashfs
 // ---------------------------------------------------------------------------
+
+// A target that is a file can't become a mount point: refused before any
+// mount(2) (as root too).
+TEST_F(MountManagerTest, MountOntoAFileFails) {
+  const auto file = test_dir_ + "/a-file";
+  std::ofstream{file} << "x";
+  EXPECT_FALSE(manager_->Mount(
+      {.source = "tmpfs", .target = file, .fstype = "tmpfs", .flags = 0}));
+  EXPECT_FALSE(manager_->MountSquashFS("/non/existent/image.squashfs", file));
+  EXPECT_FALSE(manager_->IsMounted(file));
+}
 
 TEST_F(MountManagerTest, MountSquashFSNonExistentImage) {
   // Should fail gracefully when image doesn't exist

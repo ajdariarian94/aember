@@ -83,7 +83,10 @@ int StatusReporter::CountChildren(pid_t pid) {
     if (content.empty()) return 0;
     return static_cast<int>(std::ranges::count(content, ' '));
   }
+  return CountChildrenByScan(pid);
+}
 
+int StatusReporter::CountChildrenByScan(pid_t pid) {
   int count = 0;
   for (const auto& entry : std::filesystem::directory_iterator{
            "/proc",

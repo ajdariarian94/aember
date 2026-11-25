@@ -177,7 +177,7 @@ machine's network; closing the window ends it and cleans up.
 | `aember test` | Run the CLI and C++ unit tests (`-k <name>` to filter, `-n <N>` to repeat, `--root` for the root-only tests) |
 | `aember test --coverage` / `--sanitize asan\|tsan` / `--valgrind` | Coverage report per library, sanitizer builds, memcheck |
 | `aember analyze` | Static analysis (clang-tidy, cppcheck) against a baseline |
-| `aember mutate -k <suite>` | Mutation testing of one library's tests |
+| `aember mutate -k <unit>` | Mutation testing of one library's or service's tests (weekly in CI for all) |
 | `aember fuzz [-k <target>]` | Fuzz the code that reads input (libFuzzer, ASan, UBSan; `fuzz/`) |
 | `aember systemtest [-k <scenario>]` | System tests: the packed image booted in QEMU (boot, debug shell, service/container restart, power-off, reboot); `--scenarios FILE --input k=v` runs a container repository's own end-to-end tests (e.g. aember-fleet's) |
 | `aember godbolt [-f FILE]` / `--stop` | Local Compiler Explorer with the SDK's cross compilers (every configured target) and aember's own flags: read the assembly of PID 1's code |

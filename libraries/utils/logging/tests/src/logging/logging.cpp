@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -120,6 +121,46 @@ TEST(LoggingTest, FileSinkPrefixLevelsAndConsoleMute) {
   EXPECT_NE(text.find("[warning]"), std::string::npos);
 
   fs::remove_all(dir);
+}
+
+// The console sink: muted and back, then silenced for good. Last in this
+// file: silencing can't be undone for the rest of the process.
+TEST(LoggingTest, ConsoleMuteAndSilence) {
+  // Capture fd 1 (the console sink writes to stdout).
+  std::fflush(stdout);
+  const int saved = ::dup(1);
+  ASSERT_GE(saved, 0);
+  std::FILE* capture = std::tmpfile();
+  ASSERT_NE(capture, nullptr);
+  ::dup2(::fileno(capture), 1);
+
+  Logger log{"console"};
+  EXPECT_TRUE(logging::console_logging_enabled());
+  log.info("console-before-mute");
+  logging::set_console_logging(false);
+  EXPECT_FALSE(logging::console_logging_enabled());
+  log.info("console-while-muted");
+  logging::set_console_logging(true);
+  EXPECT_TRUE(logging::console_logging_enabled());
+  log.info("console-after-mute");
+  logging::enable_console_silence();
+  log.info("console-after-silence");
+  EXPECT_NO_THROW(logging::enable_console_silence());  // twice is fine
+  logging::flush();
+  std::fflush(stdout);
+
+  ::dup2(saved, 1);
+  ::close(saved);
+  std::rewind(capture);
+  std::string out;
+  for (int c = std::fgetc(capture); c != EOF; c = std::fgetc(capture)) {
+    out += static_cast<char>(c);
+  }
+  std::fclose(capture);
+  EXPECT_NE(out.find("console-before-mute"), std::string::npos) << out;
+  EXPECT_EQ(out.find("console-while-muted"), std::string::npos) << out;
+  EXPECT_NE(out.find("console-after-mute"), std::string::npos) << out;
+  EXPECT_EQ(out.find("console-after-silence"), std::string::npos) << out;
 }
 
 }  // namespace

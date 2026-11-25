@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <unistd.h>
 
@@ -81,6 +82,17 @@ TEST(ModuleLoaderTest, UnknownModuleFailsWithAResult) {
   EXPECT_EQ(loader.GetResults()[0].status, ModuleStatus::Failed);
 }
 
+// A module that is loaded counts (the first one in /proc/modules, if the
+// kernel has any loaded).
+TEST(ModuleLoaderTest, IsLoadedFindsALoadedModule) {
+  std::ifstream proc{"/proc/modules"};
+  std::string line;
+  if (!std::getline(proc, line)) GTEST_SKIP() << "no loaded modules here";
+  const auto name = line.substr(0, line.find(' '));
+  ModuleLoader loader;
+  EXPECT_TRUE(loader.IsLoaded(name)) << name;
+}
+
 TEST(ModuleLoaderTest, ListWithAFailureReportsFalse) {
   ModuleLoader loader;
   std::vector<ModuleLoader::ModuleConfig> modules(1);
@@ -112,6 +124,7 @@ class FakeModulesDir : public ::testing::Test {
            "kernel/drivers/gpu/drm.ko:\n"
            "kernel/drivers/loop-a.ko: kernel/drivers/loop-b.ko\n"
            "kernel/drivers/loop-b.ko: kernel/drivers/loop-a.ko\n"
+           "kernel/drivers/missing.ko:\n"
            "garbage line without colon\n";
     std::ofstream{dir_ / "modules.builtin"} << "kernel/net/llc/llc.ko\n"
                                                "kernel/net/bridge/bridge.ko\n";
@@ -158,6 +171,25 @@ TEST_F(FakeModulesDir, BuiltinFromTheModulesDir) {
   // Built-in modules "load" without touching finit_module.
   EXPECT_TRUE(loader.Load("llc").has_value());
   EXPECT_EQ(loader.GetResults().back().status, ModuleStatus::AlreadyLoaded);
+}
+
+TEST_F(FakeModulesDir, ListOfBuiltinsLoads) {
+  ModuleLoader loader{dir_};
+  std::vector<ModuleLoader::ModuleConfig> modules(2);
+  modules[0].name = "llc";
+  modules[1].name = "bridge";
+  EXPECT_TRUE(loader.Load(modules));
+  EXPECT_EQ(loader.GetResults().size(), 2u);
+}
+
+// In modules.dep, but no .ko file: the open fails, and says so.
+TEST_F(FakeModulesDir, MissingModuleFileSaysSo) {
+  ModuleLoader loader{dir_};
+  const auto r = loader.Load("missing");
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(r.error().code, aember::utils::module::ModuleErrorCode::LoadFailed);
+  EXPECT_NE(r.error().message.find("No such file"), std::string::npos)
+      << r.error().message;
 }
 
 TEST_F(FakeModulesDir, UnknownModuleIsNotFound) {

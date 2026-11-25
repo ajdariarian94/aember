@@ -1,5 +1,10 @@
 """
-`aember mutate -k <suite>`: mutation testing of one library or service.
+`aember mutate -k <unit>`: mutation testing of one library or service.
+
+A unit is a directory with a tests/CMakeLists.txt: its sources (src/*.cpp)
+are mutated and every test suite of that tests/ directory is run against
+each mutant (containerd's six suites, netd's three, ...). `-k` takes the
+unit's directory name or the name of one of its suites.
 
 Mull (the usual tool) needs clang, and aember builds with GCC only, so this
 is a small source-level mutator:
@@ -8,16 +13,19 @@ is a small source-level mutator:
    character literals, not preprocessor lines) is scanned for operators
    with an obvious opposite (MUTATIONS): == / !=, < / >=, && / ||,
    true / false, + 1 / - 1, a `!` in front of a call, ...
-2. One mutant at a time is written into the source file, only the test
-   binary is rebuilt (incremental, in the x64 Debug build tree), and the
-   suite runs with a time limit.
+2. One mutant at a time is written into the source file, only the unit's
+   test binaries are rebuilt (incremental, in the x64 Debug build tree),
+   and its suites run with a time limit (as root with --root).
 3. Killed: the build or a test failed (good). Survived: every test still
    passed, so no test checks that line. Timeout counts as killed.
 4. The original is always restored (a .mutate-backup copy next to it is
    put back first, so even a killed run can't leave a mutant behind).
 
-The report goes to build/mutation/<suite>.json; the survivors are what to
-write tests for. Slow by nature: --max limits the mutants per run.
+The report goes to build/mutation/<unit>.json (+ <unit>.md, a summary for
+CI); the survivors are what to write tests for, or to judge equivalent
+(same behaviour another way). Slow by nature: --max limits the mutants per
+run (a sample, the same for the same --seed); CI runs every unit weekly
+(.github/workflows/mutation.yml).
 """
 
 import json
@@ -26,6 +34,7 @@ import os
 import random
 import re
 import shutil
+import signal
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -164,16 +173,43 @@ def restore_backups(paths: list[Path]) -> None:
             restore(backup, path)
 
 
-def suite_sources(root: Path, suite: str) -> list[Path]:
-    """Sources of the library/service a test suite belongs to: the src/
-    directory next to the tests/ that builds <suite>-unittest."""
+@dataclass(frozen=True)
+class Unit:
+    """A tests/ directory: @p name is its parent directory's name."""
+
+    name: str
+    suites: tuple[str, ...]  # <suite>-unittest targets, sorted
+    sources: tuple[Path, ...]  # src/*.cpp next to tests/
+
+
+_SUITE = re.compile(r"([A-Za-z0-9_-]+)-unittest")
+
+
+def test_units(root: Path) -> list[Unit]:
+    """Every library/service with unit tests, sorted by name."""
+    units = []
     for cmake in sorted(root.glob("**/tests/CMakeLists.txt")):
-        if "build" in cmake.relative_to(root).parts:
+        rel = cmake.relative_to(root).parts
+        if "build" in rel or rel[0] not in ("libraries", "services"):
             continue
-        if f"{suite}-unittest" in cmake.read_text():
-            src = cmake.parent.parent / "src"
-            return sorted(src.glob("*.cpp")) if src.exists() else []
-    return []
+        suites = tuple(sorted(set(_SUITE.findall(cmake.read_text()))))
+        src = cmake.parent.parent / "src"
+        sources = tuple(sorted(src.glob("*.cpp"))) if src.exists() else ()
+        if suites and sources:
+            units.append(Unit(cmake.parent.parent.name, suites, sources))
+    return sorted(units, key=lambda u: u.name)
+
+
+def find_unit(root: Path, name: str) -> Unit | None:
+    """The unit called @p name, or the one with the suite @p name."""
+    units = test_units(root)
+    for unit in units:
+        if unit.name == name:
+            return unit
+    for unit in units:
+        if name in unit.suites:
+            return unit
+    return None
 
 
 def sub_build_dir(root: Path, rel_source: str) -> Path:
@@ -192,55 +228,156 @@ def sub_build_dir(root: Path, rel_source: str) -> Path:
     )
 
 
+def report_markdown(unit: Unit, results: list[Result], root: Path) -> str:
+    """A short Markdown summary (CI job summary): score and survivors with
+    their source line."""
+    survived = [r.mutant for r in results if r.status == "survived"]
+    lines = [
+        f"### {unit.name}: {score(results)}% "
+        f"({len(results)} mutants, {len(survived)} survived)",
+        "",
+    ]
+    if survived:
+        lines += ["| Where | Mutation | Line |", "|---|---|---|"]
+        for m in sorted(survived, key=lambda m: (m.file, m.line, m.column)):
+            text = (root / m.file).read_text().splitlines()[m.line - 1].strip()
+            code = text.replace("|", "\\|")
+            lines.append(f"| `{m.file}:{m.line}` | {m.name} | `{code}` |")
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+# Root runs get their own PID and mount namespace, and in it every mount is
+# read-only except fresh tmpfs on /tmp and /var/tmp. A mutant can make code
+# destructive: root-manager's initramfs delete with `.`/`..` no longer
+# skipped walked up out of the test's directory and deleted the CI runner's
+# root filesystem as root (here it would have reached /aember_ws, the host's
+# workspace). A mount namespace alone doesn't stop deleting files.
+UNSHARE = [
+    "unshare",
+    "--pid",
+    "--fork",
+    "--kill-child",
+    "--mount",
+    "--mount-proc",
+    "--propagation",
+    "private",
+]
+SANDBOX_FAILED = 125  # the sandbox isn't read-only: stop, run nothing
+SANDBOX = (
+    # remount,bind changes only this namespace's mount flags, never the
+    # filesystem itself (a plain remount,ro would).
+    "awk '{print $5}' /proc/self/mountinfo | while read -r m; do "
+    'mount -o remount,bind,ro "$m" 2>/dev/null; done; '
+    "mount -t tmpfs tmpfs /tmp && mount -t tmpfs tmpfs /var/tmp || exit 125; "
+    'if touch "$PWD/.aember-mutate-probe" 2>/dev/null; then '
+    'rm -f "$PWD/.aember-mutate-probe"; '
+    'echo "aember mutate: sandbox is writable" >&2; exit 125; fi; '
+    'exec "$@"'
+)
+
+
+def isolated(cmd: list[str], as_root: bool, timeout: float = 120) -> list[str]:
+    """@p cmd (RunTests' command) in the read-only sandbox when it runs as
+    root (`sudo -n env K=V... <cmd>`: it goes after the variables). A root
+    `timeout` kills the sandbox's unshare after @p timeout seconds, and with
+    it (--kill-child) the whole PID namespace: the user running this can't
+    signal root processes, and sudo may put them in a session of their own."""
+    if not as_root:
+        return cmd
+    i = cmd.index("env") + 1
+    while i < len(cmd) and "=" in cmd[i] and not cmd[i].startswith("/"):
+        i += 1
+    limit = ["timeout", "-s", "KILL", str(int(timeout))]
+    return cmd[:i] + limit + UNSHARE + ["sh", "-c", SANDBOX, "sandbox"] + cmd[i:]
+
+
+def kill_group(proc: subprocess.Popen) -> None:
+    """SIGKILL @p proc's process group (its own session) and reap it (root
+    runs end through their own `timeout`, see isolated())."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
+    proc.wait()
+
+
 class MutateStep(Step):
     def __init__(
         self,
-        suite: str,
+        unit: str,
         max_mutants: int = 50,
         seed: int = 1,
         timeout: int = 120,
         files: list[str] | None = None,
+        as_root: bool = False,
     ) -> None:
-        self.suite = suite
-        self.max_mutants = max_mutants
+        self.unit = unit
+        self.max_mutants = max_mutants  # 0: every mutant
         self.seed = seed
         self.timeout = timeout
         self.files = files
+        self.as_root = as_root
 
-    def _build(self, root: Path, build_dir: Path, target: str) -> bool:
+    def _build(self, root: Path, build_dir: Path, targets: list[str]) -> bool:
         env_script = sdk_dir(root, TEST_ARCH) / SDK_ENV_MAP[TEST_ARCH]
         cmd = (
             f"source {env_script} >/dev/null && unset CC CXX && "
             f"export {JOBS_ENV}={build_jobs()} && "
-            f"cmake --build {build_dir} --target {target} --parallel {build_jobs()}"
+            f"cmake --build {build_dir} --target {' '.join(targets)} "
+            f"--parallel {build_jobs()}"
         )
         res = subprocess.run(
             ["bash", "-c", cmd], capture_output=True, text=True, cwd=root
         )
         return res.returncode == 0
 
+    def _run_suites(self, root: Path, binaries: list[Path]) -> str:
+        """killed as soon as one suite fails (or times out), else survived."""
+        for binary in binaries:
+            status = self._run_suite(root, binary)
+            if status != "survived":
+                return status
+        return "survived"
+
     def _run_suite(self, root: Path, binary: Path) -> str:
-        runner = RunTests(timeout=self.timeout)
+        """A mutant can turn a process-manager's fork() around, and the test
+        then kill()s pid 0 (its own process group) or -1 (everything it
+        may signal): this run died with it once. So each suite runs in its
+        own session, and as root in a read-only sandbox (isolated()); on a
+        timeout the whole group goes."""
+        runner = RunTests(timeout=self.timeout, as_root=self.as_root)
+        cmd = isolated(runner._command(root, binary), self.as_root, self.timeout)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=runner._env(root),
+            start_new_session=True,
+        )
         try:
-            res = subprocess.run(
-                runner._command(root, binary),
-                capture_output=True,
-                text=True,
-                errors="replace",  # test output can be any bytes
-                timeout=self.timeout,
-                env=runner._env(root),
-            )
+            # Root runs: their own `timeout` fires first; this is the backstop.
+            code = proc.wait(timeout=self.timeout + (10 if self.as_root else 0))
         except subprocess.TimeoutExpired:
+            kill_group(proc)
             return "timeout"
-        return "survived" if res.returncode == 0 else "killed"
+        if code == SANDBOX_FAILED and self.as_root:
+            raise RuntimeError("the read-only sandbox for root runs failed")
+        if self.as_root and code == 128 + signal.SIGKILL:
+            return "timeout"  # timeout -s KILL: 128 + 9
+        return "survived" if code == 0 else "killed"
 
     def run(self, ctx: Context) -> None:
         root = ctx.root
-        sources = suite_sources(root, self.suite)
+        unit = find_unit(root, self.unit)
+        if unit is None:
+            names = ", ".join(u.name for u in test_units(root))
+            raise FileNotFoundError(f"No unit or suite '{self.unit}' (units: {names})")
+        sources = list(unit.sources)
         if self.files:
             sources = [s for s in sources if any(f in str(s) for f in self.files)]
         if not sources:
-            raise FileNotFoundError(f"No sources for test suite '{self.suite}'")
+            raise FileNotFoundError(f"No sources of '{unit.name}' match {self.files}")
         restore_backups(sources)
 
         mutants = [
@@ -249,17 +386,28 @@ class MutateStep(Step):
             for m in find_mutants(src.relative_to(root).as_posix(), src.read_text())
         ]
         random.Random(self.seed).shuffle(mutants)
-        mutants = mutants[: self.max_mutants]
-        target = f"{self.suite}-unittest"
-        binary_build = sub_build_dir(root, mutants[0].file) if mutants else None
-        log.info("%d mutants of %d file(s) for %s", len(mutants), len(sources), target)
+        if self.max_mutants > 0:
+            mutants = mutants[: self.max_mutants]
+        targets = [f"{s}-unittest" for s in unit.suites]
+        build_dir = sub_build_dir(root, sources[0].relative_to(root).as_posix())
+        log.info(
+            "%d mutants of %d file(s) for %s (%s)",
+            len(mutants),
+            len(sources),
+            unit.name,
+            ", ".join(targets),
+        )
 
-        # The unmutated suite must build and pass, or nothing can be judged.
-        if not binary_build or not self._build(root, binary_build, target):
-            raise RuntimeError(f"{target} doesn't build; build Debug with tests")
-        binary = self._binary(binary_build, target)
-        if self._run_suite(root, binary) != "survived":
-            raise RuntimeError(f"{target} fails without mutations; fix it first")
+        # The unmutated suites must build and pass, or nothing can be judged.
+        if not self._build(root, build_dir, targets):
+            raise RuntimeError(
+                f"{unit.name}'s tests don't build; build Debug with tests"
+            )
+        binaries = [self._binary(build_dir, t) for t in targets]
+        if self._run_suites(root, binaries) != "survived":
+            raise RuntimeError(
+                f"{unit.name}'s tests fail without mutations; fix them first"
+            )
 
         results: list[Result] = []
         for i, mutant in enumerate(mutants, start=1):
@@ -269,10 +417,10 @@ class MutateStep(Step):
             shutil.copy2(path, backup)
             try:
                 path.write_text(mutant.apply(original))
-                if not self._build(root, binary_build, target):
+                if not self._build(root, build_dir, targets):
                     status = "build-error"
                 else:
-                    status = self._run_suite(root, binary)
+                    status = self._run_suites(root, binaries)
             finally:
                 restore(backup, path)
             results.append(Result(mutant, status))
@@ -286,24 +434,27 @@ class MutateStep(Step):
                 mutant.name,
             )
         # Leave the build tree matching the real sources again.
-        self._build(root, binary_build, target)
+        self._build(root, build_dir, targets)
 
         out = root / "build" / "mutation"
         out.mkdir(parents=True, exist_ok=True)
         report = {
-            "suite": self.suite,
+            "unit": unit.name,
+            "suites": list(unit.suites),
             "score": score(results),
             "mutants": len(results),
+            "seed": self.seed,
             "survived": [asdict(r.mutant) for r in results if r.status == "survived"],
             "results": [{**asdict(r.mutant), "status": r.status} for r in results],
         }
-        (out / f"{self.suite}.json").write_text(json.dumps(report, indent=2) + "\n")
+        (out / f"{unit.name}.json").write_text(json.dumps(report, indent=2) + "\n")
+        (out / f"{unit.name}.md").write_text(report_markdown(unit, results, root))
         log.info(
             "Mutation score %s%% (%d mutants, %d survived): %s",
             report["score"],
             len(results),
             len(report["survived"]),
-            out / f"{self.suite}.json",
+            out / f"{unit.name}.json",
         )
 
     @staticmethod

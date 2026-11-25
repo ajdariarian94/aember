@@ -1,0 +1,118 @@
+# Mutation testing of every library and service (`aember mutate`), weekly
+# and by hand. Too slow for every pull request: each mutant rebuilds a
+# unit's test suites and runs them.
+#
+#   units    lists the units (tools/ci/mutation-units.py, stdlib only)
+#   mutate   one job per unit: x64 Debug with tests, then every mutant of
+#            the unit against all its suites as root; report as artifact
+#   summary  one table of the scores, the survivors per unit below it
+#
+# Survivors are lines no test checks: write a test, or judge them equivalent
+# (same behaviour another way). Scores are tracked in TODO.md.
+name: Mutation
+
+on:
+  schedule:
+    - cron: "41 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      units:
+        description: "Units to run, space separated (empty: all)"
+        required: false
+        default: ""
+      max:
+        description: "Mutants per unit (0: all)"
+        required: false
+        default: "0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AEMBER_DEV_IMAGE: ghcr.io/ajdariarian94/aember-dev:latest
+  AEMBER_BUILD_JOBS: "4"
+
+jobs:
+  units:
+    name: Units
+    runs-on: ubuntu-24.04
+    outputs:
+      units: ${{ steps.list.outputs.units }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: list
+        env:
+          WANTED: ${{ github.event.inputs.units }}
+        run: echo "units=$(python3 tools/ci/mutation-units.py $WANTED)" >> "$GITHUB_OUTPUT"
+
+  mutate:
+    name: ${{ matrix.unit.unit }}
+    needs: units
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        unit: ${{ fromJSON(needs.units.outputs.units) }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+      - name: Free disk space
+        run: tools/ci/free-disk.sh
+      - name: vcpkg binary cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ runner.temp }}/cache/vcpkg
+          key: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-${{ github.sha }}
+          restore-keys: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-
+      - name: Pull the dev image
+        run: docker pull "$AEMBER_DEV_IMAGE"
+      - name: Hand the workspace to the image's user
+        run: |
+          mkdir -p "$RUNNER_TEMP/cache"
+          sudo chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP/cache"
+      - name: Build x64 Debug with tests (and run the unit's first suite)
+        env:
+          AEMBER_CI_CACHE: ${{ runner.temp }}/cache
+        run: tools/ci/run.sh aember test --build --root --no-cli -k "${{ matrix.unit.suite }}"
+      - name: Mutate
+        env:
+          MAX: ${{ github.event.inputs.max || '0' }}
+        run: tools/ci/run.sh aember mutate -k "${{ matrix.unit.unit }}" -n "$MAX" --root --timeout 300
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f "build/mutation/${{ matrix.unit.unit }}.md" ]; then
+            cat "build/mutation/${{ matrix.unit.unit }}.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: mutation-${{ matrix.unit.unit }}
+          path: build/mutation/
+          if-no-files-found: ignore
+
+  summary:
+    name: Summary
+    needs: mutate
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: mutation-*
+          path: mutation
+          merge-multiple: true
+      - name: Scores
+        run: python3 tools/ci/mutation-summary.py mutation >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: mutation-all
+          path: mutation/
+          if-no-files-found: ignore
