@@ -163,7 +163,8 @@ TEST_F(ChildSupervisorTest, ProcParsingSkipsMalformedEntries) {
   stat("60", "60 (a) S " + self + " 1 1");
   stat("61", "xxx" + self);  // no ')': not ours, even if a number follows
   stat("62", "62 (a) S");    // too short
-  stat("63", "63 (a) S 1 1 1");
+  // Another parent (not 1: in a PID namespace this test is PID 1).
+  stat("63", "63 (a) S " + std::to_string(::getpid() + 1) + " 1 1");
   EXPECT_TRUE(ChildSupervisor::IsChildOfThis(60, root));
   EXPECT_FALSE(ChildSupervisor::IsChildOfThis(61, root));
   EXPECT_FALSE(ChildSupervisor::IsChildOfThis(62, root));

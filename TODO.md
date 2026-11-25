@@ -307,8 +307,30 @@ first:
   unblocking signals for container inits (liblxc forks without exec),
   container app output reaching the console (init wrapper inside a
   container with a /dev/console).
-- [ ] Mutation testing for every library (`aember mutate -k <suite>`):
-  process-manager 76% -> 84% (its 4 survivors are equivalent mutants:
-  same behaviour by another path); the rest is still to run. Each run
-  rebuilds per mutant: run them when the machine is idle (an SDK build
-  next to it ran out of memory once).
+- [x] Mutation testing for every library and service (2026-11-25):
+  `aember mutate -k <unit>` runs all suites of a unit against each mutant,
+  root runs in a read-only sandbox; weekly in CI (`Mutation` workflow, one
+  job per unit, scores + survivors in the summary). Scores (first run ->
+  after the new tests):
+
+  | Unit | Score | Unit | Score |
+  |---|---|---|---|
+  | aember-init | 38.8% | module-loader | 77.1% -> 88.6% |
+  | child-supervisor | 81.5% -> 96.3% | mount-manager | 79.6% -> 83.3% |
+  | config | 100% | netd | 69.7% -> 70.2% |
+  | containerd | 70.7% -> 70.8% | netlink | 93.5% -> 95.7% |
+  | device-health | 25.0% -> 100% | process | 100% |
+  | ipc | 67.2% -> 69.0% | process-manager | 83.3% |
+  | logging | 28.6% -> 71.4% | root | 100% |
+  | module | 100% | root-manager | 64.5% (first run in the sandbox) |
+  | service-manager | 71.0% -> 72.6% | shell | 82.9% |
+  | signal | 78.6% -> 85.7% | watchdog | 68.6% -> 80.0% |
+
+  All units: 73.9% -> about 76% (1166 mutants).
+- [ ] Mutation survivors left to judge: aember-init (41: PID 1 paths only
+  a booted system reaches; the QEMU system tests cover them, mutation
+  doesn't run those), containerd (78) and netd (63) (daemon and netlink
+  paths), ipc (18), service-manager (17, mostly double-checked state
+  guards = equivalent), root-manager (27). process-manager's fork()
+  `pid == 0` mutant "survives" because the test process itself execs the
+  command and exits 0: a harness limit, not a gap.
