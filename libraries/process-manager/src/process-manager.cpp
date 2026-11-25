@@ -95,6 +95,7 @@ bool ProcessManager::RemoveProcess(std::string_view name) {
   configs_.erase(key);
   states_.erase(key);
   restart_counts_.erase(key);
+  started_at_.erase(key);
 
   log_.info("Removed process '{}'", name);
   return true;
@@ -133,6 +134,7 @@ std::optional<pid_t> ProcessManager::Start(std::string_view name) {
 
   pid_to_name_[pid] = key;
   name_to_pid_[key] = pid;
+  started_at_[key] = std::chrono::steady_clock::now();
   states_[key] = ProcessState::Running;
 
   log_.info("Started '{}' (pid {})", name, pid);
@@ -213,6 +215,14 @@ bool ProcessManager::HandleExit(pid_t pid, int exit_code) {
 
   const bool was_stopping = (states_.at(name) == ProcessState::Stopping);
   const bool clean_exit = WIFEXITED(exit_code) && (WEXITSTATUS(exit_code) == 0);
+
+  // It ran fine for a while: a fresh failure, max_restarts counts again.
+  if (const auto started = started_at_.find(name);
+      started != started_at_.end() &&
+      std::chrono::steady_clock::now() - started->second >=
+          configs_.at(name).stable_run) {
+    restart_counts_[name] = 0;
+  }
 
   if (was_stopping || clean_exit) {
     states_[name] = ProcessState::Stopped;

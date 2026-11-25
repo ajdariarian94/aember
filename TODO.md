@@ -264,10 +264,10 @@ first:
   `tla`, 2026-11-25). It found that a restart pending at shutdown started
   its service again (or crashed PID 1 on a destroyed ServiceManager):
   fixed, `StopAll` cancels pending restarts.
-- [ ] Services never reset their restart count (`max_restarts` counts
-  every failure since boot; containers count failures in a row, reset
-  after `kStableRun`). Harmless while every board has `max_restarts: 0`;
-  decide which meaning `max_restarts` has.
+- [x] `max_restarts` counts failures in a row for services too, like
+  containers (2026-11-25, the user's decision): a run of 60 s
+  (`ProcessConfig::stable_run`) starts the count over. Services used to
+  count every failure since boot.
 - [x] Regression labels (2026-11-25): past bug fixes from the history got a
   `Regression:` comment on the test that pins them; new tests for
   LinkUsable (namespace + carrier) and the CLI bugs

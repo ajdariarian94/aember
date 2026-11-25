@@ -31,12 +31,13 @@ dependency graph too). This is the design reference for that work.
 | `Crash(n)`: the environment; bounded by `MaxCrashes` | |
 | `OnFailure(n)`: restart unless `max_restarts` is used up (then `gave_up`) | `ProcessManager::ScheduleRestart`, `ContainerManager::NextRestart` |
 | `RestartDue(n)`: after `restart_delay` it waits for its dependencies again | restart callback → `ServiceManager::Start` |
-| `Stabilize(n)`: a run that lasts resets the count | containerd's `kStableRun` (60 s) |
+| `Stabilize(n)`: a run that lasts resets the count | `ProcessConfig::stable_run`, containerd's `kStableRun` (both 60 s) |
 | `Shutdown`, `Stop(n)`, `Finish`: dependents stop first, pending restarts are cancelled, then `pid1::Finish` | `AemberInit::RequestShutdown`, `ServiceManager::StopAll`, `pid1::Finish` |
 
 Constants: `Nodes`, `Deps` (`Deps[n]` = what n depends on),
 `Restartable` (`restart_on_failure` / a `restart_policy` other than `no`),
-`MaxRestarts` (0 = unlimited), `MaxCrashes`, `ResetOnStable`,
+`MaxRestarts` (0 = unlimited), `MaxCrashes`, `ResetOnStable` (TRUE: aember
+today; FALSE only in `RestartDuringShutdown`),
 `CancelRestartsOnShutdown`.
 
 Properties:
@@ -86,11 +87,6 @@ that wasn't running is `Stopped` right away. Regression tests:
 - **Containers have no dependency graph yet.** containerd starts the
   containers in file order, one at a time, and ignores `dependencies` in
   `containers.json`. The model is what the `.aember` work is to build.
-- **Services never reset their restart count** (`ProcessManager`'s
-  `restart_counts_` only grows): `max_restarts` counts every failure since
-  boot, while containers count failures in a row (`kStableRun`). Every
-  board uses `max_restarts: 0` (unlimited), so it doesn't show today;
-  `Diamond` models services as they are (`ResetOnStable = FALSE`).
 - **A start under way** is stopped by `StopInternal` at once (SIGTERM);
   the model lets it finish (ready or failed) first. Both end stopped.
 - **Readiness** (ipc `ready` or `ready_timeout`) is one step in the model.

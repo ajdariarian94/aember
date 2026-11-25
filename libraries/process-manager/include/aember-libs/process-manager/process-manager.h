@@ -16,6 +16,7 @@
 #include <aember-libs/utils/process/process-state.h>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <list>
 #include <map>
@@ -141,7 +142,9 @@ class ProcessManager {
   std::map<std::string, ProcessState> states_;
   std::map<pid_t, std::string> pid_to_name_;
   std::map<std::string, pid_t> name_to_pid_;
+  /// Restarts in a row; reset by a run of at least `stable_run`.
   std::map<std::string, unsigned int> restart_counts_;
+  std::map<std::string, std::chrono::steady_clock::time_point> started_at_;
 
   mutable std::mutex mutex_;
 

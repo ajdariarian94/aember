@@ -60,8 +60,13 @@ struct ProcessConfig {
   /// Services that must be running before this process is started.
   std::vector<std::string> dependencies;
 
-  /// Maximum number of restart attempts before giving up (0 = unlimited).
+  /// Restarts in a row before giving up (0 = unlimited). A run of at least
+  /// `stable_run` counts as healthy again: the count starts over (like
+  /// containerd's kStableRun for containers).
   unsigned int max_restarts{0};
+
+  /// How long a run must last to reset the restart count.
+  std::chrono::milliseconds stable_run{std::chrono::seconds(60)};
 
   /// Delay between a process exit and the next restart attempt.
   std::chrono::milliseconds restart_delay{std::chrono::seconds(1)};

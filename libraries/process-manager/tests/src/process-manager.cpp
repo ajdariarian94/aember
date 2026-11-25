@@ -402,6 +402,53 @@ TEST(ProcessManagerRestartTest, GivesUpAfterMaxRestarts) {
   EXPECT_EQ(restarts.load(), 2);
 }
 
+/// Start @p name, wait for it to exit and hand the exit to @p pm.
+void RunToExit(ProcessManager& pm, const std::string& name) {
+  const auto pid = pm.Start(name);
+  ASSERT_TRUE(pid);
+  int status = 0;
+  ASSERT_EQ(::waitpid(*pid, &status, 0), *pid);
+  ASSERT_TRUE(pm.HandleExit(*pid, status));
+}
+
+// Regression: services counted every failure since boot against
+// max_restarts, containers only failures in a row; a service that failed
+// once a day was given up after max_restarts days. A run of stable_run now
+// starts the count over, like containerd's kStableRun.
+TEST(ProcessManagerRestartTest, StableRunResetsTheRestartCount) {
+  ProcessManager pm;
+  pm.SetRestartCallback([](const std::string&) {});  // restart by hand
+  auto cfg = SleepConfig("flaky");
+  cfg.executable = "/bin/sh";
+  cfg.args = {"-c", "sleep 0.2; exit 3"};
+  cfg.restart_on_failure = true;
+  cfg.max_restarts = 1;
+  cfg.restart_delay = 10ms;
+  cfg.stable_run = 100ms;
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  for (int run = 0; run < 3; ++run) {
+    RunToExit(pm, "flaky");  // ran 200 ms >= stable_run: a fresh failure
+    EXPECT_EQ(pm.GetState("flaky"), State::Restarting) << "run " << run;
+  }
+}
+
+TEST(ProcessManagerRestartTest, ShortRunsCountInARow) {
+  ProcessManager pm;
+  pm.SetRestartCallback([](const std::string&) {});
+  auto cfg = SleepConfig("flaky");
+  cfg.executable = "/bin/sh";
+  cfg.args = {"-c", "exit 3"};
+  cfg.restart_on_failure = true;
+  cfg.max_restarts = 1;
+  cfg.restart_delay = 10ms;
+  cfg.stable_run = 10s;
+  ASSERT_TRUE(pm.AddProcess(cfg));
+  RunToExit(pm, "flaky");
+  EXPECT_EQ(pm.GetState("flaky"), State::Restarting);
+  RunToExit(pm, "flaky");  // second failure in a row: over max_restarts
+  EXPECT_EQ(pm.GetState("flaky"), State::Failed);
+}
+
 // Found by `aember mutate`: nothing checked how the exit status is recorded.
 // Any unrequested exit restarts (restart_on_failure: "on unexpected exit"),
 // so the status shows in the state without restarts: exit 0 is Stopped,
