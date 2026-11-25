@@ -20,6 +20,7 @@ from .base.analyze import analyze
 from .base.fuzz import fuzz
 from .base.mutate import mutate
 from .base.systemtest import systemtest
+from .base.godbolt import godbolt
 from .qemu.build import build_qemu
 from .rpi import commands as rpi_commands
 from .usb import commands as usb_commands
@@ -77,6 +78,9 @@ aember.command(help="Fuzz the code that reads input with libFuzzer, ASan and UBS
 aember.command(
     help="System tests: boot the packed image in QEMU and check the whole system"
 )(systemtest)
+aember.command(
+    help="Local Compiler Explorer with the SDK compilers and aember's flags"
+)(godbolt)
 
 # ----------------------------
 # Aember commands
