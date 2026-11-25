@@ -1,5 +1,6 @@
 """`aember mutate`: which mutants are generated, applying them, the score,
-crash recovery and finding a suite's sources."""
+crash recovery, units (a tests/ directory with all its suites) and the
+reports."""
 
 import tempfile
 import unittest
@@ -107,20 +108,116 @@ class FilesTest(unittest.TestCase):
             self.assertEqual(src.read_text(), "original")
             self.assertGreaterEqual(src.stat().st_mtime, mutant_mtime)
 
-    def test_suite_sources_and_build_dir(self):
+    def test_units_group_every_suite_of_a_tests_directory(self):
         with tempfile.TemporaryDirectory() as t:
             root = Path(t)
-            lib = root / "libraries" / "utils" / "ipc"
-            (lib / "tests").mkdir(parents=True)
-            (lib / "src").mkdir()
-            (lib / "src" / "hub.cpp").write_text("")
-            (lib / "tests" / "CMakeLists.txt").write_text(
+            ipc = root / "libraries" / "utils" / "ipc"
+            netd = root / "services" / "netd"
+            for d in (ipc, netd):
+                (d / "tests").mkdir(parents=True)
+                (d / "src").mkdir()
+            (ipc / "src" / "hub.cpp").write_text("")
+            (ipc / "tests" / "CMakeLists.txt").write_text(
                 "add_executable(ipc-unittest src/hub.cpp)"
             )
-            self.assertEqual(
-                mutate.suite_sources(root, "ipc"), [lib / "src" / "hub.cpp"]
+            (netd / "src" / "dhcp.cpp").write_text("")
+            (netd / "src" / "netd.cpp").write_text("")
+            (netd / "tests" / "CMakeLists.txt").write_text(
+                "aember_test(netd-daemon-unittest)\n"
+                "aember_test(dhcp-client-unittest)\n"
+                "target_link_libraries(dhcp-client-unittest x)\n"
             )
-            self.assertEqual(mutate.suite_sources(root, "nope"), [])
+            # Not a unit: no sources, or outside libraries/ and services/.
+            (root / "libraries" / "empty" / "tests").mkdir(parents=True)
+            (root / "libraries" / "empty" / "tests" / "CMakeLists.txt").write_text(
+                "add_executable(empty-unittest)"
+            )
+            (root / "build" / "x" / "tests").mkdir(parents=True)
+
+            units = mutate.test_units(root)
+            self.assertEqual([u.name for u in units], ["ipc", "netd"])
+            self.assertEqual(units[1].suites, ("dhcp-client", "netd-daemon"))
+            self.assertEqual(
+                units[1].sources, (netd / "src" / "dhcp.cpp", netd / "src" / "netd.cpp")
+            )
+            # By unit name or by any of its suites.
+            self.assertEqual(mutate.find_unit(root, "netd"), units[1])
+            self.assertEqual(mutate.find_unit(root, "dhcp-client"), units[1])
+            self.assertEqual(
+                mutate.find_unit(root, "ipc").sources, (ipc / "src" / "hub.cpp",)
+            )
+            self.assertIsNone(mutate.find_unit(root, "nope"))
+
+    def test_markdown_report_lists_survivors_with_their_line(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            (root / "a.cpp").write_text("int x;\nreturn a == b || c;\n")
+            unit = mutate.Unit("a", ("a",), (root / "a.cpp",))
+            m = Mutant("a.cpp", 2, 9, "==", "!=", "eq->ne")
+            text = mutate.report_markdown(
+                unit, [Result(m, "survived"), Result(m, "killed")], root
+            )
+        self.assertIn("### a: 50.0% (2 mutants, 1 survived)", text)
+        self.assertIn("| `a.cpp:2` | eq->ne | `return a == b \\|\\| c;` |", text)
+
+    def test_suites_run_until_the_first_failure(self):
+        step = mutate.MutateStep("x")
+        ran = []
+
+        def fake(root, binary):
+            ran.append(binary)
+            return {"a": "survived", "b": "killed"}.get(binary, "survived")
+
+        step._run_suite = fake
+        self.assertEqual(step._run_suites(Path("/"), ["a", "b", "c"]), "killed")
+        self.assertEqual(ran, ["a", "b"])
+        ran.clear()
+        self.assertEqual(step._run_suites(Path("/"), ["a", "c"]), "survived")
+        self.assertEqual(ran, ["a", "c"])
+
+    def test_root_runs_get_their_own_pid_namespace(self):
+        cmd = ["sudo", "-n", "env", "A=1", "B=x=/y", "setarch", "x86_64", "/ld.so"]
+        self.assertEqual(
+            mutate.isolated(cmd, as_root=True),
+            ["sudo", "-n", "env", "A=1", "B=x=/y"]
+            + mutate.UNSHARE
+            + ["setarch", "x86_64", "/ld.so"],
+        )
+        self.assertEqual(
+            mutate.isolated(["/ld.so", "t"], as_root=False), ["/ld.so", "t"]
+        )
+
+    def test_regression_a_suite_killing_its_process_group_spares_the_run(self):
+        # Regression: a mutant swapped fork()'s `pid == 0`, the suite then
+        # killed pid 0 (its process group) and took `aember mutate` with it,
+        # leaving the mutant in the source.
+        import sys
+
+        step = mutate.MutateStep("x", timeout=10)
+
+        class Runner:
+            def __init__(self, **_):
+                pass
+
+            def _command(self, root, binary):
+                return [sys.executable, "-c", binary]
+
+            def _env(self, root):
+                return None
+
+        original = mutate.RunTests
+        mutate.RunTests = Runner
+        try:
+            kill_own_group = "import os, signal; os.kill(0, signal.SIGKILL)"
+            self.assertEqual(step._run_suite(Path("/"), kill_own_group), "killed")
+            self.assertEqual(step._run_suite(Path("/"), "pass"), "survived")
+            step.timeout = 0.5
+            hang = "import subprocess; subprocess.run(['sleep', '30'])"
+            self.assertEqual(step._run_suite(Path("/"), hang), "timeout")
+        finally:
+            mutate.RunTests = original
+
+    def test_build_dir(self):
         self.assertEqual(
             mutate.sub_build_dir(Path("/r"), "services/netd/src/x.cpp"),
             Path(
@@ -133,6 +230,52 @@ class FilesTest(unittest.TestCase):
                 "aember-libs-prefix/src/aember-libs-build"
             )
         )
+
+
+def _ci_script(name):
+    """tools/ci/<name>.py as a module (the workflow runs them bare)."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "tools" / "ci" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class WorkflowScriptsTest(unittest.TestCase):
+    def test_matrix_has_every_unit_with_its_first_suite(self):
+        units = _ci_script("mutation-units")
+        root = Path(__file__).resolve().parents[2]
+        matrix = units.matrix(root, [])
+        self.assertEqual(
+            [m["unit"] for m in matrix], [u.name for u in mutate.test_units(root)]
+        )
+        netd = next(m for m in matrix if m["unit"] == "netd")
+        self.assertEqual(netd["suite"], "dhcp-client")
+        self.assertEqual([m["unit"] for m in units.matrix(root, ["ipc"])], ["ipc"])
+        with self.assertRaises(SystemExit):
+            units.matrix(root, ["no-such-unit"])
+
+    def test_summary_table(self):
+        import json
+
+        summary = _ci_script("mutation-summary")
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t)
+            for unit, mutants, survived in (("b", 4, 1), ("a", 6, 0)):
+                report = {
+                    "unit": unit,
+                    "score": round(100 * (mutants - survived) / mutants, 1),
+                    "mutants": mutants,
+                    "survived": [{}] * survived,
+                }
+                (d / f"{unit}.json").write_text(json.dumps(report))
+            (d / "b.md").write_text("### b: survivors here\n")
+            text = summary.summary(d)
+        self.assertIn("| a | 100.0% | 6 | 0 |\n| b | 75.0% | 4 | 1 |", text)
+        self.assertIn("| **all** | **90.0%** | 10 | 1 |", text)
+        self.assertIn("### b: survivors here", text)
 
 
 if __name__ == "__main__":

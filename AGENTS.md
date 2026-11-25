@@ -633,7 +633,7 @@ same image, `.github/workflows/ci.yml`).
 | `aember test --sanitize asan\|tsan [--root]` | `Debug-asan` (Address + Leak + UndefinedBehavior) or `Debug-tsan` variant; the first report fails the suite (`SANITIZER_ENV`). Needs aember-resources v0.1.8+ (the SDK's gcc-sanitizers). `tools/sanitizers/lsan.supp` (via `LSAN_OPTIONS`) hides only the dynamic loader's own allocations |
 | `aember test --valgrind` | every suite under memcheck (errors and definite leaks fail; `tools/valgrind/aember.supp`) |
 | `aember analyze [--update-baseline]` | clang-tidy (`.clang-tidy`) and cppcheck over the Debug compile database; findings beyond `tools/analysis/*-baseline.txt` fail |
-| `aember mutate -k <suite> [-n N]` | mutation testing: one operator at a time changed in the library's sources, its suite rebuilt and run; survivors = lines no test checks (`build/mutation/<suite>.json`) |
+| `aember mutate -k <unit> [-n N] [--root]` | mutation testing of one unit (a library/service directory with `tests/`, or one of its suites): one operator at a time changed in its `src/*.cpp`, all its suites rebuilt and run against each mutant (`--root`: as root, each in its own PID namespace); survivors = lines no test checks (`build/mutation/<unit>.json` and `.md`); `--list` names the units with their mutant counts. Weekly in CI for every unit (`.github/workflows/mutation.yml`) |
 | `aember fuzz [-k <target>] [--time S] [-j N]` | libFuzzer + ASan + UBSan over the code that reads input (`fuzz/`): each target for S seconds (60), up to 4 at once; failing inputs in `build/fuzz/crashes/<target>/`, logs in `build/fuzz/<target>.log`; `--list` names them |
 | `aember systemtest [-k <scenario>] [--timeout-scale F] [--kvm/--no-kvm]` | system tests: each scenario boots the packed image (`aember app pack`, Release by default) in its own QEMU and checks the whole system through the serial console; `--list` names them; consoles in `build/system-tests/<arch>/`; `--scenarios FILE --input k=v` runs another repository's scenarios, `--package-dir` boots another image |
 | `aember godbolt [--port N] [-f FILE] [--build-type T]` / `--stop` | local Compiler Explorer: upstream's, pinned (`tools/godbolt/Dockerfile`), in Docker on 127.0.0.1; one compiler per target configured under `build/configure/<arch>/<type>/` with that build's flags (see "Compiler Explorer" below) |
@@ -771,7 +771,12 @@ same image, `.github/workflows/ci.yml`).
   keeps the last mutant's object in the normal build. Tests must never
   write to relative paths: a mutated chdir then drops files in the repo.
   Some survivors are equivalent mutants (same behaviour another way):
-  judge each one, don't chase 100%.
+  judge each one, don't chase 100%. Each suite runs in its own session
+  (as root: its own PID namespace): a mutant that swaps fork()'s
+  `pid == 0` makes a test kill pid 0, its own process group, which once
+  took the whole run (and the restore) with it. The weekly `Mutation`
+  workflow runs one job per unit (every mutant, as root) and puts a score
+  table and the survivors in its summary; scores are in TODO.md.
 - **valgrind**: forked children that `_exit` leave their heap behind, so
   only the test process's own leaks count; a signal sent between fork and
   exec can get lost under valgrind (tests wait for the exec first,
