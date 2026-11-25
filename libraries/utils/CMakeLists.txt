@@ -17,6 +17,7 @@ set(SUBCOMPONENTS
     module
     mount
     netlink
+    package
     process
     root
     shell
