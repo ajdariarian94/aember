@@ -3,9 +3,12 @@ image of one architecture."""
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import time
+from collections.abc import Sequence
+from pathlib import Path
 
 from aember.core.context import Context
 from aember.core.step import Step
@@ -15,10 +18,40 @@ from aember.steps.testing.system.scenarios import SCENARIOS, System
 log = logging.getLogger("aember.systemtest")
 
 
-def select(names: list[str] | None) -> list[str]:
-    """The scenarios to run, in registration order (all by default)."""
+def load_scenarios(files: Sequence[Path]) -> list[str]:
+    """Import scenario files from other repositories (`--scenarios`); their
+    `@scenario` functions register like the built-in ones. Returns the
+    names they added."""
+    before = set(SCENARIOS)
+    for i, path in enumerate(files):
+        path = Path(path).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"scenario file {path} doesn't exist")
+        spec = importlib.util.spec_from_file_location(
+            f"aember_scenarios_{i}_{path.stem}", path
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    return [n for n in SCENARIOS if n not in before]
+
+
+def parse_inputs(items: Sequence[str]) -> dict[str, str]:
+    """`--input name=value` options as a dict."""
+    inputs = {}
+    for item in items:
+        name, sep, value = item.partition("=")
+        if not sep or not name:
+            raise ValueError(f"--input {item!r}: expected name=value")
+        inputs[name] = value
+    return inputs
+
+
+def select(names: list[str] | None, default: list[str] | None = None) -> list[str]:
+    """The scenarios to run, in registration order (@p default, else all,
+    when none are named)."""
     if not names:
-        return list(SCENARIOS)
+        return list(default or SCENARIOS)
     unknown = [n for n in names if n not in SCENARIOS]
     if unknown:
         raise ValueError(
@@ -45,17 +78,27 @@ class SystemTestStep(Step):
         names: list[str] | None = None,
         timeout_scale: float = 1.0,
         kvm: bool | None = None,
+        scenario_files: Sequence[Path] = (),
+        inputs: dict[str, str] | None = None,
+        package_dir: Path | None = None,
     ) -> None:
         self.names = names
         self.timeout_scale = timeout_scale
         self.kvm = kvm
+        self.scenario_files = list(scenario_files)
+        self.inputs = inputs or {}
+        self.package_dir = package_dir
 
     def run(self, ctx: Context) -> None:
-        names = select(self.names)
+        # With --scenarios, the default is the scenarios of those files.
+        added = load_scenarios(self.scenario_files)
+        names = select(self.names, added)
         profile = QEMU_PROFILES.get(ctx.architecture)
         if not profile:
             raise ValueError(f"no QEMU profile for {ctx.architecture}")
-        package_dir = ctx.root / "build" / "package" / ctx.architecture / ctx.build_type
+        package_dir = self.package_dir or (
+            ctx.root / "build" / "package" / ctx.architecture / ctx.build_type
+        )
         for f in ("kernel", "aember-initramfs.cpio.gz", "aember-rootfs.img"):
             if not (package_dir / f).exists():
                 raise FileNotFoundError(
@@ -69,7 +112,13 @@ class SystemTestStep(Step):
         results: list[tuple[str, bool, float, str]] = []
         for name in names:
             system = System(
-                profile, package_dir, log_dir, self.timeout_scale, self.kvm, name
+                profile,
+                package_dir,
+                log_dir,
+                self.timeout_scale,
+                self.kvm,
+                name,
+                inputs=self.inputs,
             )
             log.info("[%s] %s", name, SCENARIOS[name].description)
             began = time.monotonic()

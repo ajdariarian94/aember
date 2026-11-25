@@ -114,22 +114,27 @@ def vm_command(
     append: str = "",
     extra_args: Sequence[str] = (),
     kvm: bool | None = None,
+    rootfs: Path | None = None,
+    snapshot: bool = True,
 ) -> list[str]:
     """
     The QEMU command line of a system test: headless like `aember app launch
     --headless`, plus
     - `-snapshot`: writes go to a temporary overlay, the packed image stays
-      as it was (every test boots the same image);
+      as it was (every test boots the same image). Without it (@p snapshot
+      False) the disk keeps what the run wrote, for tests that boot the same
+      disk again (power loss); give such a test its own copy (@p rootfs).
     - `-no-reboot`: a reboot ends QEMU like a power-off, so tests see both;
     - serial console on stdin/stdout (pipes).
     """
     cmd = headless_profile(profile).base_cmd(
         str(package_dir / "kernel"),
         str(package_dir / "aember-initramfs.cpio.gz"),
-        str(package_dir / "aember-rootfs.img"),
+        str(rootfs or package_dir / "aember-rootfs.img"),
         append,
     )
-    cmd += ["-snapshot", "-no-reboot", "-serial", "stdio", "-monitor", "none"]
+    cmd += ["-snapshot"] if snapshot else []
+    cmd += ["-no-reboot", "-serial", "stdio", "-monitor", "none"]
     cmd += accel_args(kvm)
     cmd += list(extra_args)
     return cmd

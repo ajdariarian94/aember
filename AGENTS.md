@@ -632,7 +632,7 @@ same image, `.github/workflows/ci.yml`).
 | `aember test --valgrind` | every suite under memcheck (errors and definite leaks fail; `tools/valgrind/aember.supp`) |
 | `aember analyze [--update-baseline]` | clang-tidy (`.clang-tidy`) and cppcheck over the Debug compile database; findings beyond `tools/analysis/*-baseline.txt` fail |
 | `aember mutate -k <suite> [-n N]` | mutation testing: one operator at a time changed in the library's sources, its suite rebuilt and run; survivors = lines no test checks (`build/mutation/<suite>.json`) |
-| `aember systemtest [-k <scenario>] [--timeout-scale F] [--kvm/--no-kvm]` | system tests: each scenario boots the packed image (`aember app pack`, Release by default) in its own QEMU and checks the whole system through the serial console; `--list` names them; consoles in `build/system-tests/<arch>/` |
+| `aember systemtest [-k <scenario>] [--timeout-scale F] [--kvm/--no-kvm]` | system tests: each scenario boots the packed image (`aember app pack`, Release by default) in its own QEMU and checks the whole system through the serial console; `--list` names them; consoles in `build/system-tests/<arch>/`; `--scenarios FILE --input k=v` runs another repository's scenarios, `--package-dir` boots another image |
 
 | `aember lint [--check]` | ruff, black, clang-format, cmake-format, cmakelint; `--check` changes nothing and fails on anything to fix (CI) |
 
@@ -696,6 +696,18 @@ same image, `.github/workflows/ci.yml`).
   services.json / containers.json; fail with `raise vm.fail("...")`
   (an AssertionError with the end of the console). The fake-device tests
   in `aember-cli/tests/test_systemtest.py` cover the harness without QEMU.
+  **Scenarios of other repositories** (a container's end-to-end test, e.g.
+  aember-fleet's `tests/e2e/fleet.py` + `tools/e2e.sh`): `aember systemtest
+  --scenarios <file.py> --input name=value ...` imports the file (its
+  `@scenario`s register; without `-k` only those run), `system.input(name)`
+  reads an input, `--package-dir` boots another image (e.g. a release's,
+  unpacked under `build/`; configs then come from the image itself via
+  guestfish). `system.image_with_containers(bundles, files)` copies the
+  packed image (`<log_dir>/<label>.img`) and puts packed containers
+  (aember-build-helper bundles, merged into containers.json like `run.py
+  install`) and files in with guestfish; `image_copy_out()` gets a file out;
+  `boot(rootfs=..., snapshot=False)` keeps what a run writes, for a second
+  boot of the same disk (power loss: leaving the `with` kills QEMU).
 - **Regression tests** carry a comment starting `Regression:` saying which
   bug they pin down (`grep -rn "Regression:"` lists them). Every bug fix
   gets one; CLI bugs with no better home go in

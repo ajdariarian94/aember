@@ -7,21 +7,33 @@ Adding a scenario: write a function taking a `System`, decorate it with
 `@scenario("name", "what it shows")`, boot with `system.boot()` and assert
 through the `Vm` (vm.py): console patterns, commands in the debug shell,
 the status file. Raise `vm.fail("...")` (or let a `Vm` wait time out) for a
-failure. Scenarios elsewhere (e.g. a fleet end-to-end test that also starts
-a fleet server) register the same way; `extra_args` adds QEMU arguments and
-`append` kernel arguments.
+failure. `extra_args` adds QEMU arguments and `append` kernel arguments.
+
+Scenarios of other repositories (a container's own end-to-end test, e.g.
+aember-fleet's) live there and are loaded with `aember systemtest
+--scenarios <file.py>`; they register the same way. Their inputs (built
+containers, a server image) come in with `--input name=value`
+(`system.input(name)`), and `system.image_with_containers()` gives them a
+copy of the packed image with their containers and files in it.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Callable, Iterator, Sequence
+import shutil
+import subprocess
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from aember.steps.launching.launch import QemuProfile
+from aember.steps.packaging.rootfs import run_guestfish, tar_in_commands
 from aember.steps.testing.system.vm import Vm, vm_command
+
+# Where a container goes in an image (aember-build-helper's layout).
+IMAGES_DIR = Path("var/lib/aember")
+CONTAINERS_JSON = "etc/aember/containers.json"
 
 
 @dataclass
@@ -34,12 +46,129 @@ class System:
     timeout_scale: float = 1.0
     kvm: bool | None = None
     name: str = "scenario"
+    inputs: Mapping[str, str] = field(default_factory=dict)
     _boots: int = field(default=0, repr=False)
 
+    @property
+    def rootfs(self) -> Path:
+        """The packed root file system image."""
+        return self.package_dir / "aember-rootfs.img"
+
+    def input(self, name: str) -> str:
+        """The value of `--input name=value`; a scenario that needs it fails
+        without it."""
+        if name not in self.inputs:
+            raise AssertionError(
+                f"scenario {self.name} needs --input {name}=... "
+                f"(given: {', '.join(self.inputs) or 'none'})"
+            )
+        return self.inputs[name]
+
     def config(self, name: str) -> dict:
-        """/etc/aember/<name> as packed (services.json, containers.json)."""
-        path = self.package_dir / "overlay_root" / "etc" / "aember" / name
-        return json.loads(path.read_text()) if path.exists() else {}
+        """/etc/aember/<name> as packed (services.json, containers.json):
+        from the pack's overlay_root, or from the image itself (an image
+        from a release has no overlay_root next to it)."""
+        overlay = self.package_dir / "overlay_root"
+        if overlay.is_dir():
+            path = overlay / "etc" / "aember" / name
+            return json.loads(path.read_text()) if path.exists() else {}
+        text = self.image_file(f"/etc/aember/{name}")
+        return json.loads(text) if text else {}
+
+    def image_file(self, path: str, image: Path | None = None) -> str | None:
+        """A text file from the root file system image (guestfish, read
+        only); None if it isn't there."""
+        image = image or self.rootfs
+
+        def guestfish(command: str) -> str:
+            script = [f"add-ro {image}", "run", "mount-ro /dev/sda1 /", command]
+            return run_guestfish(script, what=f"{path} in {image}", read_only=True)
+
+        # Two runs: a failed `cat` is an error even with guestfish's "-".
+        if guestfish(f'is-file "{path}"').strip() != "true":
+            return None
+        return guestfish(f'cat "{path}"')
+
+    def image_copy_out(self, path: str, dest: Path, image: Path | None = None) -> Path:
+        """Copy file @p path out of the image (e.g. a container image to
+        derive a test version from) to @p dest, which must be under the
+        repository (guestfish's `docker run` sees only that)."""
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.unlink(missing_ok=True)
+        run_guestfish(
+            [
+                f"add-ro {image or self.rootfs}",
+                "run",
+                "mount-ro /dev/sda1 /",
+                f'download "{path}" "{dest}"',
+            ],
+            what=f"{path} in {image or self.rootfs}",
+            read_only=True,
+        )
+        return dest
+
+    def image_with(self, tree: Path, label: str) -> Path:
+        """A copy of the packed image with @p tree's files put in (they
+        replace what's there, owned by root): <log_dir>/<label>.img. Boot it
+        with `boot(rootfs=...)`; with `snapshot=False` it keeps what a run
+        writes, for a second boot of the same disk."""
+        image = self.log_dir / f"{label}.img"
+        image.unlink(missing_ok=True)
+        # Sparse copy: the 512 MB image is mostly empty.
+        subprocess.run(
+            ["cp", "--sparse=always", str(self.rootfs), str(image)], check=True
+        )
+        tars = self.log_dir / f"{label}-tars"
+        script = [f"add {image}", "run", "mount /dev/sda1 /"]
+        script += tar_in_commands([tree], tars)
+        script += ["umount /", "exit"]
+        try:
+            run_guestfish(script, what=str(image))
+        finally:
+            shutil.rmtree(tars, ignore_errors=True)
+        return image
+
+    def image_with_containers(
+        self,
+        bundles: Sequence[Path],
+        files: Mapping[str, str | bytes] | None = None,
+        label: str | None = None,
+    ) -> Path:
+        """
+        A copy of the packed image with more containers and files: each of
+        @p bundles is a packed container (aember-build-helper's
+        `build/aember-out/<arch>/<name>/`: container.json and
+        overlay/var/lib/aember/<name>/), added to the image's containers.json
+        (an entry of the same name is replaced), like `aember-cli/run.py
+        install` does for a board's overlay. @p files: path in the image ->
+        content (configs, keys). Returns the image (`image_with`).
+        """
+        label = label or self.name
+        tree = self.log_dir / f"{label}-tree"
+        shutil.rmtree(tree, ignore_errors=True)
+        tree.mkdir(parents=True)
+        containers = self.config("containers.json") or {}
+        entries = list(containers.get("containers", []))
+        for bundle in bundles:
+            entry = json.loads((Path(bundle) / "container.json").read_text())
+            name = entry["name"]
+            src = Path(bundle) / "overlay" / IMAGES_DIR / name
+            if not src.is_dir():
+                raise AssertionError(f"{bundle}: no {IMAGES_DIR / name} in it")
+            shutil.copytree(src, tree / IMAGES_DIR / name)
+            entries = [c for c in entries if c.get("name") != name] + [entry]
+        containers = {"bridges": containers.get("bridges", []), **containers}
+        containers["containers"] = entries
+        (tree / CONTAINERS_JSON).parent.mkdir(parents=True, exist_ok=True)
+        (tree / CONTAINERS_JSON).write_text(json.dumps(containers, indent=2) + "\n")
+        for path, content in (files or {}).items():
+            dst = tree / path.lstrip("/")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(content, bytes):
+                dst.write_bytes(content)
+            else:
+                dst.write_text(content)
+        return self.image_with(tree, label)
 
     def services(self) -> list[dict]:
         return self.config("services.json").get("processes", [])
@@ -48,12 +177,28 @@ class System:
         return self.config("containers.json").get("containers", [])
 
     @contextlib.contextmanager
-    def boot(self, append: str = "", extra_args: Sequence[str] = ()) -> Iterator[Vm]:
-        """Boot the system; the console goes to <log_dir>/<scenario>.log
-        (-2, -3, ... for later boots in the same scenario)."""
+    def boot(
+        self,
+        append: str = "",
+        extra_args: Sequence[str] = (),
+        rootfs: Path | None = None,
+        snapshot: bool = True,
+    ) -> Iterator[Vm]:
+        """Boot the system (@p rootfs: another image, e.g. from
+        `image_with_containers`; @p snapshot False: the run's writes stay on
+        it); the console goes to <log_dir>/<scenario>.log (-2, -3, ... for
+        later boots in the same scenario)."""
         self._boots += 1
         suffix = "" if self._boots == 1 else f"-{self._boots}"
-        cmd = vm_command(self.profile, self.package_dir, append, extra_args, self.kvm)
+        cmd = vm_command(
+            self.profile,
+            self.package_dir,
+            append,
+            extra_args,
+            self.kvm,
+            rootfs=rootfs,
+            snapshot=snapshot,
+        )
         with Vm(
             cmd, self.log_dir / f"{self.name}{suffix}.log", self.timeout_scale
         ) as vm:
