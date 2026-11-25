@@ -29,7 +29,15 @@ struct DaemonStatus {
   nlohmann::json network;
   /// containerd's last reported state per container.
   std::map<std::string, std::string> containers;
+  /// When each service or container last changed state (BootTimeMs()).
+  std::map<std::string, long long> since_ms;
 };
+
+/// Milliseconds since boot (CLOCK_BOOTTIME, includes suspend): when a
+/// service or container last changed state ("since_ms" in the status file).
+/// The same clock as the kernel's console timestamps, so a boot's timeline
+/// lines up with them.
+long long BootTimeMs();
 
 struct DaemonUpdate {
   enum class Kind {

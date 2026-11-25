@@ -13,6 +13,7 @@ from unittest import mock
 
 from aember.steps.launching.launch import QEMU_PROFILES
 from aember.steps.testing.system.scenarios import (
+    boot_timeline,
     SCENARIOS,
     System,
     _container_app,
@@ -274,6 +275,19 @@ class ScenarioTest(unittest.TestCase):
     def test_container_app(self):
         c = {"container": {"args": ["/bin/sh", "/echo-alpine.sh"]}}
         self.assertEqual(_container_app(c), "aember-init /bin/sh /echo-alpine.sh")
+
+    def test_boot_timeline_in_order_of_since(self):
+        status = {
+            "services": [
+                {"name": "b", "state": "running", "since_ms": 3000},
+                {"name": "a", "state": "running", "since_ms": 1200},
+                {"name": "old", "state": "running"},  # an older aember: no since
+            ]
+        }
+        self.assertEqual(
+            boot_timeline(status), [(1200, "a", "running"), (3000, "b", "running")]
+        )
+        self.assertEqual(boot_timeline({}), [])
 
     def test_summary(self):
         md = summary_markdown([("boot", True, 4.2, ""), ("reboot", False, 30, "x")])

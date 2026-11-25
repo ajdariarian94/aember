@@ -51,6 +51,25 @@ TEST(DaemonStatusTest, ContainerStates) {
   EXPECT_EQ(s.containers.at("web"), "running");
 }
 
+TEST(DaemonStatusTest, SinceIsWhenTheStateLastChanged) {
+  DaemonStatus s;
+  const auto event = [](const char* state) {
+    return json{{"type", "event"},
+                {"name", "container"},
+                {"data", {{"name", "app"}, {"state", state}}}};
+  };
+  const auto before = aember::aember_init::BootTimeMs();
+  EXPECT_GT(before, 0);
+  ApplyDaemonMessage(event("starting"), s);
+  ASSERT_TRUE(s.since_ms.contains("app"));
+  EXPECT_GE(s.since_ms["app"], before);
+  s.since_ms["app"] = 1;  // marks the time of the last change
+  ApplyDaemonMessage(event("starting"), s);
+  EXPECT_EQ(s.since_ms["app"], 1) << "the same state again is no change";
+  ApplyDaemonMessage(event("running"), s);
+  EXPECT_GE(s.since_ms["app"], before);
+}
+
 TEST(DaemonStatusTest, AnythingElseIsIgnoredNeverThrown) {
   DaemonStatus s;
   for (const auto& m :

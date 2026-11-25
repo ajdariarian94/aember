@@ -11,6 +11,8 @@
 #include <aember-libs/aember-init/daemon-status.h>
 #include <aember-libs/utils/ipc/channel.h>
 
+#include <ctime>
+
 namespace aember::aember_init {
 
 namespace {
@@ -51,10 +53,18 @@ DaemonUpdate ApplyDaemonMessage(const nlohmann::json& message,
     update.container = Text(*data, "name");
     update.state = Text(*data, "state");
     if (update.container.empty()) return update;
-    status.containers[update.container] = update.state;
+    auto& state = status.containers[update.container];
+    if (state != update.state) status.since_ms[update.container] = BootTimeMs();
+    state = update.state;
     update.kind = DaemonUpdate::Kind::kContainer;
   }
   return update;
+}
+
+long long BootTimeMs() {
+  timespec ts{};
+  if (::clock_gettime(CLOCK_BOOTTIME, &ts) != 0) return 0;
+  return (static_cast<long long>(ts.tv_sec) * 1000) + (ts.tv_nsec / 1000000);
 }
 
 }  // namespace aember::aember_init
