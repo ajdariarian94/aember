@@ -31,10 +31,11 @@ def _tree_size(path: Path) -> int:
     return total
 
 
-def run_guestfish(script: list[str], what: str) -> None:
+def run_guestfish(script: list[str], what: str, read_only: bool = False) -> str:
     """
     Run a guestfish script as root in a `docker run` of the dev image (the
     repo bind-mounted at the same path). Raises on any libguestfs error.
+    Returns what the script printed (e.g. `cat`).
     """
     docker_cmd = [
         "docker",
@@ -48,13 +49,14 @@ def run_guestfish(script: list[str], what: str) -> None:
         f"{HOST_ROOT_PATH}:/aember_ws/aember",
         get_running_container_image(),
         "guestfish",
-        "--rw",
+        "--ro" if read_only else "--rw",
     ]
     # subprocess.run used directly (not CommandRunner): the script goes in
     # through stdin.
     result = subprocess.run(
         docker_cmd,
         input="\n".join(script).encode(),
+        stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
     stderr = result.stderr.decode(errors="replace")
@@ -67,6 +69,7 @@ def run_guestfish(script: list[str], what: str) -> None:
             f"guestfish failed building {what} "
             f"(exit {result.returncode}): {stderr.strip()[-500:]}"
         )
+    return (result.stdout or b"").decode(errors="replace")
 
 
 def _root_owned(info: tarfile.TarInfo) -> tarfile.TarInfo:

@@ -158,7 +158,7 @@ machine's network; closing the window ends it and cleans up.
 | `aember test --coverage` / `--sanitize asan\|tsan` / `--valgrind` | Coverage report per library, sanitizer builds, memcheck |
 | `aember analyze` | Static analysis (clang-tidy, cppcheck) against a baseline |
 | `aember mutate -k <suite>` | Mutation testing of one library's tests |
-| `aember systemtest [-k <scenario>]` | System tests: the packed image booted in QEMU (boot, debug shell, service/container restart, power-off, reboot) |
+| `aember systemtest [-k <scenario>]` | System tests: the packed image booted in QEMU (boot, debug shell, service/container restart, power-off, reboot); `--scenarios FILE --input k=v` runs a container repository's own end-to-end tests (e.g. aember-fleet's) |
 | `aember rpi image` / `flash` / `launch` | Raspberry Pi 4 SD card image |
 | `aember usb image` / `flash` / `launch` | x86-64 PC USB stick image (UEFI) |
 | `aember fetch-resources` | Download kernel, BusyBox, LXC and SDK only |

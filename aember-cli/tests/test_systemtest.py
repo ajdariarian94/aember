@@ -9,6 +9,7 @@ import textwrap
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from aember.steps.launching.launch import QEMU_PROFILES
 from aember.steps.testing.system.scenarios import (
@@ -17,7 +18,12 @@ from aember.steps.testing.system.scenarios import (
     _container_app,
     scenario,
 )
-from aember.steps.testing.system.step import select, summary_markdown
+from aember.steps.testing.system.step import (
+    load_scenarios,
+    parse_inputs,
+    select,
+    summary_markdown,
+)
 from aember.steps.testing.system.vm import (
     READY,
     Console,
@@ -94,6 +100,18 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(cmd[-1], "-z")
         self.assertNotIn("-accel", cmd)
 
+    def test_own_disk_without_snapshot(self):
+        cmd = vm_command(
+            QEMU_PROFILES["x64-poky-linux"],
+            Path("/p"),
+            kvm=False,
+            rootfs=Path("/l/own.img"),
+            snapshot=False,
+        )
+        self.assertIn("file=/l/own.img,if=ide,format=raw", cmd)
+        self.assertNotIn("-snapshot", cmd)
+        self.assertIn("-no-reboot", cmd)
+
     def test_accel(self):
         self.assertEqual(accel_args(True), ["-accel", "kvm"])
         self.assertEqual(accel_args(False), [])
@@ -167,6 +185,91 @@ class ScenarioTest(unittest.TestCase):
         system = System(QEMU_PROFILES["x64-poky-linux"], tmp, tmp)
         self.assertEqual(system.services(), [{"name": "a"}])
         self.assertEqual(system.containers(), [])
+
+    def test_scenarios_from_another_repository(self):
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "theirs.py").write_text(
+            textwrap.dedent(
+                """
+                from aember.steps.testing.system.scenarios import scenario
+
+                @scenario("their-test", "theirs")
+                def their_test(system):
+                    system.input("server")
+                """
+            )
+        )
+        try:
+            added = load_scenarios([tmp / "theirs.py"])
+            self.assertEqual(added, ["their-test"])
+            # Without -k only theirs run; -k still picks any.
+            self.assertEqual(select(None, added), ["their-test"])
+            self.assertEqual(select(["boot"], added), ["boot"])
+            system = System(
+                QEMU_PROFILES["x64-poky-linux"], tmp, tmp, name="their-test"
+            )
+            with self.assertRaisesRegex(AssertionError, "--input server="):
+                SCENARIOS["their-test"].run(system)
+            system.inputs = {"server": "x"}
+            SCENARIOS["their-test"].run(system)
+        finally:
+            SCENARIOS.pop("their-test", None)
+        with self.assertRaises(FileNotFoundError):
+            load_scenarios([tmp / "missing.py"])
+
+    def test_inputs(self):
+        self.assertEqual(
+            parse_inputs(["a=1", "b=x=y", "c="]), {"a": "1", "b": "x=y", "c": ""}
+        )
+        for bad in ("a", "=1"):
+            with self.assertRaises(ValueError):
+                parse_inputs([bad])
+
+    def test_image_with_containers(self):
+        tmp = Path(tempfile.mkdtemp())
+        etc = tmp / "overlay_root" / "etc" / "aember"
+        etc.mkdir(parents=True)
+        (etc / "containers.json").write_text(
+            json.dumps(
+                {
+                    "bridges": [{"name": "lxcbr0"}],
+                    "containers": [{"name": "echo"}, {"name": "auth", "old": 1}],
+                }
+            )
+        )
+        bundle = tmp / "bundle"
+        files = bundle / "overlay" / "var" / "lib" / "aember" / "auth"
+        files.mkdir(parents=True)
+        (files / "auth.squashfs").write_bytes(b"img")
+        (bundle / "container.json").write_text('{"name": "auth", "new": 1}')
+        system = System(QEMU_PROFILES["x64-poky-linux"], tmp, tmp / "log")
+        with mock.patch.object(System, "image_with", return_value=Path("/i")) as w:
+            image = system.image_with_containers(
+                [bundle], {"/etc/aember/auth/auth.json": "{}", "key": b"k"}, "x"
+            )
+        self.assertEqual(image, Path("/i"))
+        tree, label = w.call_args.args
+        self.assertEqual(label, "x")
+        merged = json.loads((tree / "etc/aember/containers.json").read_text())
+        self.assertEqual(merged["bridges"], [{"name": "lxcbr0"}])
+        # Same name replaced, others kept, new ones last.
+        self.assertEqual(
+            merged["containers"], [{"name": "echo"}, {"name": "auth", "new": 1}]
+        )
+        self.assertEqual(
+            (tree / "var/lib/aember/auth/auth.squashfs").read_bytes(), b"img"
+        )
+        self.assertEqual((tree / "etc/aember/auth/auth.json").read_text(), "{}")
+        self.assertEqual((tree / "key").read_bytes(), b"k")
+
+    def test_configs_from_the_image_without_overlay_root(self):
+        tmp = Path(tempfile.mkdtemp())
+        system = System(QEMU_PROFILES["x64-poky-linux"], tmp, tmp)
+        with mock.patch.object(
+            System, "image_file", return_value='{"containers": [{"name": "c"}]}'
+        ) as f:
+            self.assertEqual(system.containers(), [{"name": "c"}])
+        f.assert_called_once_with("/etc/aember/containers.json")
 
     def test_container_app(self):
         c = {"container": {"args": ["/bin/sh", "/echo-alpine.sh"]}}
