@@ -99,6 +99,14 @@ class ProcessManager {
   /** Called internally after HandleExit when restart policy allows it. */
   void ScheduleRestart(std::string_view name);
 
+  /**
+   * Shutdown: cancel the pending restarts (their threads are stopped and
+   * joined, so none fires later) and schedule no new ones until
+   * EnableRestarts(). Must not be called from a restart callback.
+   */
+  void CancelRestarts();
+  void EnableRestarts();
+
   // ---------------------------------------------------------------------------
   // Queries
   // ---------------------------------------------------------------------------
@@ -147,6 +155,10 @@ class ProcessManager {
   };
   std::mutex restarts_mutex_;
   std::list<PendingRestart> restarts_;
+  /// False between CancelRestarts() and EnableRestarts(). Checked when a
+  /// restart is scheduled and again when it is queued (under
+  /// restarts_mutex_), so none slips past a CancelRestarts().
+  std::atomic<bool> restarts_enabled_{true};
 
   ExitCallback on_exit_;
 

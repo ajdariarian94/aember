@@ -260,6 +260,14 @@ first:
   NOLINT only where one thread runs); cppcheck keeps 10 style findings
   (raw loops, the deliberate local mutex for stop-token waits) in its
   baseline.
+- [x] TLA+ model of start, restarts and shutdown (`spec/tla/`, CI job
+  `tla`, 2026-11-25). It found that a restart pending at shutdown started
+  its service again (or crashed PID 1 on a destroyed ServiceManager):
+  fixed, `StopAll` cancels pending restarts.
+- [ ] Services never reset their restart count (`max_restarts` counts
+  every failure since boot; containers count failures in a row, reset
+  after `kStableRun`). Harmless while every board has `max_restarts: 0`;
+  decide which meaning `max_restarts` has.
 - [ ] Mutation testing for every library (`aember mutate -k <suite>`):
   process-manager 76% -> 84% (its 4 survivors are equivalent mutants:
   same behaviour by another path); the rest is still to run. Each run

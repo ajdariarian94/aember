@@ -192,6 +192,8 @@ vcpkg/                  SUBMODULE (fork) incl. x64/aarch64-poky-linux triplets
 tools/triplets/         overlay triplets not in the submodule (arm-poky-linux, riscv64-poky-linux),
                         passed as VCPKG_OVERLAY_TRIPLETS by ConfigureStep
 vcpkg.json              cli11, gtest, nlohmann-json, spdlog
+spec/tla/               TLA+ models checked with TLC (spec/tla/check.sh, CI job `tla`):
+                        StartGraph = start graph, restarts, shutdown; README.md
 doc/                    Doxyfile, changelog/ (written by `aember changelog`), configuration.md
                         (every /etc/aember/*.json key: keep it current with the parsers), packages.md
 build/                  git-ignored: aember-resources/, configure/, install/,
@@ -675,6 +677,11 @@ same image, `.github/workflows/ci.yml`).
   `/usr/bin/aember`; `AEMBER_TEST_BUSYBOX` comes from `aember test`).
 - **Regression tests** carry a comment starting `Regression:` saying which
   bug they pin down.
+- **TLA+ models** (`spec/tla/`, README there): `StartGraph.tla` is the
+  design of start (dependency graph, parallel), restarts and shutdown.
+  Change the model with the behaviour, run `spec/tla/check.sh` (Docker,
+  ~15 s), and keep "Where the code differs" in its README current. A bug
+  the model finds gets an `EXPECTED TO FAIL` model plus a regression test.
 - **Mutation testing** edits the real sources one mutant at a time (a
   `.mutate-backup` next to the file; a killed run is repaired by the next
   one, or by moving the backup back). Restoring touches the file, or make

@@ -8,6 +8,7 @@
 #   test        x64 Debug with tests as root, static analysis
 #   coverage    per-library coverage report (artifact + job summary)
 #   valgrind    every suite under memcheck (nightly and by hand)
+#   tla         the TLA+ models in spec/tla checked with TLC
 #
 # The image (~10 GB) and the SDK (~3.6 GB) need more disk than a runner has
 # free: the preinstalled toolchains aember doesn't use are removed first.
@@ -50,6 +51,19 @@ jobs:
         run: tools/ci/run.sh aember lint --check
       - name: CLI tests
         run: tools/ci/run.sh aember test -k cli
+
+  tla:
+    name: TLA+ models (TLC)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/aember-tla
+          key: tla2tools-${{ hashFiles('spec/tla/check.sh') }}
+      - name: Model-check
+        run: spec/tla/check.sh
 
   test:
     name: Unit tests (root) and static analysis

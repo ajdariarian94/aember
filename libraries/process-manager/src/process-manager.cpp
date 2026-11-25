@@ -252,6 +252,11 @@ void ProcessManager::ScheduleRestart(std::string_view name) {
     return;
   }
 
+  if (!restarts_enabled_) {
+    log_.info("Not restarting '{}': shutting down", name);
+    return;
+  }
+
   auto& count = restart_counts_.at(key);
 
   if (config.max_restarts > 0 && count >= config.max_restarts) {
@@ -295,13 +300,37 @@ void ProcessManager::ScheduleRestart(std::string_view name) {
     } catch (...) { log_.error("Restart of '{}' failed", key); }
   }};
 
-  std::lock_guard restarts_lock{restarts_mutex_};
-  std::erase_if(restarts_, [](PendingRestart& r) {
-    if (!r.done->load()) return false;
-    r.thread.join();  // finished: joining is immediate
-    return true;
-  });
-  restarts_.push_back({std::move(done), std::move(thread)});
+  {
+    std::lock_guard restarts_lock{restarts_mutex_};
+    if (restarts_enabled_) {
+      std::erase_if(restarts_, [](PendingRestart& r) {
+        if (!r.done->load()) return false;
+        r.thread.join();  // finished: joining is immediate
+        return true;
+      });
+      restarts_.push_back({std::move(done), std::move(thread)});
+      return;
+    }
+  }
+  // CancelRestarts() ran since the check above: this one is cancelled too
+  // (the jthread's destructor stops and joins it, outside the lock).
+}
+
+void ProcessManager::CancelRestarts() {
+  restarts_enabled_ = false;
+  std::list<PendingRestart> pending;
+  {
+    std::lock_guard lock{restarts_mutex_};
+    pending.swap(restarts_);
+  }
+  if (!pending.empty()) {
+    log_.info("Cancelling {} pending restart(s)", pending.size());
+  }
+  pending.clear();  // request_stop + join each (outside the lock)
+}
+
+void ProcessManager::EnableRestarts() {
+  restarts_enabled_ = true;
 }
 
 // ---------------------------------------------------------------------------

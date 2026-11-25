@@ -226,6 +226,16 @@ bool ServiceManager::StopInternal(std::string_view name) {
   // Without the lock: ProcessManager reports the exit through a callback
   // that takes mutex_ (std::mutex, not recursive).
   process_manager_.Stop(name);
+
+  // Nothing was running (failed, or a restart pending): no exit will be
+  // reported, so it is stopped now.
+  if (!process_manager_.GetPid(name)) {
+    std::lock_guard lock{mutex_};
+    const auto it = states_.find(key);
+    if (it != states_.end() && it->second == ProcessState::Stopping) {
+      SetState(key, ProcessState::Stopped);
+    }
+  }
   return true;
 }
 
@@ -240,6 +250,7 @@ bool ServiceManager::Restart(std::string_view name) {
 // ---------------------------------------------------------------------------
 
 void ServiceManager::StartAll() {
+  process_manager_.EnableRestarts();
   const auto order = dependency_resolver_.ResolveStartOrder(Graph());
   {
     std::lock_guard lock{mutex_};
@@ -253,6 +264,10 @@ void ServiceManager::StartAll() {
 }
 
 void ServiceManager::StopAll() {
+  // First: a restart pending now would otherwise fire during (or after) the
+  // shutdown and start its service again, or call into a destroyed
+  // ServiceManager (spec/tla/StartGraph.tla, NoStartAfterShutdown).
+  process_manager_.CancelRestarts();
   {
     std::lock_guard lock{mutex_};
     waiting_.clear();
