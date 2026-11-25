@@ -337,45 +337,25 @@ AemberInit::Result<> AemberInit::InitServiceStack() {
 
 void AemberInit::OnDaemonMessage(const std::string& name,
                                  const nlohmann::json& message) {
-  namespace ipc = aember::utils::ipc;
-  const auto type = ipc::TypeOf(message);
-  if (type == "ready") {
-    if (service_manager_) { service_manager_->MarkReady(name); }
-    return;
+  DaemonUpdate update;
+  {
+    std::lock_guard lock{status_mutex_};
+    update = ApplyDaemonMessage(message, daemon_status_);
   }
-  if (type != "event" || !message.contains("data")) { return; }
-
-  const auto& data = message["data"];
-  if (!data.is_object()) { return; }
-  const auto online = [](const nlohmann::json& j) {
-    const auto it = j.find("online");
-    return j.is_object() && it != j.end() && it->is_boolean() &&
-           it->get<bool>();
-  };
-  const auto text = [&](const char* key) {
-    const auto it = data.find(key);
-    return it != data.end() && it->is_string() ? it->get<std::string>()
-                                               : std::string{};
-  };
-
-  const auto name_it = message.find("name");
-  const std::string event = name_it != message.end() && name_it->is_string()
-                                ? name_it->get<std::string>()
-                                : "";
-  std::lock_guard lock{status_mutex_};
-  if (event == "network") {
-    const bool was_online = online(network_status_);
-    network_status_ = data;
-    if (was_online && !online(network_status_)) {
-      log_.warn("Network: internet connectivity lost");
-    }
-  } else if (event == "container") {
-    const auto container = text("name");
-    const auto state = text("state");
-    if (!container.empty()) {
-      log_.info("Container '{}': {}", container, state);
-      container_states_[container] = state;
-    }
+  switch (update.kind) {
+    case DaemonUpdate::Kind::kReady:
+      if (service_manager_) { service_manager_->MarkReady(name); }
+      break;
+    case DaemonUpdate::Kind::kNetwork:
+      if (update.went_offline) {
+        log_.warn("Network: internet connectivity lost");
+      }
+      break;
+    case DaemonUpdate::Kind::kContainer:
+      log_.info("Container '{}': {}", update.container, update.state);
+      break;
+    case DaemonUpdate::Kind::kIgnored:
+      break;
   }
 }
 
@@ -557,8 +537,10 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
   nlohmann::json containers = nlohmann::json::array();
   {
     std::lock_guard lock{status_mutex_};
-    if (!network_status_.is_null()) { payload["network"] = network_status_; }
-    for (const auto& [name, state] : container_states_) {
+    if (!daemon_status_.network.is_null()) {
+      payload["network"] = daemon_status_.network;
+    }
+    for (const auto& [name, state] : daemon_status_.containers) {
       containers.push_back(
           {{"name", name}, {"state", state}, {"type", "container"}});
     }

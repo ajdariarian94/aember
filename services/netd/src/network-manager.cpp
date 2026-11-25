@@ -18,9 +18,11 @@
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <cstring>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
@@ -68,6 +70,21 @@ bool WaitForCarrier(std::string_view name, std::chrono::milliseconds timeout) {
     std::this_thread::sleep_for(std::chrono::milliseconds{100});
   }
   return true;
+}
+
+/// A whole number >= 0 from network.json, @p fallback if absent. Anything
+/// else throws (bring-up fails with the reason): value<int>() of 1e30 or a
+/// fraction was an undefined float-to-int conversion.
+int CountField(const nlohmann::json& config, const char* key, int fallback) {
+  const auto it = config.find(key);
+  if (it == config.end()) return fallback;
+  if (!it->is_number_unsigned() ||
+      it->get<std::uint64_t>() >
+          static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error(
+        std::format("network.json: '{}' must be a whole number >= 0", key));
+  }
+  return static_cast<int>(it->get<std::uint64_t>());
 }
 
 }  // namespace
@@ -147,13 +164,16 @@ bool NetworkManager::WaitForConnectivity(std::chrono::milliseconds timeout) {
 // ---------------------------------------------------------------------------
 
 void NetworkManager::ParseConfig(const nlohmann::json& config) {
+  if (!config.is_object()) {
+    throw std::runtime_error("NetworkManager: config must be an object");
+  }
   config_.ping_target = config.value("ping_target", "8.8.8.8");
-  config_.ping_retries = config.value("ping_retries", 3);
+  config_.ping_retries = CountField(config, "ping_retries", 3);
   config_.ping_interval =
-      std::chrono::milliseconds{config.value("ping_interval_ms", 10000)};
+      std::chrono::milliseconds{CountField(config, "ping_interval_ms", 10000)};
   config_.dhcp_timeout =
-      std::chrono::milliseconds{config.value("dhcp_timeout_ms", 30000)};
-  config_.dhcp_retries = config.value("dhcp_retries", 3);
+      std::chrono::milliseconds{CountField(config, "dhcp_timeout_ms", 30000)};
+  config_.dhcp_retries = CountField(config, "dhcp_retries", 3);
 
   if (!config.contains("interfaces") || !config["interfaces"].is_array()) {
     throw std::runtime_error(
@@ -175,6 +195,12 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
     }
 
     if (entry.contains("dns")) {
+      // Iterating a JSON string yields the string itself: check the type.
+      if (!entry["dns"].is_array()) {
+        throw std::runtime_error(
+            std::format("network.json: '{}': 'dns' must be a list of addresses",
+                        iface.name));
+      }
       std::ranges::transform(
           entry["dns"],
           std::back_inserter(iface.dns_servers),

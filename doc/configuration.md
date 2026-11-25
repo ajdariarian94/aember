@@ -113,14 +113,14 @@ agent uses it.
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `ping_target` | IPv4 | `"8.8.8.8"` | connectivity check (TCP probe) |
-| `ping_interval_ms` | number | `10000` | how often |
-| `ping_retries` | number | `3` | failures before "offline" |
-| `dhcp_timeout_ms` | number | `30000` | per DHCP attempt |
-| `dhcp_retries` | number | `3` | attempts before the interface counts as failed |
+| `ping_interval_ms` | whole number ≥ 0 | `10000` | how often |
+| `ping_retries` | whole number ≥ 0 | `3` | failures before "offline" |
+| `dhcp_timeout_ms` | whole number ≥ 0 | `30000` | per DHCP attempt |
+| `dhcp_retries` | whole number ≥ 0 | `3` | attempts before the interface counts as failed |
 | `interfaces[].name` | string | required | e.g. `eth0`, `wlan0` |
 | `interfaces[].mode` | `"dhcp"`, `"static"` | `"dhcp"` | |
 | `interfaces[].address` / `gateway` | CIDR / IPv4 | | static mode |
-| `interfaces[].dns` | array of IPv4 | `[]` | written to `/etc/resolv.conf` |
+| `interfaces[].dns` | array of IPv4 (a list, also for one) | `[]` | written to `/etc/resolv.conf` |
 | `interfaces[].required` | bool | `false` | if it fails to come up, aember-netd exits (PID 1 restarts it); other interfaces are retried later |
 
 aember-netd waits for an interface that isn't there yet (a USB adapter, a

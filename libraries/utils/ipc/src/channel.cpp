@@ -62,7 +62,10 @@ Channel Channel::Inherited() {
 
 bool Channel::Send(const nlohmann::json& message, bool wait) const {
   if (fd_ < 0) return false;
-  const std::string text = message.dump();
+  // Bytes that aren't UTF-8 (an interface name, say) become U+FFFD instead
+  // of a type_error out of dump(): Send never throws.
+  const std::string text =
+      message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
   if (text.size() > kMaxMessage) return false;
   // MSG_NOSIGNAL: a dead peer is EPIPE, not a SIGPIPE that kills us.
   const int flags = MSG_NOSIGNAL | (wait ? 0 : MSG_DONTWAIT);

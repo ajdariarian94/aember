@@ -163,6 +163,41 @@ bool ContainersConfigParser::ParseContainer(const nlohmann::json& json,
   return true;
 }
 
+std::vector<BridgeConfig> ParseBridges(const nlohmann::json& config,
+                                       std::vector<std::string>& errors) {
+  std::vector<BridgeConfig> bridges;
+  if (!config.is_object()) return bridges;
+  const auto list = config.find("bridges");
+  if (list == config.end()) return bridges;
+  if (!list->is_array()) {
+    errors.emplace_back("'bridges' must be an array");
+    return bridges;
+  }
+  for (const auto& entry : *list) {
+    // value() would throw on an entry that isn't an object or on a name
+    // that isn't a string: containerd crashed on such a containers.json.
+    const auto name = entry.is_object() ? entry.find("name") : entry.end();
+    if (name == entry.end() || !name->is_string() ||
+        name->get_ref<const std::string&>().empty()) {
+      errors.emplace_back(
+          "bridge without a name: " +
+          entry.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
+      continue;
+    }
+    BridgeConfig bridge{.name = name->get<std::string>(), .address = {}};
+    if (const auto address = entry.find("address"); address != entry.end()) {
+      if (!address->is_string()) {
+        errors.emplace_back("bridge '" + bridge.name +
+                            "': 'address' must be a string");
+        continue;
+      }
+      bridge.address = address->get<std::string>();
+    }
+    bridges.push_back(std::move(bridge));
+  }
+  return bridges;
+}
+
 const std::vector<ContainerConfig>& ContainersConfigParser::GetContainers()
     const {
   return containers_;

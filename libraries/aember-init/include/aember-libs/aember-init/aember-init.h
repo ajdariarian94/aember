@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <aember-libs/aember-init/daemon-status.h>
 #include <aember-libs/aember-init/pid1.h>
 #include <aember-libs/child-supervisor/child-supervisor.h>
 #include <aember-libs/device-health/heartbeat.h>
@@ -181,8 +182,7 @@ class AemberInit {
   /// Daemon channels (netd, containerd) and what they last reported.
   aember::utils::ipc::Hub hub_;
   std::mutex status_mutex_;
-  nlohmann::json network_status_;
-  std::map<std::string, std::string> container_states_;
+  DaemonStatus daemon_status_;
 
   Logger log_;
 };

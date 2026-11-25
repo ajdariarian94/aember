@@ -1,0 +1,1 @@
+{"type":"event","name":"network","data":{"online":true,"interface":"eth0","rtt_ms":12,"ip":"10.0.2.15"}}

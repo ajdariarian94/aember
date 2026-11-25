@@ -58,6 +58,20 @@ TEST(ChannelTest, MessagesArriveWhole) {
   EXPECT_EQ((*m2)["data"]["ip"], "10.0.2.15");
 }
 
+// Regression: Send threw nlohmann's type_error 316 on a string that isn't
+// UTF-8 (found by fuzz/fuzz_ipc). Send is documented as returning false on
+// failure; an exception out of a daemon's report thread is std::terminate.
+TEST(ChannelTest, SendOfBytesThatArentUtf8NeverThrows) {
+  auto [a, b] = MakePair();
+  bool sent = false;
+  EXPECT_NO_THROW(
+      sent = a.Send(ipc::Event("network", {{"interface", "eth\x91"}})));
+  ASSERT_TRUE(sent);
+  const auto m = b.Receive(1s);
+  ASSERT_TRUE(m.has_value());
+  EXPECT_EQ((*m)["data"]["interface"], "eth\xEF\xBF\xBD");  // U+FFFD
+}
+
 TEST(ChannelTest, BothDirections) {
   auto [a, b] = MakePair();
   ASSERT_TRUE(b.Send({{"type", "hello"}}));

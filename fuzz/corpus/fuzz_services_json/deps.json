@@ -1,0 +1,4 @@
+{"processes": [{"name": "a", "executable": "/bin/a"}, {"name": "b", "executable": "/bin/b", "dependencies": ["a"]},
+ {"name": "c", "executable": "/bin/c", "dependencies": ["a", "b"], "args": ["-x"], "environment": {"K": "V"}},
+ {"name": "d", "executable": "/bin/d", "dependencies": ["e"]}, {"name": "e", "executable": "/bin/e", "dependencies": ["d"]},
+ {"name": "f", "executable": "/bin/f", "dependencies": ["missing"], "max_restarts": 3, "restart_delay_ms": 10, "ipc": true}]}

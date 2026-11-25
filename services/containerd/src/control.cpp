@@ -60,6 +60,24 @@ nlohmann::json HandleControlRequest(const nlohmann::json& request,
   return {{"ok", true}};
 }
 
+std::string AnswerControlRequest(std::string_view request,
+                                 ControlTarget& target) {
+  static aember::utils::logging::Logger log{"containerd-control"};
+  const auto parsed = nlohmann::json::parse(request, nullptr, false);
+  const auto answer = parsed.is_discarded()
+                          ? Error("request is not JSON")
+                          : HandleControlRequest(parsed, target);
+  // Strings from JSON text are valid UTF-8; replace anyway: an answer is
+  // never worth an exception.
+  const auto text = [](const nlohmann::json& j) {
+    return j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+  };
+  log.info("control: {} -> {}",
+           parsed.is_discarded() ? "?" : text(parsed),
+           answer.value("ok", false) ? "ok" : answer.value("error", "?"));
+  return text(answer);
+}
+
 int OpenControlSocket(const std::string& path) {
   sockaddr_un addr{};
   if (path.size() >= sizeof(addr.sun_path)) return -ENAMETOOLONG;
@@ -84,7 +102,6 @@ int OpenControlSocket(const std::string& path) {
 }
 
 bool ServeControlConnection(int listen_fd, ControlTarget& target) {
-  static aember::utils::logging::Logger log{"containerd-control"};
   const int fd = ::accept4(listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
   if (fd < 0) return false;
   // A client that connects and says nothing must not stall containerd.
@@ -94,21 +111,11 @@ bool ServeControlConnection(int listen_fd, ControlTarget& target) {
 
   std::array<char, 4096> buf{};
   const ssize_t n = ::recv(fd, buf.data(), buf.size(), 0);
-  nlohmann::json answer;
-  if (n <= 0) {
-    answer = Error("no request");
-  } else {
-    const auto request = nlohmann::json::parse(
-        std::string_view{buf.data(), static_cast<std::size_t>(n)},
-        nullptr,
-        false);
-    answer = request.is_discarded() ? Error("request is not JSON")
-                                    : HandleControlRequest(request, target);
-    log.info("control: {} -> {}",
-             request.is_discarded() ? "?" : request.dump(),
-             answer.value("ok", false) ? "ok" : answer.value("error", "?"));
-  }
-  const auto out = answer.dump();
+  const auto out =
+      n <= 0 ? Error("no request").dump()
+             : AnswerControlRequest(
+                   std::string_view{buf.data(), static_cast<std::size_t>(n)},
+                   target);
   std::ignore = ::send(fd, out.data(), out.size(), MSG_NOSIGNAL);
   ::close(fd);
   return true;

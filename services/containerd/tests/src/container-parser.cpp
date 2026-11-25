@@ -28,6 +28,7 @@ namespace fs = std::filesystem;
 using aember::containerd::ContainersConfigParser;
 using aember::containerd::ContainerState;
 using aember::containerd::ContainerStateToString;
+using aember::containerd::ParseBridges;
 using aember::utils::config::ConfigError;
 
 class ContainerParserTest : public ::testing::Test {
@@ -176,6 +177,33 @@ TEST_F(ContainerParserTest, BadLifecycleFieldsAreRejected) {
     e.insert(e.rfind('}'), extra);
     EXPECT_FALSE(ParseOne(e)) << extra;
   }
+}
+
+// Regression: containerd crashed (uncaught type_error from json::value) on a
+// "bridges" entry that wasn't an object or had a non-string name/address.
+TEST(ParseBridgesTest, BadEntriesAreSkippedNeverThrown) {
+  const auto config = nlohmann::json::parse(R"({"bridges": [
+      "lxcbr0", 7, null, {"name": 1}, {"name": ""}, {"address": "10.0.0.1/24"},
+      {"name": "br1", "address": 5},
+      {"name": "br0", "address": "10.0.3.1/24"}, {"name": "br2"}]})");
+  std::vector<std::string> errors;
+  std::vector<aember::containerd::BridgeConfig> bridges;
+  EXPECT_NO_THROW(bridges = ParseBridges(config, errors));
+  ASSERT_EQ(bridges.size(), 2U);
+  EXPECT_EQ(bridges[0].name, "br0");
+  EXPECT_EQ(bridges[0].address, "10.0.3.1/24");
+  EXPECT_EQ(bridges[1].name, "br2");
+  EXPECT_EQ(bridges[1].address, "");
+  EXPECT_EQ(errors.size(), 7U);
+}
+
+TEST(ParseBridgesTest, MissingOrWrongList) {
+  std::vector<std::string> errors;
+  EXPECT_TRUE(ParseBridges(nlohmann::json::object(), errors).empty());
+  EXPECT_TRUE(ParseBridges(nlohmann::json::array(), errors).empty());
+  EXPECT_TRUE(errors.empty());
+  EXPECT_TRUE(ParseBridges({{"bridges", "lxcbr0"}}, errors).empty());
+  EXPECT_EQ(errors.size(), 1U);
 }
 
 }  // namespace

@@ -44,6 +44,11 @@ class ControlTarget {
 nlohmann::json HandleControlRequest(const nlohmann::json& request,
                                     ControlTarget& target);
 
+/// The answer (JSON text) to one raw request as it came off the socket:
+/// bytes that aren't JSON get an error answer. Never throws.
+std::string AnswerControlRequest(std::string_view request,
+                                 ControlTarget& target);
+
 /// Listening SOCK_SEQPACKET socket at @p path (its directory is created
 /// 0700, a stale socket replaced); -errno on failure.
 int OpenControlSocket(const std::string& path);

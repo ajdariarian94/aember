@@ -17,6 +17,7 @@ from .base.release import release
 from .base.resources import fetch_resources
 from .base.test import test
 from .base.analyze import analyze
+from .base.fuzz import fuzz
 from .base.mutate import mutate
 from .base.systemtest import systemtest
 from .qemu.build import build_qemu
@@ -70,6 +71,9 @@ aember.command(help="Static analysis: clang-tidy and cppcheck against a baseline
     analyze
 )
 aember.command(help="Mutation testing of one library's test suite")(mutate)
+aember.command(help="Fuzz the code that reads input with libFuzzer, ASan and UBSan")(
+    fuzz
+)
 aember.command(
     help="System tests: boot the packed image in QEMU and check the whole system"
 )(systemtest)

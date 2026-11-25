@@ -632,6 +632,7 @@ same image, `.github/workflows/ci.yml`).
 | `aember test --valgrind` | every suite under memcheck (errors and definite leaks fail; `tools/valgrind/aember.supp`) |
 | `aember analyze [--update-baseline]` | clang-tidy (`.clang-tidy`) and cppcheck over the Debug compile database; findings beyond `tools/analysis/*-baseline.txt` fail |
 | `aember mutate -k <suite> [-n N]` | mutation testing: one operator at a time changed in the library's sources, its suite rebuilt and run; survivors = lines no test checks (`build/mutation/<suite>.json`) |
+| `aember fuzz [-k <target>] [--time S] [-j N]` | libFuzzer + ASan + UBSan over the code that reads input (`fuzz/`): each target for S seconds (60), up to 4 at once; failing inputs in `build/fuzz/crashes/<target>/`, logs in `build/fuzz/<target>.log`; `--list` names them |
 | `aember systemtest [-k <scenario>] [--timeout-scale F] [--kvm/--no-kvm]` | system tests: each scenario boots the packed image (`aember app pack`, Release by default) in its own QEMU and checks the whole system through the serial console; `--list` names them; consoles in `build/system-tests/<arch>/`; `--scenarios FILE --input k=v` runs another repository's scenarios, `--package-dir` boots another image |
 
 | `aember lint [--check]` | ruff, black, clang-format, cmake-format, cmakelint; `--check` changes nothing and fails on anything to fix (CI) |
@@ -736,6 +737,31 @@ same image, `.github/workflows/ci.yml`).
   Change the model with the behaviour, run `spec/tla/check.sh` (Docker,
   ~15 s), and keep "Where the code differs" in its README current. A bug
   the model finds gets an `EXPECTED TO FAIL` model plus a regression test.
+- **Fuzzing** (`fuzz/`, `aember fuzz`, CI job `fuzz`): one target per
+  input aember reads: `fuzz_services_json` (parser + start order),
+  `fuzz_containers_json` (containers + `ParseBridges`), `fuzz_modules_json`,
+  `fuzz_network_json` (netd's `NetworkManager` constructor; a
+  `std::exception` is fine, netd exits on it), `fuzz_ipc` (raw bytes through
+  a real channel pair into `Channel::Receive`, PID 1's
+  `ApplyDaemonMessage` and `ApplyControl`; `Send` of any string),
+  `fuzz_control` (`AnswerControlRequest`), `fuzz_dhcp` (`ParseUdpFrame`,
+  `Parse`, `LeaseTimer`), `fuzz_status` (`StatusReporter::WriteFile` always
+  leaves one JSON document; `ParseUptimeSeconds`). Targets also check
+  properties (`fuzz::Fail`): start order respects dependencies, answers are
+  JSON, lease times are ordered. Not part of the main build: clang 18 from
+  the dev image builds `fuzz/CMakeLists.txt` against the x64 SDK sysroot
+  (`--target=x86_64-poky-linux`, `-D__cpp_concepts=202002L` like `aember
+  analyze`) and the x64 Debug build's vcpkg packages (configured first if
+  missing), with the sysroot's dynamic linker. Code under test must
+  therefore be pure enough to compile without liblxc or root: keep parsing
+  apart from doing (e.g. `ParseBridges` vs `EnsureBridges`,
+  `AnswerControlRequest` vs `ServeControlConnection`,
+  `ApplyDaemonMessage` vs `AemberInit::OnDaemonMessage`). A new target:
+  `fuzz/targets/fuzz_<name>.cpp` with `LLVMFuzzerTestOneInput`, its name in
+  `AEMBER_FUZZ_TARGETS`, its sources in `aember-fuzzed`, seeds in
+  `fuzz/corpus/fuzz_<name>/`. A crash gets a fix, a `Regression:` unit test
+  and its input in the seeds (`regression-*`). Reproduce with
+  `build/fuzz/build/<target> <file>`.
 - **Mutation testing** edits the real sources one mutant at a time (a
   `.mutate-backup` next to the file; a killed run is repaired by the next
   one, or by moving the backup back). Restoring touches the file, or make

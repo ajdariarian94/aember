@@ -13,11 +13,24 @@
 #include <aember-libs/utils/config/iconfig-file-parser.h>
 #include <aember-services/containerd/container-config.h>
 
+#include <string>
 #include <vector>
 
 namespace aember::containerd {
 
 namespace config = aember::utils::config;
+
+/// One entry of containers.json's "bridges" list.
+struct BridgeConfig {
+  std::string name;
+  std::string address;  ///< CIDR, e.g. "10.0.3.1/24"; empty: no address
+};
+
+/// The "bridges" list of a parsed containers.json. An entry that isn't
+/// {"name": "<non-empty>", "address": "<optional>"} is skipped and described
+/// in @p errors; a missing list is no bridges. Never throws.
+std::vector<BridgeConfig> ParseBridges(const nlohmann::json& config,
+                                       std::vector<std::string>& errors);
 
 class ContainersConfigParser : public config::IConfigFileParser {
  public:
