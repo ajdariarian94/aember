@@ -535,6 +535,7 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
 
   // Network status and container states as the daemons last reported them.
   nlohmann::json containers = nlohmann::json::array();
+  std::map<std::string, long long> since;
   {
     std::lock_guard lock{status_mutex_};
     if (!daemon_status_.network.is_null()) {
@@ -543,7 +544,12 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
     for (const auto& [name, state] : daemon_status_.containers) {
       containers.push_back(
           {{"name", name}, {"state", state}, {"type", "container"}});
+      if (const auto it = daemon_status_.since_ms.find(name);
+          it != daemon_status_.since_ms.end()) {
+        containers.back()["since_ms"] = it->second;
+      }
     }
+    since = daemon_status_.since_ms;
   }
 
   // Enrich with service states.
@@ -556,6 +562,9 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
           {"state", aember::utils::process::ToString(state)},
           {"type", "process"},
       });
+      if (const auto it = since.find(name); it != since.end()) {
+        services.back()["since_ms"] = it->second;
+      }
     }
     for (auto& c : containers) { services.push_back(std::move(c)); }
     payload["services"] = services;
@@ -570,6 +579,10 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
 void AemberInit::OnServiceStateChange(const std::string& name,
                                       ProcessState old_state,
                                       ProcessState new_state) {
+  {
+    std::lock_guard lock{status_mutex_};
+    daemon_status_.since_ms[name] = BootTimeMs();
+  }
   log_.info("Service '{}': {} -> {}",
             name,
             aember::utils::process::ToString(old_state),

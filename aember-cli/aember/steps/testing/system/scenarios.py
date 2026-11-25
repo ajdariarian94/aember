@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import shutil
 import subprocess
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -30,6 +31,8 @@ from pathlib import Path
 from aember.steps.launching.launch import QemuProfile
 from aember.steps.packaging.rootfs import run_guestfish, tar_in_commands
 from aember.steps.testing.system.vm import Vm, vm_command
+
+log = logging.getLogger("aember.systemtest")
 
 # Where a container goes in an image (aember-build-helper's layout).
 IMAGES_DIR = Path("var/lib/aember")
@@ -253,6 +256,19 @@ def wait_all_running(system: System, vm: Vm) -> dict[str, str]:
     return vm.states()
 
 
+def boot_timeline(status: dict) -> list[tuple[int, str, str]]:
+    """(since_ms, name, state) of every entry in the status file, in the
+    order they reached their state: since_ms is when PID 1 saw the last
+    change, in ms since the kernel started (CLOCK_BOOTTIME)."""
+    entries = status.get("services", [])
+    timeline = [
+        (int(e["since_ms"]), e["name"], e["state"])
+        for e in entries
+        if isinstance(e.get("since_ms"), int)
+    ]
+    return sorted(timeline)
+
+
 @scenario("boot", "Init comes up; every service and container reaches running")
 def boot(system: System) -> None:
     with system.boot() as vm:
@@ -264,6 +280,25 @@ def boot(system: System) -> None:
         status = vm.status()
         if "timestamp" not in status:
             raise vm.fail(f"no heartbeat timestamp in the status: {status}")
+        timeline = boot_timeline(status)
+        if len(timeline) != len(states):
+            raise vm.fail(f"entries without since_ms in the status: {status}")
+        for ms, name, state in timeline:
+            log.info("[boot] %7.3f s  %s %s", ms / 1000, name, state)
+        last_ms, last, _ = timeline[-1]
+        log.info(
+            "[boot] all %d running %.3f s after the kernel started (last: %s)",
+            len(timeline),
+            last_ms / 1000,
+            last,
+        )
+        (system.log_dir / "boot-timeline.json").write_text(
+            json.dumps(
+                [{"since_ms": t, "name": n, "state": st} for t, n, st in timeline],
+                indent=2,
+            )
+            + "\n"
+        )
 
 
 @scenario(

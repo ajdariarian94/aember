@@ -326,7 +326,10 @@ The status display is two containers from sibling repos, `../aember-stats`
 `aember-cli/run.py install -a <arch> ../aember` there. aember's part is only
 PID 1's status file `/var/log/aember-status.json` (`StatusReporter`, read at
 `/host-logs/aember-status.json` in containers): keep its format compatible
-with aember-stats' (it embeds it unchanged). The old Qt monitor container,
+with aember-stats' (it embeds it unchanged). Each entry of its `services`
+list has `name`, `state`, `type` and `since_ms`: when PID 1 saw its last
+state change, in ms since the kernel started (CLOCK_BOOTTIME, the clock of
+the kernel's console timestamps), so the status is also the boot timeline. The old Qt monitor container,
 its per-second console box and the X11/lxc-extra.conf passthrough are gone;
 don't bring them back.
 
@@ -689,7 +692,9 @@ same image, `.github/workflows/ci.yml`).
   the prompt; `vm.run(cmd)` / `vm.sh(cmd)` run a command in the debug shell
   between `@@B""n@@` / `@@E""n:$?@@` markers (the `""` keeps the shell's
   echo of the command line from matching) and give its exit code and
-  output; `vm.states()` reads `/var/log/aember-status.json`;
+  output; `vm.states()` reads `/var/log/aember-status.json`; the boot
+  scenario logs the boot timeline from its `since_ms` (when each entry got
+  to running; `build/system-tests/<arch>/boot-timeline.json`);
   `vm.wait_until(check, timeout, what)` polls. While the shell is open
   PID 1 keeps its log off the console, so scenarios that watch PID 1's
   log close the shell first (`(sleep 1; kill -USR2 1) & exit`).
