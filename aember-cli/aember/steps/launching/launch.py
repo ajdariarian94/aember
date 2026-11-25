@@ -63,6 +63,16 @@ class QemuProfile:
         return cmd
 
 
+def headless_profile(profile: QemuProfile) -> QemuProfile:
+    """
+    @p profile without a window: the virtual GPU stays (containers bind
+    /dev/dri, /dev/fb0; `--qmp` screendumps it), only GTK becomes none.
+    """
+    return replace(
+        profile, display=tuple("none" if a == "gtk" else a for a in profile.display)
+    )
+
+
 def extra_kernel_args(debug_shell: bool, append: str) -> str:
     """
     What `aember app launch` adds to the kernel command line: aember.shell=1
@@ -313,12 +323,7 @@ class LaunchStep(Step):
         # ---------------------------------------------------------------------------
         if ctx.data.get("headless"):
             timeout = ctx.data.get("timeout")
-            # Keep the virtual GPU (containers bind /dev/dri, /dev/fb0), only
-            # swap the GTK window for no display.
-            headless_display = tuple(
-                "none" if arg == "gtk" else arg for arg in profile.display
-            )
-            cmd = replace(profile, display=headless_display).base_cmd(
+            cmd = headless_profile(profile).base_cmd(
                 kernel_path, initrd_path, rootfs_img, kernel_args
             )
             cmd += serial_chardevs + ["-monitor", "none"]

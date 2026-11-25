@@ -632,6 +632,7 @@ same image, `.github/workflows/ci.yml`).
 | `aember test --valgrind` | every suite under memcheck (errors and definite leaks fail; `tools/valgrind/aember.supp`) |
 | `aember analyze [--update-baseline]` | clang-tidy (`.clang-tidy`) and cppcheck over the Debug compile database; findings beyond `tools/analysis/*-baseline.txt` fail |
 | `aember mutate -k <suite> [-n N]` | mutation testing: one operator at a time changed in the library's sources, its suite rebuilt and run; survivors = lines no test checks (`build/mutation/<suite>.json`) |
+| `aember systemtest [-k <scenario>] [--timeout-scale F] [--kvm/--no-kvm]` | system tests: each scenario boots the packed image (`aember app pack`, Release by default) in its own QEMU and checks the whole system through the serial console; `--list` names them; consoles in `build/system-tests/<arch>/` |
 
 | `aember lint [--check]` | ruff, black, clang-format, cmake-format, cmakelint; `--check` changes nothing and fails on anything to fix (CI) |
 
@@ -675,6 +676,26 @@ same image, `.github/workflows/ci.yml`).
   root switch in a private namespace (a tmpfs "initramfs", an ext4 image on
   a writable loop device found by label, exec of a BusyBox script as
   `/usr/bin/aember`; `AEMBER_TEST_BUSYBOX` comes from `aember test`).
+- **System tests** (`aember systemtest`, `aember-cli/aember/steps/testing/system/`):
+  `vm.py` is the harness: `vm_command()` boots the packed image headless
+  with `-snapshot` (the image never changes) and `-no-reboot` (a reboot
+  ends QEMU), `Vm` reads the serial console on a thread (escape sequences
+  stripped) and waits for patterns with deadlines (`--timeout-scale`
+  stretches them; never fixed sleeps). `vm.open_shell()` presses d until
+  the prompt; `vm.run(cmd)` / `vm.sh(cmd)` run a command in the debug shell
+  between `@@B""n@@` / `@@E""n:$?@@` markers (the `""` keeps the shell's
+  echo of the command line from matching) and give its exit code and
+  output; `vm.states()` reads `/var/log/aember-status.json`;
+  `vm.wait_until(check, timeout, what)` polls. While the shell is open
+  PID 1 keeps its log off the console, so scenarios that watch PID 1's
+  log close the shell first (`(sleep 1; kill -USR2 1) & exit`).
+  **Adding a scenario** (`scenarios.py`): a function decorated with
+  `@scenario("name", "what it shows")` that takes a `System` and uses
+  `with system.boot(append=..., extra_args=[...]) as vm:`;
+  `system.services()` / `system.containers()` are the packed
+  services.json / containers.json; fail with `raise vm.fail("...")`
+  (an AssertionError with the end of the console). The fake-device tests
+  in `aember-cli/tests/test_systemtest.py` cover the harness without QEMU.
 - **Regression tests** carry a comment starting `Regression:` saying which
   bug they pin down (`grep -rn "Regression:"` lists them). Every bug fix
   gets one; CLI bugs with no better home go in
@@ -704,7 +725,10 @@ same image, `.github/workflows/ci.yml`).
   runs a command in the published dev image with the repo at
   `/aember_ws/aember` (the SDK's baked path), privileged. Jobs: lint + CLI
   tests; tests as root + analysis; coverage (artifact + job summary);
-  valgrind nightly. Job summaries come from `$GITHUB_STEP_SUMMARY`
+  system tests (x64 Release built, packed with `AEMBER_CI_DOCKER=1` so
+  pack's guestfish `docker run` reaches the runner's Docker, then
+  `aember systemtest --timeout-scale 3`; KVM when the runner has
+  /dev/kvm, else TCG; the consoles are an artifact); valgrind nightly. Job summaries come from `$GITHUB_STEP_SUMMARY`
   (`build/ci-summary.md` inside the container).
 
 ## Coding conventions

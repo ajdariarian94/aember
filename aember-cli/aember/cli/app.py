@@ -18,6 +18,7 @@ from .base.resources import fetch_resources
 from .base.test import test
 from .base.analyze import analyze
 from .base.mutate import mutate
+from .base.systemtest import systemtest
 from .qemu.build import build_qemu
 from .rpi import commands as rpi_commands
 from .usb import commands as usb_commands
@@ -69,6 +70,9 @@ aember.command(help="Static analysis: clang-tidy and cppcheck against a baseline
     analyze
 )
 aember.command(help="Mutation testing of one library's test suite")(mutate)
+aember.command(
+    help="System tests: boot the packed image in QEMU and check the whole system"
+)(systemtest)
 
 # ----------------------------
 # Aember commands

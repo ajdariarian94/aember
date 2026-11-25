@@ -253,9 +253,10 @@ first:
   adopt, exits and restarts, without root (2026-11-19).
 - [ ] `MountManager::UnmountAll` forgets mounts whose unmount failed (it
   clears its list regardless).
-- [ ] `pid1::Finish` has no test: remounting / read-only and reboot(2)
-  can't run safely outside a VM. A QEMU system test (`kill -USR2 1`) covers
-  it; make that part of a scripted system-test suite.
+- [x] `pid1::Finish` is tested in QEMU (2026-11-25): `aember systemtest`'s
+  poweroff (`kill -USR2 1`) and reboot (`kill -TERM 1`) scenarios check the
+  clean stop, PID 1's "shutting down" and the kernel's power-down/restart,
+  and that QEMU ends by itself; in CI (job "System tests (QEMU)").
 - [x] clang-tidy at 0 findings (strerror -> system_category().message(),
   NOLINT only where one thread runs); cppcheck keeps 10 style findings
   (raw loops, the deliberate local mutex for stop-token waits) in its
