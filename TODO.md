@@ -281,6 +281,16 @@ first:
   an empty DHCP option as the last byte of a reply aborted netd in -O0
   builds. A random dependency-graph generator with reference answers is
   ready for the parallel start.
+- [x] Fuzzing (2026-11-25): `aember fuzz`, 8 targets in `fuzz/`, CI job
+  `fuzz` (60 s each, corpus kept in the Actions cache). Found and fixed:
+  netd's `value<int>()` on a float/huge number in network.json (undefined
+  float-to-int), `Channel::Send` throwing on a string that isn't UTF-8.
+  Fixed while writing the targets: containerd crashing on a "bridges" entry
+  that isn't an object (`ParseBridges`), the status file left stale for good
+  by a string that isn't UTF-8, `/proc/uptime` inf/nan cast to long, a
+  "dns" string taken as one address.
+- [ ] Fuzz more: the `.aember` unpacker (when it exists), `lxc.container.conf`
+  handling, the debug shell's input.
 - [ ] Past bugs still without a regression test: loopback brought up by
   PID 1 (`AemberInit::BringUpLoopback` is private; a QEMU system test or a
   root test in a private net namespace), containerd's pthread_atfork

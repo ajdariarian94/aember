@@ -59,7 +59,8 @@ class Channel {
   [[nodiscard]] bool Valid() const { return fd_ >= 0; }
   [[nodiscard]] int Fd() const { return fd_; }
 
-  /// Send one message; false if it is too big or the peer is gone. With
+  /// Send one message; false if it is too big or the peer is gone. Never
+  /// throws (strings that aren't UTF-8 go out with U+FFFD). With
   /// @p wait false it never blocks: a peer that doesn't read (full socket
   /// buffer) makes it fail instead (PID 1 must not hang on a stuck daemon).
   bool Send(const nlohmann::json& message, bool wait = true) const;

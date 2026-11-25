@@ -90,6 +90,19 @@ TEST(ControlTest, FailureIsReported) {
   EXPECT_EQ(t.calls, (std::vector<std::string>{"stop web"}));  // no start
 }
 
+TEST(ControlTest, RawRequestsGetJsonAnswers) {
+  FakeTarget t;
+  for (const std::string_view raw :
+       {"", "{", "\xff\xfe", R"({"op": "list")", "null"}) {
+    const auto a =
+        json::parse(aember::containerd::AnswerControlRequest(raw, t));
+    EXPECT_FALSE(a["ok"].get<bool>()) << raw;
+  }
+  const auto a = json::parse(
+      aember::containerd::AnswerControlRequest(R"({"op":"list"})", t));
+  EXPECT_TRUE(a["ok"].get<bool>());
+}
+
 TEST(ControlTest, RoundTripOverTheSocket) {
   char dir[] = "/tmp/aember-control-XXXXXX";
   ASSERT_NE(::mkdtemp(dir), nullptr);

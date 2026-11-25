@@ -10,6 +10,7 @@
 #   system      x64 Release built and packed, booted in QEMU: `aember systemtest`
 #   valgrind    every suite under memcheck (nightly and by hand)
 #   tla         the TLA+ models in spec/tla checked with TLC
+#   fuzz        every fuzz target (fuzz/) for 60 s: libFuzzer, ASan, UBSan
 #
 # The image (~10 GB) and the SDK (~3.6 GB) need more disk than a runner has
 # free: the preinstalled toolchains aember doesn't use are removed first.
@@ -202,6 +203,57 @@ jobs:
       - name: Give the cache back to the runner
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cache"
+
+  fuzz:
+    name: Fuzzing (libFuzzer, ASan, UBSan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+      - name: Free disk space
+        run: tools/ci/free-disk.sh
+      - name: vcpkg binary cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ runner.temp }}/cache/vcpkg
+          key: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-${{ github.sha }}
+          restore-keys: vcpkg-x64-${{ hashFiles('vcpkg.json', 'tools/toolchains/*.cmake') }}-
+      # The corpus the fuzzers grew in earlier runs: each run starts where
+      # the last one stopped instead of from the seeds.
+      - name: Fuzz corpus
+        uses: actions/cache@v6.1.0
+        with:
+          path: build/fuzz/corpus
+          key: fuzz-corpus-${{ github.sha }}
+          restore-keys: fuzz-corpus-
+      - name: Pull the dev image
+        run: docker pull "$AEMBER_DEV_IMAGE"
+      - name: Hand the workspace to the image's user
+        run: |
+          mkdir -p "$RUNNER_TEMP/cache" build/fuzz/corpus
+          sudo chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP/cache"
+      - name: Fuzz every target
+        env:
+          AEMBER_CI_CACHE: ${{ runner.temp }}/cache
+        run: tools/ci/run.sh aember fuzz --time 60
+      - name: Inputs that failed
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fuzz-crashes
+          path: |
+            build/fuzz/crashes/
+            build/fuzz/*.log
+          if-no-files-found: ignore
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f build/ci-summary.md ]; then cat build/ci-summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Give the workspace and cache back to the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/cache"
 
   valgrind:
     name: Valgrind (nightly)

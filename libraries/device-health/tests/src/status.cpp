@@ -16,6 +16,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -90,6 +91,34 @@ TEST(StatusReporterTest, WriteFileCreatesMissingFileAndSurvivesBadPath) {
   fs::remove(path);
   EXPECT_NO_THROW(
       status.WriteFile(nlohmann::json{{"c", 3}}, "/nonexistent/dir/x.json"));
+}
+
+TEST(StatusReporterTest, WriteFileReplacesBytesThatArentUtf8) {
+  const auto path = fs::temp_directory_path() /
+                    ("aember-status-utf8-" + std::to_string(::getpid()));
+  { std::ofstream{path} << R"({"old":1})"; }
+  StatusReporter status;
+  status.WriteFile(nlohmann::json{{"name",
+                                   std::string{"eth\xff"
+                                               "0"}}},
+                   path.string());
+  const auto written = nlohmann::json::parse(Read(path));
+  EXPECT_EQ(written["name"],
+            "eth\xEF\xBF\xBD"
+            "0");  // U+FFFD
+  fs::remove(path);
+}
+
+TEST(StatusReporterTest, ParseUptimeSeconds) {
+  using aember::device_health::ParseUptimeSeconds;
+  EXPECT_EQ(ParseUptimeSeconds("12345.67 54321.00\n"), 12345);
+  EXPECT_EQ(ParseUptimeSeconds("0.50 1.00"), 0);
+  EXPECT_EQ(ParseUptimeSeconds(""), 0);
+  EXPECT_EQ(ParseUptimeSeconds("abc"), 0);
+  EXPECT_EQ(ParseUptimeSeconds("-5 1"), 0);
+  EXPECT_EQ(ParseUptimeSeconds("inf 1"), 0);
+  EXPECT_EQ(ParseUptimeSeconds("nan 1"), 0);
+  EXPECT_EQ(ParseUptimeSeconds("1e300"), std::numeric_limits<long>::max());
 }
 
 }  // namespace

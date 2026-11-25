@@ -10,7 +10,7 @@ from aember.utils.runner import CommandRunner
 log = logging.getLogger("aember.lint")
 
 EXCLUDE_PATHS = ["build", "vcpkg", ".venv"]
-CPP_SCAN_FOLDERS = ["libraries", "executables", "services"]
+CPP_SCAN_FOLDERS = ["libraries", "executables", "services", "fuzz"]
 
 
 # ---------------------------------------------------------------------------

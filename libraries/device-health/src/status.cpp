@@ -10,10 +10,15 @@
 
 #include <aember-libs/device-health/status.h>
 
+#include <charconv>
+#include <cmath>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <sstream>
+#include <string>
+#include <system_error>
 
 #include <unistd.h>
 
@@ -102,11 +107,24 @@ int StatusReporter::CountChildren(pid_t pid) {
   return count;
 }
 
+long ParseUptimeSeconds(std::string_view proc_uptime) {
+  const auto* begin = proc_uptime.data();
+  const auto* end = begin + proc_uptime.size();
+  while (begin != end && (*begin == ' ' || *begin == '\t')) ++begin;
+  double uptime = 0.0;
+  if (std::from_chars(begin, end, uptime).ec != std::errc{}) return 0;
+  // Casting inf, nan or anything beyond long to long is undefined.
+  if (!std::isfinite(uptime) || uptime < 0) return 0;
+  constexpr auto kMax = static_cast<double>(std::numeric_limits<long>::max());
+  return uptime >= kMax ? std::numeric_limits<long>::max()
+                        : static_cast<long>(uptime);
+}
+
 long StatusReporter::ReadUptimeSeconds() {
   std::ifstream f{"/proc/uptime"};
-  double uptime = 0.0;
-  f >> uptime;
-  return static_cast<long>(uptime);
+  std::string line;
+  std::getline(f, line);
+  return ParseUptimeSeconds(line);
 }
 
 nlohmann::json StatusReporter::Snapshot() const {
@@ -131,7 +149,10 @@ void StatusReporter::WriteFile(const nlohmann::json& payload,
                                std::string_view path) const {
   try {
     const std::string path_str{path};
-    const std::string data = payload.dump();
+    // Bytes that aren't UTF-8 become U+FFFD: a throwing dump() would leave
+    // the file stale for good.
+    const std::string data =
+        payload.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 
     // std::ios::in | std::ios::out updates the EXISTING file in-place
     // without deleting/recreating the inode that LXC bound to the container!

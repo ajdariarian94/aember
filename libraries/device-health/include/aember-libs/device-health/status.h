@@ -29,6 +29,10 @@ namespace aember::device_health {
 /// Where PID 1 writes its status (aember-init passes its log dir).
 inline constexpr std::string_view kStatusFile = "/var/log/aember-status.json";
 
+/// Seconds of uptime from /proc/uptime's text ("12345.67 54321.00"); 0 if
+/// it can't be read, clamped to long. Never undefined (inf, nan, huge).
+long ParseUptimeSeconds(std::string_view proc_uptime);
+
 struct Pid1Stats {
   int pid{1};
   long vm_rss_kb{0};

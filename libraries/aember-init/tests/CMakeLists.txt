@@ -55,3 +55,25 @@ install(
   TARGETS aember-init-unittest
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
 )
+
+# What PID 1 keeps from its daemons' messages (also fuzzed: fuzz/)
+add_executable(
+  daemon-status-unittest
+  src/daemon-status.cpp
+)
+
+target_link_libraries(
+  daemon-status-unittest
+  PRIVATE aember-libs::aember-init
+          GTest::gtest_main
+)
+
+add_test(
+  NAME daemon-status-unittest
+  COMMAND daemon-status-unittest
+)
+
+install(
+  TARGETS daemon-status-unittest
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/tests
+)

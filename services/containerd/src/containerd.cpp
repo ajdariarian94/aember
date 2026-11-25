@@ -14,6 +14,7 @@
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/netlink/netlink.h>
 #include <aember-services/containerd/container-manager.h>
+#include <aember-services/containerd/container-parser.h>
 #include <aember-services/containerd/container-state.h>
 #include <aember-services/containerd/containerd.h>
 #include <aember-services/containerd/control.h>
@@ -60,21 +61,11 @@ int EnsureBridges(const std::string& containers_json) {
   std::ifstream file{containers_json};
   const auto config = nlohmann::json::parse(file, nullptr, false);
   if (config.is_discarded() || !config.is_object()) return 0;  // reported later
-  const auto it = config.find("bridges");
-  if (it == config.end()) return 0;
-  if (!it->is_array()) {
-    log.error("{}: 'bridges' must be an array", containers_json);
-    return 1;
-  }
-  int failed = 0;
-  for (const auto& bridge : *it) {
-    const auto name = bridge.value("name", std::string{});
-    const auto address = bridge.value("address", std::string{});
-    if (name.empty()) {
-      log.error("bridge without a name in {}", containers_json);
-      ++failed;
-      continue;
-    }
+  std::vector<std::string> errors;
+  const auto bridges = ParseBridges(config, errors);
+  for (const auto& error : errors) log.error("{}: {}", containers_json, error);
+  int failed = static_cast<int>(errors.size());
+  for (const auto& [name, address] : bridges) {
     if (const int rc = aember::utils::netlink::EnsureBridge(name, address);
         rc != 0) {
       log.error("bridge '{}' ({}): {}",

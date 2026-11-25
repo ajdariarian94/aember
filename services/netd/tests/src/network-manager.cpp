@@ -86,6 +86,30 @@ TEST(NetworkManagerTest, InvalidConfigsThrow) {
   }
 }
 
+// Regression: a float or huge number (ping_interval_ms: 1e30) went through
+// value<int>(), an undefined float-to-int conversion; and a "dns" that
+// isn't a list was quietly taken as one address.
+TEST(NetworkManagerTest, NumbersMustBeWholeAndInRange) {
+  for (const auto* text : {
+           R"({"interfaces": [], "ping_interval_ms": 1e30})",
+           R"({"interfaces": [], "ping_retries": 2.5})",
+           R"({"interfaces": [], "dhcp_retries": -1})",
+           R"({"interfaces": [], "dhcp_timeout_ms": 4294967296})",
+           R"({"interfaces": [], "ping_retries": "3"})",
+           R"([])",
+           R"({"interfaces": [{"name": "eth0", "dns": "9.9.9.9"}]})",
+           R"({"interfaces": [{"name": "eth0", "dns": [9]}]})",
+       }) {
+    EXPECT_THROW(
+        { NetworkManager nm{json::parse(text)}; }, std::exception)
+        << text;
+  }
+  EXPECT_NO_THROW({
+    NetworkManager nm{json::parse(
+        R"({"interfaces": [], "ping_retries": 0, "dhcp_timeout_ms": 2147483647})")};
+  });
+}
+
 // Regression: Stop() used to wait out a whole ping interval (the monitor
 // slept).
 TEST(NetworkManagerTest, StopIsPromptWithALongPingInterval) {
