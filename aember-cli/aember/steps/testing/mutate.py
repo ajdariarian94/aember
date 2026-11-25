@@ -247,28 +247,57 @@ def report_markdown(unit: Unit, results: list[Result], root: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-# A PID namespace for root runs: everything the suite started dies with it.
-UNSHARE = ["unshare", "--pid", "--fork", "--kill-child", "--mount", "--mount-proc"]
+# Root runs get their own PID and mount namespace, and in it every mount is
+# read-only except fresh tmpfs on /tmp and /var/tmp. A mutant can make code
+# destructive: root-manager's initramfs delete with `.`/`..` no longer
+# skipped walked up out of the test's directory and deleted the CI runner's
+# root filesystem as root (here it would have reached /aember_ws, the host's
+# workspace). A mount namespace alone doesn't stop deleting files.
+UNSHARE = [
+    "unshare",
+    "--pid",
+    "--fork",
+    "--kill-child",
+    "--mount",
+    "--mount-proc",
+    "--propagation",
+    "private",
+]
+SANDBOX_FAILED = 125  # the sandbox isn't read-only: stop, run nothing
+SANDBOX = (
+    # remount,bind changes only this namespace's mount flags, never the
+    # filesystem itself (a plain remount,ro would).
+    "awk '{print $5}' /proc/self/mountinfo | while read -r m; do "
+    'mount -o remount,bind,ro "$m" 2>/dev/null; done; '
+    "mount -t tmpfs tmpfs /tmp && mount -t tmpfs tmpfs /var/tmp || exit 125; "
+    'if touch "$PWD/.aember-mutate-probe" 2>/dev/null; then '
+    'rm -f "$PWD/.aember-mutate-probe"; '
+    'echo "aember mutate: sandbox is writable" >&2; exit 125; fi; '
+    'exec "$@"'
+)
 
 
-def isolated(cmd: list[str], as_root: bool) -> list[str]:
-    """@p cmd (RunTests' command) in a PID namespace when it runs as root
-    (`sudo -n env K=V... <cmd>`: unshare goes after the variables)."""
+def isolated(cmd: list[str], as_root: bool, timeout: float = 120) -> list[str]:
+    """@p cmd (RunTests' command) in the read-only sandbox when it runs as
+    root (`sudo -n env K=V... <cmd>`: it goes after the variables). A root
+    `timeout` kills the sandbox's unshare after @p timeout seconds, and with
+    it (--kill-child) the whole PID namespace: the user running this can't
+    signal root processes, and sudo may put them in a session of their own."""
     if not as_root:
         return cmd
     i = cmd.index("env") + 1
     while i < len(cmd) and "=" in cmd[i] and not cmd[i].startswith("/"):
         i += 1
-    return cmd[:i] + UNSHARE + cmd[i:]
+    limit = ["timeout", "-s", "KILL", str(int(timeout))]
+    return cmd[:i] + limit + UNSHARE + ["sh", "-c", SANDBOX, "sandbox"] + cmd[i:]
 
 
 def kill_group(proc: subprocess.Popen) -> None:
-    """SIGKILL @p proc's process group (its own session) and reap it."""
+    """SIGKILL @p proc's process group (its own session) and reap it (root
+    runs end through their own `timeout`, see isolated())."""
     try:
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    except PermissionError:  # sudo dropped to root children: kill sudo
+    except (ProcessLookupError, PermissionError):
         proc.kill()
     proc.wait()
 
@@ -315,10 +344,10 @@ class MutateStep(Step):
         """A mutant can turn a process-manager's fork() around, and the test
         then kill()s pid 0 (its own process group) or -1 (everything it
         may signal): this run died with it once. So each suite runs in its
-        own session, and as root in its own PID namespace too; on a timeout
-        the whole group goes."""
+        own session, and as root in a read-only sandbox (isolated()); on a
+        timeout the whole group goes."""
         runner = RunTests(timeout=self.timeout, as_root=self.as_root)
-        cmd = isolated(runner._command(root, binary), self.as_root)
+        cmd = isolated(runner._command(root, binary), self.as_root, self.timeout)
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
@@ -327,10 +356,15 @@ class MutateStep(Step):
             start_new_session=True,
         )
         try:
-            code = proc.wait(timeout=self.timeout)
+            # Root runs: their own `timeout` fires first; this is the backstop.
+            code = proc.wait(timeout=self.timeout + (10 if self.as_root else 0))
         except subprocess.TimeoutExpired:
             kill_group(proc)
             return "timeout"
+        if code == SANDBOX_FAILED and self.as_root:
+            raise RuntimeError("the read-only sandbox for root runs failed")
+        if self.as_root and code == 128 + signal.SIGKILL:
+            return "timeout"  # timeout -s KILL: 128 + 9
         return "survived" if code == 0 else "killed"
 
     def run(self, ctx: Context) -> None:

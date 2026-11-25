@@ -14,13 +14,16 @@
 
 #include <gtest/gtest.h>
 
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
@@ -56,6 +59,36 @@ TEST(StatusReporterTest, SnapshotHasPid1Fields) {
   }
   EXPECT_EQ(p["pid"], 1);
   EXPECT_GE(p["uptime_seconds"].get<long>(), 0);
+}
+
+TEST(StatusReporterTest, Pid1StatsAreReadFromProc) {
+  // PID 1 is whatever runs as init here (in a PID namespace: this test).
+  const auto s = StatusReporter::ReadPid1Stats();
+  EXPECT_GT(s.vm_rss_kb, 0);  // the value after "VmRSS:", not 0
+  EXPECT_GE(s.vm_size_kb, s.vm_rss_kb);
+  EXPECT_GE(s.threads, 1);
+  EXPECT_GE(s.children, 0);
+}
+
+TEST(StatusReporterTest, CountsChildrenBothWays) {
+  std::vector<pid_t> kids;
+  for (int i = 0; i < 2; ++i) {
+    const pid_t pid = ::fork();
+    ASSERT_GE(pid, 0);
+    if (pid == 0) {
+      ::pause();
+      ::_exit(0);
+    }
+    kids.push_back(pid);
+  }
+  EXPECT_EQ(StatusReporter::CountChildren(::getpid()), 2);
+  EXPECT_EQ(StatusReporter::CountChildrenByScan(::getpid()), 2);
+  for (const pid_t pid : kids) {
+    ::kill(pid, SIGKILL);
+    ::waitpid(pid, nullptr, 0);
+  }
+  EXPECT_EQ(StatusReporter::CountChildren(::getpid()), 0);
+  EXPECT_EQ(StatusReporter::CountChildrenByScan(::getpid()), 0);
 }
 
 TEST(StatusReporterTest, DefaultFileIsAemberStatusJson) {

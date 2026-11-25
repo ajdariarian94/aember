@@ -1,3 +1,7 @@
+#include <filesystem>
+#include <fstream>
+#include <string>
+
 #include <aember-libs-tests/child-supervisor/child-supervisor.h>
 
 namespace aember_test::child_supervisor {
@@ -135,6 +139,37 @@ TEST_F(ChildSupervisorTest, ListZombieChildrenFindsOnlyZombies) {
       aember::child_supervisor::ChildSupervisor::ListZombieChildren();
   EXPECT_NE(std::ranges::find(zombies, zombie), zombies.end());
   EXPECT_EQ(std::ranges::find(zombies, running), zombies.end());
+}
+
+// A fake /proc with malformed entries: only well-formed stat lines count.
+TEST_F(ChildSupervisorTest, ProcParsingSkipsMalformedEntries) {
+  namespace fs = std::filesystem;
+  using aember::child_supervisor::ChildSupervisor;
+  const auto root = fs::temp_directory_path() /
+                    ("aember-cs-proc-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  const auto self = std::to_string(::getpid());
+  const auto stat = [&](const std::string& dir, const std::string& line) {
+    fs::create_directories(root / dir);
+    std::ofstream{root / dir / "stat"} << line << "\n";
+  };
+  stat("10", "10 (ok (z)) Z " + self + " 1 1");  // the one real zombie
+  stat("77x", "77 (name) Z " + self + " 1 1");   // not a pid directory
+  stat("55", "xZ " + self + " 1 1");             // no ')'
+  stat("56", "56 (a)");                          // nothing after the ')'
+  stat("57", "57 (a) S " + self);                // not a zombie
+  EXPECT_EQ(ChildSupervisor::ListZombieChildren(root), std::vector<pid_t>{10});
+
+  stat("60", "60 (a) S " + self + " 1 1");
+  stat("61", "xxx" + self);  // no ')': not ours, even if a number follows
+  stat("62", "62 (a) S");    // too short
+  stat("63", "63 (a) S 1 1 1");
+  EXPECT_TRUE(ChildSupervisor::IsChildOfThis(60, root));
+  EXPECT_FALSE(ChildSupervisor::IsChildOfThis(61, root));
+  EXPECT_FALSE(ChildSupervisor::IsChildOfThis(62, root));
+  EXPECT_FALSE(ChildSupervisor::IsChildOfThis(63, root));
+  EXPECT_FALSE(ChildSupervisor::IsChildOfThis(64, root));  // gone
+  fs::remove_all(root);
 }
 
 TEST_F(ChildSupervisorTest, ReapZombiesReapsTrackedAtOnce) {

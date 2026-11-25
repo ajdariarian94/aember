@@ -176,4 +176,39 @@ TEST(WatchdogTest, DestructorLeavesItArmed) {
   EXPECT_EQ(content.find('V'), std::string::npos);
 }
 
+TEST(WatchdogTest, FeedReportsWhetherTheKeepaliveWasWritten) {
+  TempFile f{"aember-wd-feed"};
+  auto dog = OpenFile(f);
+  ASSERT_NE(dog, nullptr);
+  EXPECT_TRUE(dog->Feed());
+  EXPECT_EQ(dog->Feeds(), 1u);
+  EXPECT_EQ(f.Content().size(), 1u);
+  // A device that refuses the write (/dev/full: ENOSPC) is no keepalive.
+  auto full = wd::Watchdog::Open({.device = "/dev/full", .timeout = 1s});
+  ASSERT_NE(full, nullptr);
+  EXPECT_FALSE(full->Feed());
+  EXPECT_EQ(full->Feeds(), 0u);
+}
+
+// A second Start() changes nothing: the first alive check stays.
+TEST(WatchdogTest, SecondStartIsIgnored) {
+  TempFile f{"aember-wd-restart"};
+  auto dog = OpenFile(f);
+  ASSERT_NE(dog, nullptr);
+  dog->Start([] { return false; });  // hung: only Start's own feed
+  const auto first = dog->Feeds();
+  dog->Start([] { return true; });
+  std::this_thread::sleep_for(900ms);
+  EXPECT_EQ(dog->Feeds(), first);
+}
+
+TEST(WatchdogTest, DisarmTwiceIsFine) {
+  TempFile f{"aember-wd-disarm2"};
+  auto dog = OpenFile(f);
+  ASSERT_NE(dog, nullptr);
+  EXPECT_TRUE(dog->Disarm());
+  EXPECT_TRUE(dog->Disarm());  // nothing left to disarm
+  EXPECT_EQ(f.Content(), "V");
+}
+
 }  // namespace

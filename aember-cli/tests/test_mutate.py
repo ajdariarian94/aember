@@ -178,9 +178,11 @@ class FilesTest(unittest.TestCase):
     def test_root_runs_get_their_own_pid_namespace(self):
         cmd = ["sudo", "-n", "env", "A=1", "B=x=/y", "setarch", "x86_64", "/ld.so"]
         self.assertEqual(
-            mutate.isolated(cmd, as_root=True),
+            mutate.isolated(cmd, as_root=True, timeout=30),
             ["sudo", "-n", "env", "A=1", "B=x=/y"]
+            + ["timeout", "-s", "KILL", "30"]
             + mutate.UNSHARE
+            + ["sh", "-c", mutate.SANDBOX, "sandbox"]
             + ["setarch", "x86_64", "/ld.so"],
         )
         self.assertEqual(

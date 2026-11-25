@@ -102,6 +102,18 @@ TEST_F(SignalHandlerTest, MultipleStopCalls) {
   // Should not crash
 }
 
+// Stop() hands the signals back: unblocked again in the calling thread.
+TEST_F(SignalHandlerTest, StopUnblocksTheSignals) {
+  handler_->Register(SIGUSR2, [](int) {});
+  handler_->Start();
+  sigset_t now;
+  ASSERT_EQ(pthread_sigmask(SIG_BLOCK, nullptr, &now), 0);
+  EXPECT_EQ(sigismember(&now, SIGUSR2), 1);
+  handler_->Stop();
+  ASSERT_EQ(pthread_sigmask(SIG_BLOCK, nullptr, &now), 0);
+  EXPECT_EQ(sigismember(&now, SIGUSR2), 0);
+}
+
 TEST_F(SignalHandlerTest, CallbackReceivesCorrectSignal) {
   std::atomic<int> usr1_count{0};
   std::atomic<int> usr2_count{0};

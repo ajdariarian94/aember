@@ -771,10 +771,17 @@ same image, `.github/workflows/ci.yml`).
   keeps the last mutant's object in the normal build. Tests must never
   write to relative paths: a mutated chdir then drops files in the repo.
   Some survivors are equivalent mutants (same behaviour another way):
-  judge each one, don't chase 100%. Each suite runs in its own session
-  (as root: its own PID namespace): a mutant that swaps fork()'s
-  `pid == 0` makes a test kill pid 0, its own process group, which once
-  took the whole run (and the restore) with it. The weekly `Mutation`
+  judge each one, don't chase 100%. Each suite runs in its own session: a
+  mutant that swaps fork()'s `pid == 0` makes a test kill pid 0, its own
+  process group, which once took the whole run (and the restore) with it.
+  As root (`--root`) each suite runs in a **read-only sandbox**: its own
+  PID and mount namespace where every mount is remounted read-only (bind
+  remounts: the real mounts stay writable) except fresh tmpfs on `/tmp` and
+  `/var/tmp`, ended by a root `timeout`. A root-manager mutant that no
+  longer skipped `.`/`..` in the initramfs delete walked out of the test's
+  directory and deleted the CI runner's root filesystem; in the dev
+  container it would have reached the host's workspace. If the sandbox
+  isn't read-only (a probe write to the repo succeeds) the run stops. The weekly `Mutation`
   workflow runs one job per unit (every mutant, as root) and puts a score
   table and the survivors in its summary; scores are in TODO.md.
 - **valgrind**: forked children that `_exit` leave their heap behind, so

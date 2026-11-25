@@ -18,6 +18,7 @@
 #include <string>
 
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <sched.h>
 #include <unistd.h>
 
@@ -197,6 +198,46 @@ TEST(NetlinkTest, EnsureBridgeRejectsBadCidr) {
 }
 
 // Idempotent: a restarted containerd finds the bridge already there.
+// A bridge that can't be created (no root: EPERM; a name longer than
+// IFNAMSIZ: EINVAL) is reported as that error, not as a missing device.
+TEST(NetlinkTest, EnsureBridgeReportsTheCreateError) {
+  const int rc = netlink::EnsureBridge("aember-name-too-long-for-a-link", "");
+  EXPECT_LT(rc, 0);
+  EXPECT_NE(rc, -ENODEV);
+}
+
+// The broadcast address is set below /31 only (RFC 3021 point-to-point).
+TEST(NetlinkTest, BroadcastOnlyBelowSlash31AsRoot) {
+  AEMBER_REQUIRE_PRIVATE_NET();
+  const char* name = "aembertest3";
+  ASSERT_EQ(netlink::CreateBridge(name), 0);
+  const int idx = netlink::InterfaceIndex(name);
+  ASSERT_GT(idx, 0);
+  ASSERT_EQ(netlink::AddAddress(idx, Ip("10.125.0.1"), 24), 0);
+  ASSERT_EQ(netlink::AddAddress(idx, Ip("10.126.0.1"), 32), 0);
+  std::string brd24 = "none";
+  std::string brd32 = "none";
+  ifaddrs* list = nullptr;
+  ASSERT_EQ(::getifaddrs(&list), 0);
+  for (const ifaddrs* a = list; a != nullptr; a = a->ifa_next) {
+    if (a->ifa_addr == nullptr || a->ifa_addr->sa_family != AF_INET ||
+        std::string{a->ifa_name} != name) {
+      continue;
+    }
+    const auto local =
+        Str(reinterpret_cast<sockaddr_in*>(a->ifa_addr)->sin_addr);
+    std::string brd = "none";
+    if (a->ifa_broadaddr != nullptr) {
+      brd = Str(reinterpret_cast<sockaddr_in*>(a->ifa_broadaddr)->sin_addr);
+    }
+    (local == "10.125.0.1" ? brd24 : brd32) = brd;
+  }
+  ::freeifaddrs(list);
+  EXPECT_EQ(brd24, "10.125.0.255");
+  EXPECT_NE(brd32, "10.126.0.255");
+  EXPECT_EQ(netlink::DeleteLink(name), 0);
+}
+
 TEST(NetlinkTest, EnsureBridgeAsRoot) {
   AEMBER_REQUIRE_PRIVATE_NET();
   const char* name = "aembertest2";

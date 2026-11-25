@@ -248,6 +248,7 @@ TEST_F(ServiceManagerTest, UnknownNames) {
   EXPECT_FALSE(sm_->Start("ghost"));
   EXPECT_FALSE(sm_->Stop("ghost"));
   EXPECT_FALSE(sm_->Remove("ghost"));
+  EXPECT_FALSE(sm_->Restart("ghost"));
   EXPECT_EQ(sm_->GetState("ghost"), State::Failed);
 }
 
