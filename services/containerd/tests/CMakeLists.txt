@@ -30,6 +30,12 @@ install(
 add_executable(
   container-parser-unittest
   src/container-parser.cpp
+  src/container-parser-properties.cpp
+)
+
+target_include_directories(
+  container-parser-unittest
+  PRIVATE ${AEMBER_TEST_SUPPORT_DIR}
 )
 
 target_link_libraries(

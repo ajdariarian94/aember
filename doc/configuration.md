@@ -4,7 +4,9 @@ A board's configuration is its rootfs overlay, `resources/<arch>/rootfs/`.
 `aember app pack` copies it into the root filesystem image, so on the device
 the files below are in `/etc/aember/`. Every file is JSON; an unknown key is
 ignored, a key with the wrong type is an error that names the file and key
-(in `/var/log/aember-init.log` or the service's log).
+(in `/var/log/aember-init.log` or the service's log). "unsigned" means a
+whole number from 0 to 4294967295; a bigger one is an error too (it used to
+wrap around: 4294967296 restarts meant no limit).
 
 | File | Read by | What it lists |
 |------|---------|---------------|

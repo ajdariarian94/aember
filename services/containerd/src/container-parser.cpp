@@ -11,6 +11,8 @@
 #include <aember-services/containerd/container-parser.h>
 
 #include <chrono>
+#include <cstdint>
+#include <limits>
 #include <string>
 
 namespace aember::containerd {
@@ -43,6 +45,17 @@ bool ContainersConfigParser::Parse(const nlohmann::json& json,
 
   return true;
 }
+
+namespace {
+
+/// A whole number that fits an unsigned. get<unsigned>() alone wraps bigger
+/// ones: "max_restart_attempts": 4294967296 would be 0 (= unlimited).
+bool FitsUnsigned(const nlohmann::json& value) {
+  return value.is_number_unsigned() &&
+         value.get<std::uint64_t>() <= std::numeric_limits<unsigned>::max();
+}
+
+}  // namespace
 
 bool ContainersConfigParser::ParseContainer(const nlohmann::json& json,
                                             ContainerConfig& cfg,
@@ -109,7 +122,7 @@ bool ContainersConfigParser::ParseContainer(const nlohmann::json& json,
   // -------------------------
   const auto seconds = [&](const char* key, std::chrono::seconds& out) {
     if (!json.contains(key)) return true;
-    if (!json[key].is_number_unsigned()) {
+    if (!FitsUnsigned(json[key])) {
       error = config::ConfigError(std::string{"'"} + key +
                                   "' must be a number of seconds");
       return false;
@@ -139,7 +152,7 @@ bool ContainersConfigParser::ParseContainer(const nlohmann::json& json,
     cfg.restart_policy = *policy;
   }
   if (json.contains("max_restart_attempts")) {
-    if (!json["max_restart_attempts"].is_number_unsigned()) {
+    if (!FitsUnsigned(json["max_restart_attempts"])) {
       error = config::ConfigError("'max_restart_attempts' must be >= 0");
       return false;
     }

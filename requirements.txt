@@ -13,3 +13,4 @@ typer==0.20.*
 rich==14.3.*
 pyyaml==6.0.*
 gcovr==8.8
+hypothesis==6.122.*

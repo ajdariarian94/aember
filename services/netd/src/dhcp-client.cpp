@@ -187,7 +187,9 @@ std::optional<Message> Parse(std::span<const std::uint8_t> p) {
     if (i >= p.size()) return std::nullopt;
     const std::uint8_t len = p[i++];
     if (i + len > p.size()) return std::nullopt;  // truncated option
-    const std::uint8_t* v = &p[i];
+    // Not &p[i]: an empty option at the very end has i == p.size(), and
+    // span::operator[] there is out of range (an assertion in -O0 builds).
+    const std::uint8_t* v = p.data() + i;
     switch (code) {
       case kOptMessageType:
         if (len == 1) {

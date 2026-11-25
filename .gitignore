@@ -28,3 +28,5 @@ doc/generated
 # resources/ overlay: configs are tracked; container images come from the
 # release (aember-resources-v<V>.tar.gz, see utils/check_resources.py)
 /resources/**/*.squashfs
+# Hypothesis (property tests) keeps failing examples here
+.hypothesis

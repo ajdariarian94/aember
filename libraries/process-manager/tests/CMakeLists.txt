@@ -9,6 +9,12 @@ find_package(
 add_executable(
   process-manager-unittest
   src/process-manager.cpp
+  src/restart-properties.cpp
+)
+
+target_include_directories(
+  process-manager-unittest
+  PRIVATE ${AEMBER_TEST_SUPPORT_DIR}
 )
 
 target_link_libraries(

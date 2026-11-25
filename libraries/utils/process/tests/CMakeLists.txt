@@ -9,6 +9,12 @@ find_package(
 add_executable(
   process-config-parser-unittest
   src/process-config-parser.cpp
+  src/process-config-properties.cpp
+)
+
+target_include_directories(
+  process-config-parser-unittest
+  PRIVATE ${AEMBER_TEST_SUPPORT_DIR}
 )
 
 target_link_libraries(

@@ -25,6 +25,12 @@ find_package(
   REQUIRED
 )
 
+# Header-only helpers for the tests (property tests, random dependency graphs):
+# test-support/include/aember-test/
+set(AEMBER_TEST_SUPPORT_DIR
+    ${CMAKE_CURRENT_SOURCE_DIR}/../test-support/include
+)
+
 # Common
 add_subdirectory(aember-init)
 add_subdirectory(child-supervisor)

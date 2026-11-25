@@ -30,6 +30,12 @@ install(
 add_executable(
   dhcp-client-unittest
   src/dhcp-client.cpp
+  src/dhcp-properties.cpp
+)
+
+target_include_directories(
+  dhcp-client-unittest
+  PRIVATE ${AEMBER_TEST_SUPPORT_DIR}
 )
 
 target_link_libraries(
