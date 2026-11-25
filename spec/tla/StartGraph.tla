@@ -31,7 +31,7 @@ CONSTANTS
     Restartable,    \* entries with restart_on_failure / a restart_policy
     MaxRestarts,    \* max_restarts / max_restart_attempts; 0 = unlimited
     MaxCrashes,     \* how many crashes the environment may cause in all
-    ResetOnStable,  \* TRUE: a run that lasts resets the count (containers)
+    ResetOnStable,  \* TRUE: a run that lasts resets the count (aember today)
     CancelRestartsOnShutdown \* TRUE: pending restarts die with shutdown
 
 ASSUME Deps \in [Nodes -> SUBSET Nodes]
@@ -119,7 +119,8 @@ Crash(n) ==
                    THEN [restarts EXCEPT ![n] = 0] ELSE restarts
     /\ UNCHANGED <<stable, phase, startedLate>>
 
-(* kStableRun (containers): a run that lasts resets the count. *)
+(* stable_run (services) / kStableRun (containers): a run that lasts resets  *)
+(* the count.                                                              *)
 Stabilize(n) ==
     /\ ResetOnStable
     /\ st[n] = "running"

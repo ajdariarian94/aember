@@ -44,7 +44,7 @@ entry names them.
 | `environment` | object of strings | `{}` | added to PID 1's environment |
 | `dependencies` | array of names | `[]` | start after these are running (or ready, with `ipc`) |
 | `restart_on_failure` | bool | `true` | restart after a non-zero exit or a signal |
-| `max_restarts` | unsigned | `0` | restarts before giving up; `0` = no limit |
+| `max_restarts` | unsigned | `0` | restarts in a row before giving up; `0` = no limit (a run of 60 s resets the count) |
 | `restart_delay_ms` | unsigned | `1000` | wait between an exit and the restart |
 | `stop_timeout_ms` | unsigned | `5000` | SIGTERM to SIGKILL at shutdown |
 | `ipc` | bool | `false` | a message channel to PID 1 on fd 3 (see [services/README.md](../services/README.md)) |
