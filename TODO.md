@@ -26,6 +26,16 @@ Left:
   console gets a root shell. Decide whether production images should
   disable it (build option or kernel parameter).
 
+PID 1 performance (task 10; after the parallel start graph, which changes
+the boot timeline):
+
+- [x] `aember godbolt` (2026-11-25): a local Compiler Explorer with the
+  SDK's cross compilers and aember's flags, to read PID 1's assembly.
+- [ ] Measure first: a boot timeline (when each service/container was
+  started and when it was running), `perf` on PID 1, and a size breakdown
+  of aember and its libraries (bloaty); then optimize the hot spots,
+  comparing the assembly before/after in `aember godbolt`.
+
 ## Running without QEMU
 
 Done (2026-11-17): `aember app launch --chroot` runs the packed system as

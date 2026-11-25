@@ -189,6 +189,7 @@ resources/<arch>/rootfs rootfs overlay: configs tracked, *.squashfs images from 
 tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (SDK compilers, sysroot, flags)
 tools/scripts/          init.sh (postStart), prerequisites.sh, bashrc.d/
 vcpkg/                  SUBMODULE (fork) incl. x64/aarch64-poky-linux triplets
+tools/godbolt/          Dockerfile: upstream Compiler Explorer at a pinned commit (`aember godbolt`)
 tools/triplets/         overlay triplets not in the submodule (arm-poky-linux, riscv64-poky-linux),
                         passed as VCPKG_OVERLAY_TRIPLETS by ConfigureStep
 vcpkg.json              cli11, gtest, nlohmann-json, spdlog
@@ -634,6 +635,7 @@ same image, `.github/workflows/ci.yml`).
 | `aember mutate -k <suite> [-n N]` | mutation testing: one operator at a time changed in the library's sources, its suite rebuilt and run; survivors = lines no test checks (`build/mutation/<suite>.json`) |
 | `aember fuzz [-k <target>] [--time S] [-j N]` | libFuzzer + ASan + UBSan over the code that reads input (`fuzz/`): each target for S seconds (60), up to 4 at once; failing inputs in `build/fuzz/crashes/<target>/`, logs in `build/fuzz/<target>.log`; `--list` names them |
 | `aember systemtest [-k <scenario>] [--timeout-scale F] [--kvm/--no-kvm]` | system tests: each scenario boots the packed image (`aember app pack`, Release by default) in its own QEMU and checks the whole system through the serial console; `--list` names them; consoles in `build/system-tests/<arch>/`; `--scenarios FILE --input k=v` runs another repository's scenarios, `--package-dir` boots another image |
+| `aember godbolt [--port N] [-f FILE] [--build-type T]` / `--stop` | local Compiler Explorer: upstream's, pinned (`tools/godbolt/Dockerfile`), in Docker on 127.0.0.1; one compiler per target configured under `build/configure/<arch>/<type>/` with that build's flags (see "Compiler Explorer" below) |
 
 | `aember lint [--check]` | ruff, black, clang-format, cmake-format, cmakelint; `--check` changes nothing and fails on anything to fix (CI) |
 
@@ -787,6 +789,37 @@ same image, `.github/workflows/ci.yml`).
   `aember systemtest --timeout-scale 3`; KVM when the runner has
   /dev/kvm, else TCG; the consoles are an artifact); valgrind nightly. Job summaries come from `$GITHUB_STEP_SUMMARY`
   (`build/ci-summary.md` inside the container).
+
+- **Compiler Explorer** (`aember godbolt`, `aember-cli/aember/steps/godbolt/`):
+  for reading the assembly of PID 1 and the libraries per target before and
+  after a change. Upstream's Compiler Explorer, never forked or copied:
+  `tools/godbolt/Dockerfile` installs a pinned commit (bump `CE_COMMIT`,
+  the node version from that commit's `.node-version`, and `IMAGE` in
+  `godbolt.py` together); the image (~3.9 GB) is built on first use (a few minutes; `--rebuild-image`).
+  It runs with the repo mounted read-only at `/aember_ws/aember` (the path
+  the SDKs and `compile_commands.json` are made for), listening on
+  127.0.0.1 only, as the calling user. `build/godbolt/` holds the two files
+  it writes on every start: `c++.local.properties` (only the aember
+  compilers) and `compiler-explorer.local.properties` (60 s compile
+  timeout: aember's headers pull in spdlog/fmt/nlohmann).
+  - Compilers: one per target with a configured build (all 8 after
+    `aember app configure` for each), ids `aember-x64`, `aember-aarch64`,
+    `aember-arm`, `aember-riscv64` and `..._musl`; options = that build's
+    flags for `FLAGS_FROM` (process-manager: `--sysroot`, `-march`, the
+    build's `-O2 ... -O3` (last wins), `-std=c++23`, defines, warnings,
+    `-isystem` vcpkg) plus every `-I` of the database, so any
+    `#include <aember-libs/...>` works. Dropped: `-flto` (CE compiles one
+    file), `-Werror`, `-g`, `-pipe`, `-o`/`-c`. objdump and c++filt are the
+    SDK's of the same target; production mode (`NODE_ENV`), short links
+    stored in /tmp of the container.
+  - Use: paste a function (or `#include` its header and call it), compare
+    targets side by side ("Add new > Compiler"), add `-Os` in the options
+    box to see the size build; "Compile to binary" (objdump of the SDK)
+    shows the real encoding. `aember godbolt -f file.cpp` prints a link that
+    opens with that file. Execution is off (cross compilers).
+  - Measure before optimizing: which functions matter comes from the boot
+    timeline, `perf` and a size breakdown (task 10's measuring part,
+    TODO.md), not from reading assembly.
 
 ## Coding conventions
 
