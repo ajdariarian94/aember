@@ -36,6 +36,10 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AemberService.cmake)
 if (BUILD_TESTS)
   include(CTest)
   enable_testing()
+  # Header-only test helpers: test-support/include/aember-test/
+  set(AEMBER_TEST_SUPPORT_DIR
+      ${CMAKE_CURRENT_SOURCE_DIR}/../test-support/include
+  )
 endif ()
 
 # Every subdirectory with a CMakeLists.txt is a service.

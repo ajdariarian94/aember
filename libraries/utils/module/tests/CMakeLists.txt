@@ -9,6 +9,12 @@ find_package(
 add_executable(
   module-parser-unittest
   src/module-parser.cpp
+  src/module-properties.cpp
+)
+
+target_include_directories(
+  module-parser-unittest
+  PRIVATE ${AEMBER_TEST_SUPPORT_DIR}
 )
 
 target_link_libraries(

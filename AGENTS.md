@@ -712,6 +712,25 @@ same image, `.github/workflows/ci.yml`).
   bug they pin down (`grep -rn "Regression:"` lists them). Every bug fix
   gets one; CLI bugs with no better home go in
   `aember-cli/tests/test_regressions.py`.
+- **Property tests** state a rule and check it on many generated cases:
+  `test-support/include/aember-test/property.h` (`aember::test::ForAll(runs,
+  [](Gen& g) {...})` with gtest assertions; seeded cases, no framework:
+  RapidCheck through vcpkg would be built for every target triplet). A
+  failing case names its seed: `AEMBER_PROPERTY_SEED=<seed>
+  AEMBER_PROPERTY_RUNS=1 <test> --gtest_filter=...` reruns it alone; a big
+  `AEMBER_PROPERTY_RUNS` runs more. Test CMakeLists add
+  `${AEMBER_TEST_SUPPORT_DIR}` (set in libraries/ and services/) to their
+  includes. `aember-test/dependency-graph.h` makes random dependency graphs
+  (DAGs, cycles, self-loops, unknown names, duplicates) with the reference
+  answers (`Startable`: what StartGraph.tla starts, `DependenciesFirst`,
+  `Depth`): the parallel start's tests use it. Today: services.json,
+  containers.json, modules.json round trips and wrong types, the
+  dependency resolver, the ipc channel, DHCP packets/frames/lease timer,
+  restart counting against a model; the CLI's (Hypothesis, skipped when it
+  isn't installed) in `aember-cli/tests/test_properties.py`. A new parser or
+  format gets a round-trip property. Generator values: `Gen::Pick` returns
+  a copy (a reference into a temporary vector dangles); for JSON numbers
+  judge the type as read back from text (7 is unsigned once parsed).
 - **TLA+ models** (`spec/tla/`, README there): `StartGraph.tla` is the
   design of start (dependency graph, parallel), restarts and shutdown.
   Change the model with the behaviour, run `spec/tla/check.sh` (Docker,

@@ -12,7 +12,23 @@
 
 #include <aember-libs/utils/process/process-config-parser.h>
 
+#include <cstdint>
+#include <limits>
+
 namespace aember::utils::process {
+
+namespace {
+
+/// json[key] is a whole number that fits an unsigned int. get<unsigned
+/// int>() alone wraps bigger ones: 4294967296 would be 0 (= unlimited for
+/// max_restarts).
+bool IsUnsignedInt(const nlohmann::json& json, const char* key) {
+  return json[key].is_number_unsigned() &&
+         json[key].get<std::uint64_t>() <=
+             std::numeric_limits<unsigned int>::max();
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -173,8 +189,9 @@ bool ProcessConfigParser::ParseProcess(const nlohmann::json& json,
   // MAX RESTARTS (optional, default: 0 = unlimited)
   // -------------------------
   if (json.contains("max_restarts")) {
-    if (!json["max_restarts"].is_number_unsigned()) {
-      error = config::ConfigError("'max_restarts' must be an unsigned integer");
+    if (!IsUnsignedInt(json, "max_restarts")) {
+      error = config::ConfigError(
+          "'max_restarts' must be an unsigned integer (up to 4294967295)");
       return false;
     }
 
@@ -185,9 +202,9 @@ bool ProcessConfigParser::ParseProcess(const nlohmann::json& json,
   // RESTART DELAY ms (optional, default: 1000)
   // -------------------------
   if (json.contains("restart_delay_ms")) {
-    if (!json["restart_delay_ms"].is_number_unsigned()) {
-      error =
-          config::ConfigError("'restart_delay_ms' must be an unsigned integer");
+    if (!IsUnsignedInt(json, "restart_delay_ms")) {
+      error = config::ConfigError(
+          "'restart_delay_ms' must be an unsigned integer (up to 4294967295)");
       return false;
     }
 
@@ -199,9 +216,9 @@ bool ProcessConfigParser::ParseProcess(const nlohmann::json& json,
   // STOP TIMEOUT ms (optional, default: 5000)
   // -------------------------
   if (json.contains("stop_timeout_ms")) {
-    if (!json["stop_timeout_ms"].is_number_unsigned()) {
-      error =
-          config::ConfigError("'stop_timeout_ms' must be an unsigned integer");
+    if (!IsUnsignedInt(json, "stop_timeout_ms")) {
+      error = config::ConfigError(
+          "'stop_timeout_ms' must be an unsigned integer (up to 4294967295)");
       return false;
     }
 
@@ -221,9 +238,9 @@ bool ProcessConfigParser::ParseProcess(const nlohmann::json& json,
   }
 
   if (json.contains("ready_timeout_ms")) {
-    if (!json["ready_timeout_ms"].is_number_unsigned()) {
-      error =
-          config::ConfigError("'ready_timeout_ms' must be an unsigned integer");
+    if (!IsUnsignedInt(json, "ready_timeout_ms")) {
+      error = config::ConfigError(
+          "'ready_timeout_ms' must be an unsigned integer (up to 4294967295)");
       return false;
     }
     cfg.ready_timeout =

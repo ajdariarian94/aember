@@ -217,6 +217,20 @@ TEST(DhcpPacketTest, ParseRejectsGarbage) {
   EXPECT_FALSE(dhcp::Parse(no_type).has_value());
 }
 
+// Regression: an empty option as the last bytes of a reply (no end option)
+// took &p[p.size()], out of range for std::span: netd aborted in -O0
+// builds (GCC 15 turns _GLIBCXX_ASSERTIONS on there). Found by the property
+// tests (dhcp-properties.cpp).
+TEST(DhcpPacketTest, EmptyOptionAtTheVeryEnd) {
+  auto p = Reply(dhcp::MessageType::kAck, 1, kMac, Ip("10.0.0.2"), false);
+  p.pop_back();     // no end option
+  p.push_back(12);  // host name, length 0, nothing after it
+  p.push_back(0);
+  const auto m = dhcp::Parse(p);
+  ASSERT_TRUE(m.has_value());
+  EXPECT_EQ(m->type, dhcp::MessageType::kAck);
+}
+
 TEST(DhcpPacketTest, PrefixLengthOfOddMasks) {
   dhcp::Lease l;
   l.netmask = Ip("255.255.0.0");

@@ -274,6 +274,13 @@ first:
   LinkUsable (namespace + carrier) and the CLI bugs
   (`aember-cli/tests/test_regressions.py`: guestfish error with exit 0,
   image sizing, compile_commands merge, `qemu build` clean condition).
+- [x] Property tests (2026-11-25, `test-support/include/aember-test/`):
+  config files, dependency resolver, ipc, DHCP, restart counting, CLI
+  console reader. They found: numbers above 4294967295 in services.json and
+  containers.json wrapped (`max_restarts: 4294967296` meant unlimited), and
+  an empty DHCP option as the last byte of a reply aborted netd in -O0
+  builds. A random dependency-graph generator with reference answers is
+  ready for the parallel start.
 - [ ] Past bugs still without a regression test: loopback brought up by
   PID 1 (`AemberInit::BringUpLoopback` is private; a QEMU system test or a
   root test in a private net namespace), containerd's pthread_atfork

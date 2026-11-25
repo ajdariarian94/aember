@@ -1,6 +1,7 @@
 """
-Run the CLI's own Python tests (aember-cli/tests, stdlib unittest, no extra
-packages): `aember test` runs them before the C++ suites.
+Run the CLI's own Python tests (aember-cli/tests, stdlib unittest; the
+property tests also need Hypothesis from requirements.txt and are skipped
+without it): `aember test` runs them before the C++ suites.
 """
 
 import logging

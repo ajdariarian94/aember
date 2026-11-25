@@ -9,6 +9,12 @@ find_package(
 add_executable(
   ipc-unittest
   src/ipc.cpp
+  src/ipc-properties.cpp
+)
+
+target_include_directories(
+  ipc-unittest
+  PRIVATE ${AEMBER_TEST_SUPPORT_DIR}
 )
 
 target_link_libraries(
