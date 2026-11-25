@@ -53,6 +53,7 @@ class RpiImageStep(Step):
         services_root = package_dir / "services_root"
         # Opt-in packages (packages.json) and the user database.
         packages_root = package_dir / "packages_root"
+        notices_root = package_dir / "notices_root"  # third-party notices
         # The overlay as `aember app pack` staged it: only listed containers.
         overlay = package_dir / "overlay_root"
         for needed in (package_dir / "kernel", initramfs_root, overlay):
@@ -94,6 +95,7 @@ class RpiImageStep(Step):
                     _tree_size(initramfs_root)
                     + _tree_size(services_root)
                     + _tree_size(packages_root)
+                    + _tree_size(notices_root)
                     + _tree_size(overlay)
                 )
                 / (1024 * 1024)
@@ -128,7 +130,8 @@ class RpiImageStep(Step):
             f"mkfs ext4 /dev/sda2 label:{rpi.ROOT_LABEL}",
             "mount /dev/sda2 /",
             *tar_in_commands(
-                [initramfs_root, services_root, packages_root, overlay], tars
+                [initramfs_root, services_root, packages_root, notices_root, overlay],
+                tars,
             ),
             "umount /",
             "mount /dev/sda1 /",

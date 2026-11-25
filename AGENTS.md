@@ -197,7 +197,9 @@ vcpkg.json              cli11, gtest, nlohmann-json, spdlog
 spec/tla/               TLA+ models checked with TLC (spec/tla/check.sh, CI job `tla`):
                         StartGraph = start graph, restarts, shutdown; README.md
 doc/                    Doxyfile, changelog/ (written by `aember changelog`), configuration.md
-                        (every /etc/aember/*.json key: keep it current with the parsers), packages.md
+                        (every /etc/aember/*.json key: keep it current with the parsers), packages.md,
+                        licensing/ (third-party inventory, components.json, licence texts,
+                        source offer, notes for the legal review, CLA draft)
 build/                  git-ignored: aember-resources/, configure/, install/,
                         package/, downloads/, logging/, release/
 ```
@@ -585,6 +587,30 @@ app package and binary as tar.gz into `build/release/<arch>/<type>/`),
 The toolchain files find everything relative to the repo
 (`AEMBER_ROOT`, `AEMBER_RESOURCES_DIR`, `POKY_SYSROOT`, `POKY_SDK_ROOT`,
 `VIRT_ROOT`). Both C and C++ use the SDK's `<triplet>-gcc`/`-g++`.
+
+## Third-party licences
+
+aember is sold under its own licence, so what ships next to it must allow
+that. `doc/licensing/THIRD_PARTY.md` is the inventory (licence, linking,
+obligation, blockers); `doc/licensing/components.json` is its
+machine-readable copy. `aember app pack` (`steps/packaging/notices.py`)
+writes `/usr/share/licenses/aember/NOTICES.gz` into the rootfs (its own
+`notices_root` tree, also used by the Pi/USB images and the AppImage): the
+source offer, one entry per component the image really contains (found by
+`detect` globs in the staged trees, or the Yocto names in an opt-in
+package's packages.txt), the vcpkg ports' upstream `copyright` files, and
+each licence text once (`doc/licensing/texts/`, SPDX texts from Poky).
+Rules:
+- A new third-party component on the device (library, package, container
+  content, firmware) goes into `components.json` and THIRD_PARTY.md in the
+  same PR; `load_components` refuses unknown keys, missing texts and
+  duplicate ids (`tests/test_notices.py`).
+- Our programs (aember, its services, the aember-* containers) never link
+  GPL code; LGPL only dynamically and replaceable; check a dependency's
+  licence before adding it. GPL *programs* next to ours (BusyBox, ConnMan)
+  are fine with the source offer.
+- Don't edit `LICENSE`: the owner decides it (LICENSING-NOTES.md lists the
+  open questions).
 
 ## Releasing aember
 

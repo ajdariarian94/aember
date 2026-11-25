@@ -334,3 +334,36 @@ first:
   guards = equivalent), root-manager (27). process-manager's fork()
   `pid == 0` mutant "survives" because the test process itself execs the
   command and exits 0: a harness limit, not a gap.
+
+## Licensing (task 12)
+
+Phase 1 done (2026-11-26): `doc/licensing/` (inventory, notes for the legal
+review, source offer, CLA draft), NOTICES.gz on every image, aember-auth and
+aember-fleet-agent ported to Monocypher + mbedTLS backends (#7, #8 there).
+
+- [ ] Phase 2, aember-resources v0.1.16 (exclusive build slot; one
+  component and architecture at a time):
+  - `kas/base.yml`: `INHERIT += "archiver create-spdx"`,
+    `ARCHIVER_MODE[src] = "original"` + `ARCHIVER_MODE[diff] = "1"` (source +
+    our patches per recipe), `SPDX_INCLUDE_SOURCES = "0"`; collect
+    `deploy/spdx` and `deploy/sources` into the release assets
+    (`aember-sources-<component>-<arch>.tar`, `*.spdx.json`).
+  - `kas/recipes/sdk.yml`: `TOOLCHAIN_TARGET_TASK:append = " mbedtls-dev"`
+    (meta-networking mbedtls 3.6.4); then aember-auth/aember-fleet default to
+    `mbedtls` and drop their wolfSSL backends; wolfssl-dev leaves the SDK
+    when nothing uses it.
+  - connman: `PACKAGECONFIG:pn-connman` without `client` (no connmanctl, no
+    GPL-3.0 readline); drop `connman-client` from aember-pkg-connman.
+  - Optional Wi-Fi build without GPL: `PACKAGECONFIG`/config for
+    wpa_supplicant and hostapd with `CONFIG_TLS=openssl` (OpenSSL 3,
+    Apache-2.0), as a second package variant.
+  - Rebuild order, x64 first: sdk, packages (connman, wifi, wifi-ap), then
+    the other 7 architectures; the kernel, BusyBox and LXC only change by
+    the archiver/SPDX classes (sstate reuse, new deploy outputs).
+- [ ] Pi/USB images: put `LICENCE.broadcom` (already downloaded) and the
+  systemd-boot notice on the boot partition; list them in NOTICES there.
+- [ ] Containers carry their own notices (`/usr/share/licenses` inside each
+  squashfs, written by aember-build-helper's pack), instead of aember's
+  central list.
+- [ ] Owner: legal review of `doc/licensing/LICENSING-NOTES.md`, then decide
+  the LICENSE wording (Change Date, evaluation), the CLA, a trademark.

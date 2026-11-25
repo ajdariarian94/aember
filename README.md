@@ -293,3 +293,11 @@ tools/         toolchain files, dev container scripts
 
 [AGENTS.md](AGENTS.md) has the details for contributors (and coding
 agents); [TODO.md](TODO.md) the open ideas.
+
+## Licence
+
+aember is under the Aember License ([LICENSE](LICENSE)): free for
+personal, educational and evaluation use, a commercial licence for
+everything else. The third-party software an aember device contains, its
+licences and the source offer are in [doc/licensing/](doc/licensing/); on a
+device: `zcat /usr/share/licenses/aember/NOTICES.gz`.
