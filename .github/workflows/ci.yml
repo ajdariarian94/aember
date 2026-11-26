@@ -188,6 +188,10 @@ jobs:
           AEMBER_CI_DOCKER: "1"
         run: tools/ci/run.sh bash -c "aember app build && aember app pack"
       - name: System tests
+        env:
+          # Scenarios that change the image (package-install) use guestfish
+          # in a `docker run`, like the pack.
+          AEMBER_CI_DOCKER: "1"
         run: tools/ci/run.sh aember systemtest --timeout-scale 3
       - name: Consoles of the scenarios
         if: always()
