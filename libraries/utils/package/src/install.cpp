@@ -395,10 +395,15 @@ void Recover(const std::string& root, std::vector<std::string>& notes) {
   }
   std::ranges::sort(entries);
   bool changed = false;
+  const auto at = [&](std::string_view entry) {
+    return (fs::path{root} / entry).string();
+  };
   const auto rename = [&](const std::string& from, const std::string& to) {
-    if (std::rename((root + "/" + from).c_str(), (root + "/" + to).c_str()) ==
-        0) {
-      notes.push_back(from + " -> " + to);
+    if (std::rename(at(from).c_str(), at(to).c_str()) == 0) {
+      std::string note = from;
+      note += " -> ";
+      note += to;
+      notes.push_back(std::move(note));
       changed = true;
     }
   };
@@ -408,8 +413,8 @@ void Recover(const std::string& root, std::vector<std::string>& notes) {
   for (const auto& e : entries) {
     if (!e.starts_with('.') || !e.ends_with(".new")) continue;
     const auto name = e.substr(1, e.size() - 5);
-    if (!ValidName(name) || Exists(root + "/" + name)) continue;
-    if (Exists(root + "/" + e + "/" + std::string{kInstalledFile})) {
+    if (!ValidName(name) || Exists(at(name))) continue;
+    if (Exists((fs::path{at(e)} / kInstalledFile).string())) {
       rename(e, name);
     }
   }
@@ -417,20 +422,21 @@ void Recover(const std::string& root, std::vector<std::string>& notes) {
     for (const std::string_view suffix : {".exchange", ".prev"}) {
       if (!e.ends_with(suffix)) continue;
       const auto name = e.substr(0, e.size() - suffix.size());
-      if (!ValidName(name) || !Exists(root + "/" + e)) continue;
-      if (!Exists(root + "/" + name)) {
+      if (!ValidName(name) || !Exists(at(e))) continue;
+      if (!Exists(at(name))) {
         rename(e, name);
       } else if (suffix == ".exchange") {
-        RemoveAll(root + "/" + name + ".prev");
-        rename(e, name + ".prev");  // the old version of an exchange
+        const auto prev = name + ".prev";
+        RemoveAll(at(prev));
+        rename(e, prev);  // the old version of an exchange
       }
     }
   }
   // Unpacks that never finished.
   for (const auto& e : entries) {
     if (!e.starts_with('.') || !e.ends_with(".new")) continue;
-    if (!Exists(root + "/" + e)) continue;
-    RemoveAll(root + "/" + e);
+    if (!Exists(at(e))) continue;
+    RemoveAll(at(e));
     notes.push_back("removed " + e);
     changed = true;
   }

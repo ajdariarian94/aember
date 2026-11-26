@@ -52,7 +52,7 @@ inline constexpr std::string_view kInstalledFile = "package.json";
 inline constexpr std::string_view kExtension = ".aember";
 
 /// Largest config.json / lxc.container.conf accepted.
-inline constexpr std::uint64_t kMaxTextSize = 64 * 1024;
+inline constexpr std::uint64_t kMaxTextSize = std::uint64_t{64} * 1024;
 /// Largest image accepted (sanity bound, not a quota).
 inline constexpr std::uint64_t kMaxImageSize = std::uint64_t{8} << 30;
 /// Memory the xz decoder may use (packages are written with preset 6:

@@ -125,7 +125,8 @@ std::array<std::uint8_t, kTarBlock> TarHeader(std::string_view name,
 std::expected<void, std::string> TarReader::Header() {
   auto parsed = ParseTarHeader(block_);
   if (!parsed) return std::unexpected(parsed.error());
-  if (!*parsed) {
+  const std::optional<TarMember>& next = *parsed;
+  if (!next.has_value()) {
     if (members_ != kMembers.size()) {
       return std::unexpected("the package ends after " +
                              std::to_string(members_) + " of 3 files");
@@ -133,7 +134,7 @@ std::expected<void, std::string> TarReader::Header() {
     state_ = State::kEnd;
     return {};
   }
-  const auto& member = **parsed;
+  const TarMember& member = *next;
   if (members_ >= kMembers.size()) {
     return std::unexpected("more than three files in the package ('" +
                            member.name + "')");
