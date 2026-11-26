@@ -3,6 +3,7 @@ the QEMU command line, and the debug-shell protocol against a fake device
 (a Python script that answers like aember's console)."""
 
 import json
+import os
 import sys
 import tempfile
 import textwrap
@@ -41,6 +42,9 @@ FAKE_DEVICE = textwrap.dedent(
     r"""
     import subprocess, sys
     status = sys.argv[1]
+    # kmsg: a kernel message lands right after the first command's begin
+    # marker, before its line end (what the serial console did once).
+    kmsg = "kmsg" in sys.argv[2:]
     out = sys.stdout
     out.write("[info] \x1b[32mAember Init System started successfully\x1b[0m\r\n")
     out.flush()
@@ -58,6 +62,10 @@ FAKE_DEVICE = textwrap.dedent(
                 break
             line = line.replace("/var/log/aember-status.json", status)
             r = subprocess.run(["sh", "-c", line], capture_output=True, text=True)
+            if kmsg and "@@B" in r.stdout:
+                junk = "[    0.902669] input: mouse\n"
+                r.stdout = r.stdout.replace("@@\n", "@@" + junk + "\n", 1)
+                kmsg = False
             out.write(r.stdout.replace("\n", "\r\n") + "~ # "); out.flush()
     """
 )
@@ -116,6 +124,10 @@ class CommandTest(unittest.TestCase):
     def test_accel(self):
         self.assertEqual(accel_args(True), ["-accel", "kvm"])
         self.assertEqual(accel_args(False), [])
+        # Regression: auto chose KVM for aarch64 on an x86 host, and QEMU
+        # refused to start ("invalid accelerator kvm").
+        if os.uname().machine == "x86_64":
+            self.assertEqual(accel_args(None, "qemu-system-aarch64"), [])
 
 
 class FakeDeviceTest(unittest.TestCase):
@@ -144,6 +156,15 @@ class FakeDeviceTest(unittest.TestCase):
             self.assertIn("never", str(e.exception))
             vm.close_shell()
         self.assertIn(READY, (self.tmp / "console.log").read_text())
+
+    def test_kernel_message_after_the_begin_marker(self):
+        # Regression: a kernel message printed between a command's begin
+        # marker and its line end made the marker unmatched, so open_shell's
+        # `dmesg -n 1` (which keeps them off) failed the boot.
+        with Vm(self.cmd + ["kmsg"], self.tmp / "console.log") as vm:
+            vm.wait_ready(10)
+            vm.open_shell()
+            self.assertEqual(vm.sh("echo hello"), "hello")
 
     def test_a_missing_pattern_fails_with_the_console(self):
         with Vm(self.cmd, self.tmp / "console.log") as vm:

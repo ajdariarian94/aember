@@ -10,10 +10,11 @@
 
 #include <aember-libs/module-loader/module-loader.h>
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
-#include <format>
 #include <fstream>
 #include <ranges>
 #include <sstream>
@@ -87,7 +88,7 @@ ModuleLoader::Result<> ModuleLoader::Load(std::string_view name) {
 
   const auto order = LoadOrder(name);
   if (order.empty()) {
-    const Error err{std::format("not in {}/modules.dep", modules_dir_.string()),
+    const Error err{fmt::format("not in {}/modules.dep", modules_dir_.string()),
                     ModuleErrorCode::NotFound};
     results_.push_back(
         {std::string{name}, ModuleStatus::Failed, err.code, err.message});
@@ -100,7 +101,7 @@ ModuleLoader::Result<> ModuleLoader::Load(std::string_view name) {
     const int rc = LoadFile(modules_dir_ / rel);
     if (rc == 0 || rc == -EEXIST) { continue; }
     const Error err{
-        std::format(
+        fmt::format(
             "finit_module {}: {}", rel, std::system_category().message(-rc)),
         ModuleErrorCode::LoadFailed};
     results_.push_back(

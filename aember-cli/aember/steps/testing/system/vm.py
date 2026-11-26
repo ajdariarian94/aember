@@ -100,11 +100,21 @@ class Console:
                 self._cond.wait(min(remaining, 0.5))
 
 
-def accel_args(kvm: bool | None = None) -> list[str]:
-    """`-accel kvm` when /dev/kvm is usable (auto when @p kvm is None),
-    else nothing: QEMU's TCG, much slower but everywhere."""
+# QEMU binary -> the host machine (uname -m) KVM can run it on.
+KVM_HOSTS = {"qemu-system-x86_64": "x86_64", "qemu-system-aarch64": "aarch64"}
+
+
+def accel_args(
+    kvm: bool | None = None, binary: str = "qemu-system-x86_64"
+) -> list[str]:
+    """`-accel kvm` when /dev/kvm is usable and @p binary emulates the host's
+    own architecture (auto when @p kvm is None), else nothing: QEMU's TCG,
+    much slower but everywhere."""
     if kvm is None:
-        kvm = os.access("/dev/kvm", os.R_OK | os.W_OK)
+        kvm = (
+            os.access("/dev/kvm", os.R_OK | os.W_OK)
+            and KVM_HOSTS.get(Path(binary).name) == os.uname().machine
+        )
     return ["-accel", "kvm"] if kvm else []
 
 
@@ -135,7 +145,7 @@ def vm_command(
     )
     cmd += ["-snapshot"] if snapshot else []
     cmd += ["-no-reboot", "-serial", "stdio", "-monitor", "none"]
-    cmd += accel_args(kvm)
+    cmd += accel_args(kvm, profile.binary)
     cmd += list(extra_args)
     return cmd
 
@@ -260,7 +270,11 @@ class Vm:
         n = self._marker
         start = self.console.mark()
         self.send(f'echo @@B""{n}@@; {command}; echo @@E""{n}:$?@@\n')
-        begin = self.wait_for(rf"^@@B{n}@@\n", timeout, start, what=f"'{command}'")
+        # Anything up to the line end belongs to the marker's line: a kernel
+        # message can land there before `dmesg -n 1` took effect.
+        begin = self.wait_for(
+            rf"^@@B{n}@@[^\n]*\n", timeout, start, what=f"'{command}'"
+        )
         end = self.wait_for(
             rf"@@E{n}:(\d+)@@", timeout, begin.end(), what=f"end of '{command}'"
         )

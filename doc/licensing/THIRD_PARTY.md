@@ -25,7 +25,7 @@ can replace the library. *Static*: compiled into our binary.
 | 2 | **GNU readline 8.3 (GPL-3.0-or-later) in connmanctl** (connman package) | GPLv3 on a consumer device ("User Product") requires the "Installation Information" to install a modified version: conflicts with a locked device. | Drop `connman-client` from the package (ConnMan is controlled over D-Bus anyway), phase 2. |
 | 3 | **Qt 6 (LGPL-3.0-only) in aember-monitor** | Same LGPLv3/GPLv3 installation rule: the device owner must be able to replace Qt. Signed-only fleet updates or secure boot would block that. | Keep devices open for owners (documented way to install own images/keys), or buy a Qt commercial licence. Lawyer question. |
 | 4 | GPL/LGPL source offer (kernel, BusyBox, liblxc + our patch, glibc, ConnMan, e2fsprogs, wolfSSL in Wi-Fi, ...) | Every shipped binary needs the corresponding source (incl. our patches and configs) for 3 years. | Written offer (SOURCE-OFFER.md, on the image); phase 2 publishes the source archives per release. |
-| 5 | Attribution for MIT/BSD/FTL code (nlohmann/json, spdlog, CLI11, Monocypher, FreeType, ...) | Notices must travel with binaries. | Done: NOTICES.gz on every image. |
+| 5 | Attribution for MIT/BSD/FTL code (nlohmann/json, spdlog, Monocypher, FreeType, ...) | Notices must travel with binaries. | Done: NOTICES.gz on every image. |
 
 Nothing else found that forbids selling aember under its own licence.
 
@@ -42,7 +42,6 @@ Nothing else found that forbids selling aember under its own licence.
 | nlohmann/json | 3.12.0 | MIT | header-only, in aember | notice |
 | spdlog | 1.15.3 | MIT | static, in aember | notice |
 | {fmt} | 11.0.2 | MIT (binary exception) | static, via spdlog | none for binaries; notice kept |
-| CLI11 | 2.5.0 | BSD-3-Clause | header-only, in aember | notice |
 | GoogleTest | 1.17.0 | BSD-3-Clause | static, test binaries only | notice (Debug/test images) |
 
 ## Opt-in packages (`packages.json`, built by aember-resources)

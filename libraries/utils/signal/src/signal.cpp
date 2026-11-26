@@ -15,7 +15,8 @@
 
 #include <aember-libs/utils/signal/signal.h>
 
-#include <format>
+#include <fmt/format.h>
+
 #include <stdexcept>
 
 #include <errno.h>
@@ -36,7 +37,7 @@ SignalHandler::SignalHandler() {
   // Create wake pipe — written to by Stop() to unblock epoll_wait
   if (::pipe(wake_pipe_) != 0) {
     throw std::runtime_error(
-        std::format("SignalHandler: pipe() failed: errno={}", errno));
+        fmt::format("SignalHandler: pipe() failed: errno={}", errno));
   }
 }
 
@@ -72,14 +73,14 @@ void SignalHandler::Start() {
   signal_fd_ = ::signalfd(-1, &signal_set_, SFD_NONBLOCK | SFD_CLOEXEC);
   if (signal_fd_ < 0) {
     throw std::runtime_error(
-        std::format("SignalHandler: signalfd() failed: errno={}", errno));
+        fmt::format("SignalHandler: signalfd() failed: errno={}", errno));
   }
 
   // Create epoll instance
   epoll_fd_ = ::epoll_create1(EPOLL_CLOEXEC);
   if (epoll_fd_ < 0) {
     throw std::runtime_error(
-        std::format("SignalHandler: epoll_create1() failed: errno={}", errno));
+        fmt::format("SignalHandler: epoll_create1() failed: errno={}", errno));
   }
 
   // Watch signalfd

@@ -12,6 +12,7 @@
 #include <aember-services/netd/dhcp-client.h>
 #include <aember-services/netd/network-manager.h>
 
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -20,7 +21,6 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
-#include <format>
 #include <fstream>
 #include <limits>
 #include <ranges>
@@ -82,7 +82,7 @@ int CountField(const nlohmann::json& config, const char* key, int fallback) {
       it->get<std::uint64_t>() >
           static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
     throw std::runtime_error(
-        std::format("network.json: '{}' must be a whole number >= 0", key));
+        fmt::format("network.json: '{}' must be a whole number >= 0", key));
   }
   return static_cast<int>(it->get<std::uint64_t>());
 }
@@ -198,7 +198,7 @@ void NetworkManager::ParseConfig(const nlohmann::json& config) {
       // Iterating a JSON string yields the string itself: check the type.
       if (!entry["dns"].is_array()) {
         throw std::runtime_error(
-            std::format("network.json: '{}': 'dns' must be a list of addresses",
+            fmt::format("network.json: '{}': 'dns' must be a list of addresses",
                         iface.name));
       }
       std::ranges::transform(
@@ -239,7 +239,7 @@ void NetworkManager::BringUpInterfaces() {
 
     if (state == InterfaceState::kFailed) {
       if (iface.required) {
-        throw std::runtime_error(std::format(
+        throw std::runtime_error(fmt::format(
             "NetworkManager: required interface '{}' failed to come up",
             iface.name));
       }
@@ -736,7 +736,7 @@ NetworkManager::NetworkInfo NetworkManager::GetNetworkInfo() {
       const auto* hw =
           reinterpret_cast<const unsigned char*>(ifr.ifr_hwaddr.sa_data);
       info.mac_address =
-          std::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+          fmt::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
                       hw[0],
                       hw[1],
                       hw[2],

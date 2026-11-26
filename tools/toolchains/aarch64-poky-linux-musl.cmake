@@ -63,7 +63,7 @@ else()
   endif()
 endif()
 set(RELEASE_FLAGS
-  "-O3 -flto=${AEMBER_LTO_JOBS} -ffunction-sections -fdata-sections -fvisibility=hidden"
+  "-Os -flto=${AEMBER_LTO_JOBS} -ffunction-sections -fdata-sections -fvisibility=hidden"
 )
 
 set(RELEASE_LINK_FLAGS

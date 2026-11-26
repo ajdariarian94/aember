@@ -36,7 +36,9 @@ set(POKY_FLAGS
 # ---------------------------------------------------------------------------
 # Release optimizations
 #
-# -O3                  Full optimization
+# -Os                  Optimize for size: 18-24 % smaller programs than -O3
+#                      with the same boot time and idle CPU, measured in
+#                      doc/performance.md (they mostly wait).
 # -flto                Link-time optimization — biggest size/speed win.
 #                      Must appear on both compiler and linker flags.
 # -ffunction-sections  Each function in its own section → --gc-sections can
@@ -62,7 +64,7 @@ else()
   endif()
 endif()
 set(RELEASE_FLAGS
-  "-O3 -flto=${AEMBER_LTO_JOBS} -ffunction-sections -fdata-sections -fvisibility=hidden"
+  "-Os -flto=${AEMBER_LTO_JOBS} -ffunction-sections -fdata-sections -fvisibility=hidden"
 )
 
 # ---------------------------------------------------------------------------
