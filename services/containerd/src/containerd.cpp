@@ -287,12 +287,11 @@ int RunContainerd(const ContainerdOptions& options) {
     bool Start(std::string_view n) override { return start(n); }
   } control;
   control.list = [&] {
-    std::vector<ControlTarget::Entry> list;
-    list.reserve(names.size());
-    for (const auto& name : names) {
-      list.push_back(
-          {name, ContainerStateToString(containers.GetContainerState(name))});
-    }
+    std::vector<ControlTarget::Entry> list(names.size());
+    std::ranges::transform(names, list.begin(), [&](const std::string& name) {
+      return ControlTarget::Entry{
+          name, ContainerStateToString(containers.GetContainerState(name))};
+    });
     return list;
   };
   control.has = [&](std::string_view n) { return containers.HasContainer(n); };

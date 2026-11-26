@@ -11,6 +11,7 @@
 #include <aember-services/containerd/start-graph.h>
 
 #include <algorithm>
+#include <numeric>
 #include <ranges>
 
 namespace aember::containerd {
@@ -141,15 +142,22 @@ std::vector<std::string> StartGraph::StopOrder() const {
 }
 
 int StartGraph::Depth() const {
+  // Dependencies first (the stop order reversed): each one's depth is
+  // known when its dependents need it.
   std::map<std::string, int> depth;
-  int deepest = 0;
   for (const auto& name : std::views::reverse(StopOrder())) {
-    int d = 1;
-    for (const auto& dep : deps_.at(name)) d = std::max(d, depth[dep] + 1);
-    depth[name] = d;
-    deepest = std::max(deepest, d);
+    const auto& deps = deps_.at(name);
+    depth[name] = 1 + std::accumulate(deps.begin(),
+                                      deps.end(),
+                                      0,
+                                      [&](int deepest, const std::string& d) {
+                                        return std::max(deepest, depth[d]);
+                                      });
   }
-  return deepest;
+  return std::accumulate(
+      depth.begin(), depth.end(), 0, [](int deepest, const auto& entry) {
+        return std::max(deepest, entry.second);
+      });
 }
 
 }  // namespace aember::containerd
