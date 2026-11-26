@@ -87,6 +87,26 @@ int EnsureBridges(const std::string& containers_json) {
   return failed;
 }
 
+utils::package::InstallOptions MakeInstallOptions(
+    const ContainerdOptions& options, bool allow_unsigned) {
+  namespace pkg = aember::utils::package;
+  aember::utils::logging::Logger log{"containerd"};
+  std::vector<std::string> errors;
+  pkg::InstallOptions install{
+      .root = options.packages_root,
+      .policy = {.keys = pkg::LoadKeys(options.keys_dir, errors),
+                 .allow_unsigned = allow_unsigned},
+      .check_config = [root =
+                           options.packages_root](const nlohmann::json& config)
+          -> std::expected<void, std::string> {
+        auto parsed = ParseContainerConfig(config, root);
+        if (!parsed) return std::unexpected(parsed.error());
+        return {};
+      }};
+  for (const auto& error : errors) log.error("key {}", error);
+  return install;
+}
+
 int InstallPackages(const ContainerdOptions& options, bool allow_unsigned) {
   namespace pkg = aember::utils::package;
   aember::utils::logging::Logger log{"containerd"};
@@ -107,18 +127,7 @@ int InstallPackages(const ContainerdOptions& options, bool allow_unsigned) {
   if (packages.empty()) return 0;
   std::ranges::sort(packages);
 
-  std::vector<std::string> errors;
-  pkg::InstallOptions install{
-      .root = options.packages_root,
-      .policy = {.keys = pkg::LoadKeys(options.keys_dir, errors),
-                 .allow_unsigned = allow_unsigned},
-      .check_config = [&](const nlohmann::json& config)
-          -> std::expected<void, std::string> {
-        auto parsed = ParseContainerConfig(config, options.packages_root);
-        if (!parsed) return std::unexpected(parsed.error());
-        return {};
-      }};
-  for (const auto& error : errors) log.error("key {}", error);
+  const auto install = MakeInstallOptions(options, allow_unsigned);
 
   int failed = 0;
   for (const auto& package : packages) {
@@ -281,10 +290,18 @@ int RunContainerd(const ContainerdOptions& options) {
   struct Control final : ControlTarget {
     std::function<std::vector<Entry>()> list;
     std::function<bool(std::string_view)> has, stop, start;
+    std::function<std::expected<void, std::string>(std::string_view, bool)>
+        replace;
     [[nodiscard]] std::vector<Entry> List() const override { return list(); }
     [[nodiscard]] bool Has(std::string_view n) const override { return has(n); }
     bool Stop(std::string_view n) override { return stop(n); }
     bool Start(std::string_view n) override { return start(n); }
+    std::expected<void, std::string> Install(std::string_view n) override {
+      return replace(n, true);
+    }
+    std::expected<void, std::string> Rollback(std::string_view n) override {
+      return replace(n, false);
+    }
   } control;
   control.list = [&] {
     std::vector<ControlTarget::Entry> list(names.size());
@@ -316,6 +333,45 @@ int RunContainerd(const ContainerdOptions& options) {
     graph.SetRunning(name, ok);
     if (!ok) schedule_restart(name);
     return ok;
+  };
+  // An update (install) or a rollback: the container stops, its directory
+  // changes, it starts again with the config that is there now.
+  control.replace = [&](std::string_view n,
+                        bool install) -> std::expected<void, std::string> {
+    namespace pkg = aember::utils::package;
+    const std::string name{n};
+    if (graph.IsStarting(name)) return std::unexpected("it is starting");
+    restart_at.erase(name);
+    graph.Unwant(name);
+    containers.StopContainer(name);
+    graph.SetRunning(name, false);
+    std::expected<void, std::string> result;
+    if (install) {
+      const auto opts = MakeInstallOptions(options, board.allow_unsigned);
+      const auto r = pkg::Install(
+          options.inbox + "/" + name + std::string{pkg::kExtension}, opts);
+      if (r) {
+        log.info("installed {} ({}, {})",
+                 name,
+                 r->signed_by ? "signed by " + *r->signed_by
+                              : std::string{"unsigned"},
+                 r->digest.substr(0, 16));
+      } else {
+        result = std::unexpected(r.error());
+      }
+    } else {
+      result = pkg::Rollback(options.packages_root, name);
+      if (result) log.info("rolled {} back", name);
+    }
+    // What is in place now (the new version, or the old one if the install
+    // failed), started again either way.
+    if (auto cfg = LoadContainerConfig(name, options.packages_root); cfg) {
+      containers.UpdateConfig(*cfg);
+    } else if (result) {
+      result = std::unexpected(cfg.error());
+    }
+    control.start(name);
+    return result;
   };
   int control_fd = -1;
   if (!options.control_socket.empty()) {

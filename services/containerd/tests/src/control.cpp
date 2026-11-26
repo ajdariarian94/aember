@@ -46,7 +46,34 @@ struct FakeTarget final : ControlTarget {
     states[std::string{name}] = "running";
     return !fail;
   }
+  std::expected<void, std::string> Install(std::string_view name) override {
+    calls.push_back("install " + std::string{name});
+    if (fail) return std::unexpected("bad signature");
+    return {};
+  }
+  std::expected<void, std::string> Rollback(std::string_view name) override {
+    calls.push_back("rollback " + std::string{name});
+    if (fail) return std::unexpected("no previous version");
+    return {};
+  }
 };
+
+TEST(ControlTest, InstallAndRollbackSayWhyTheyFailed) {
+  FakeTarget t;
+  EXPECT_TRUE(
+      HandleControlRequest({{"op", "install"}, {"name", "web"}}, t)["ok"]);
+  EXPECT_TRUE(
+      HandleControlRequest({{"op", "rollback"}, {"name", "web"}}, t)["ok"]);
+  EXPECT_EQ(t.calls, (std::vector<std::string>{"install web", "rollback web"}));
+  t.fail = true;
+  const auto a = HandleControlRequest({{"op", "install"}, {"name", "web"}}, t);
+  EXPECT_FALSE(a["ok"].get<bool>());
+  EXPECT_NE(a["error"].get<std::string>().find("bad signature"),
+            std::string::npos);
+  EXPECT_FALSE(
+      HandleControlRequest({{"op", "install"}, {"name", "nope"}}, t)["ok"]);
+  EXPECT_FALSE(HandleControlRequest({{"op", "install"}}, t)["ok"]);
+}
 
 TEST(ControlTest, ListsContainers) {
   FakeTarget t;

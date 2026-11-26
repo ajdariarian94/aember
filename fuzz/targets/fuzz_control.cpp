@@ -27,6 +27,14 @@ struct Target final : aember::containerd::ControlTarget {
   }
   bool Stop(std::string_view name) override { return Set(name, "stopped"); }
   bool Start(std::string_view name) override { return Set(name, "running"); }
+  std::expected<void, std::string> Install(std::string_view name) override {
+    Set(name, "running");
+    return {};
+  }
+  std::expected<void, std::string> Rollback(std::string_view name) override {
+    Set(name, "running");
+    return std::unexpected("no previous version");
+  }
   bool Set(std::string_view name, const char* state) {
     const auto it = states.find(name);
     if (it == states.end()) fuzz::Fail("acted on an unknown container");

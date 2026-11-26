@@ -112,6 +112,18 @@ bool ContainerManager::AddContainer(const ContainerConfig& config) {
   return true;
 }
 
+bool ContainerManager::UpdateConfig(const ContainerConfig& config) {
+  std::lock_guard lock{mutex_};
+  auto* e = Find(config.name);
+  if (!e || (e->state != ContainerState::kStopped &&
+             e->state != ContainerState::kFailed)) {
+    return false;
+  }
+  e->config = config;
+  e->restarts = 0;
+  return true;
+}
+
 bool ContainerManager::RemoveContainer(std::string_view name) {
   std::lock_guard lock{mutex_};
 

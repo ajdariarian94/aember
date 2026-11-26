@@ -45,7 +45,8 @@ nlohmann::json HandleControlRequest(const nlohmann::json& request,
         });
     return {{"ok", true}, {"containers", std::move(list)}};
   }
-  if (op != "stop" && op != "start" && op != "restart") {
+  if (op != "stop" && op != "start" && op != "restart" && op != "install" &&
+      op != "rollback") {
     return Error("unknown op '" + op + "'");
   }
   if (!request.contains("name") || !request["name"].is_string()) {
@@ -53,6 +54,12 @@ nlohmann::json HandleControlRequest(const nlohmann::json& request,
   }
   const auto name = request["name"].get<std::string>();
   if (!target.Has(name)) return Error("no container '" + name + "'");
+  if (op == "install" || op == "rollback") {
+    const auto done =
+        op == "install" ? target.Install(name) : target.Rollback(name);
+    if (!done) return Error(op + " of '" + name + "' failed: " + done.error());
+    return {{"ok", true}};
+  }
   bool ok = true;
   if (op == "stop" || op == "restart") ok = target.Stop(name);
   if (ok && (op == "start" || op == "restart")) ok = target.Start(name);
