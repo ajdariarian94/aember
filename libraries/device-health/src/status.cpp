@@ -10,16 +10,21 @@
 
 #include <aember-libs/device-health/status.h>
 
+#include <fmt/format.h>
+
+#include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <limits>
 #include <sstream>
 #include <string>
 #include <system_error>
 
+#include <dirent.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 namespace aember::device_health {
@@ -31,7 +36,7 @@ namespace aember::device_health {
 namespace {
 
 long read_status_field(pid_t pid, std::string_view field) {
-  std::ifstream f{std::format("/proc/{}/status", pid)};
+  std::ifstream f{fmt::format("/proc/{}/status", pid)};
   std::string line;
   while (std::getline(f, line)) {
     if (line.starts_with(field)) {
@@ -45,7 +50,7 @@ long read_status_field(pid_t pid, std::string_view field) {
 }
 
 int read_thread_count(pid_t pid) {
-  std::ifstream f{std::format("/proc/{}/status", pid)};
+  std::ifstream f{fmt::format("/proc/{}/status", pid)};
   std::string line;
   while (std::getline(f, line)) {
     if (line.starts_with("Threads:")) {
@@ -75,38 +80,46 @@ Pid1Stats StatusReporter::ReadPid1Stats() {
   };
 }
 
-int StatusReporter::CountChildren(pid_t pid) {
-  const auto path = std::format("/proc/{}/task/{}/children", pid, pid);
+int StatusReporter::CountChildren(pid_t pid,
+                                  const std::filesystem::path& proc_root) {
+  const auto path = proc_root / fmt::format("{}/task/{}/children", pid, pid);
   if (std::ifstream f{path}; f.is_open()) {
     std::string content;
     std::getline(f, content);
     if (content.empty()) return 0;
     return static_cast<int>(std::ranges::count(content, ' '));
   }
-  return CountChildrenByScan(pid);
+  return CountChildrenByScan(pid, proc_root);
 }
 
-int StatusReporter::CountChildrenByScan(pid_t pid) {
+int StatusReporter::CountChildrenByScan(
+    pid_t pid, const std::filesystem::path& proc_root) {
+  // Plain syscalls and one stack buffer per entry (see
+  // ChildSupervisor::ListZombieChildren): the stat line, not the much
+  // longer status file.
   int count = 0;
-  for (const auto& entry : std::filesystem::directory_iterator{
-           "/proc",
-           std::filesystem::directory_options::skip_permission_denied}) {
-    if (!entry.is_directory()) continue;
-    const auto name = entry.path().filename().string();
-    if (!std::ranges::all_of(name, ::isdigit)) continue;
-
-    std::ifstream status{std::format("/proc/{}/status", name)};
-    std::string line;
-    while (std::getline(status, line)) {
-      if (line.starts_with("PPid:")) {
-        pid_t ppid = 0;
-        std::istringstream ss{line.substr(line.find(':') + 1)};
-        ss >> ppid;
-        if (ppid == pid) ++count;
-        break;
-      }
-    }
+  DIR* dir = ::opendir(proc_root.c_str());
+  if (dir == nullptr) return 0;
+  const int dir_fd = ::dirfd(dir);
+  std::array<char, 512> buf{};
+  while (const dirent* entry = ::readdir(dir)) {
+    const std::string_view name{entry->d_name};
+    if (name.empty() || !std::ranges::all_of(name, ::isdigit)) continue;
+    const std::string stat_path = std::string{name} + "/stat";
+    const int fd = ::openat(dir_fd, stat_path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) continue;
+    const ssize_t n = ::read(fd, buf.data(), buf.size() - 1);
+    ::close(fd);
+    if (n <= 0) continue;
+    // "<pid> (<comm>) <state> <ppid> ...": comm may hold ')' and spaces.
+    const std::string_view line{buf.data(), static_cast<std::size_t>(n)};
+    const auto close = line.rfind(')');
+    if (close == std::string_view::npos || close + 4 >= line.size()) continue;
+    pid_t ppid = 0;
+    std::from_chars(line.data() + close + 4, line.data() + line.size(), ppid);
+    if (ppid == pid) ++count;
   }
+  ::closedir(dir);
   return count;
 }
 
@@ -131,7 +144,21 @@ long StatusReporter::ReadUptimeSeconds() {
 }
 
 nlohmann::json StatusReporter::Snapshot() const {
-  auto stats = ReadPid1Stats();
+  auto stats = Pid1Stats{
+      .pid = 1,
+      .vm_rss_kb = read_status_field(1, "VmRSS:"),
+      .vm_size_kb = read_status_field(1, "VmSize:"),
+      .threads = read_thread_count(1),
+      .children = 0,
+      .uptime_seconds = ReadUptimeSeconds(),
+  };
+  const auto now = std::chrono::steady_clock::now();
+  if (children_at_ == std::chrono::steady_clock::time_point{} ||
+      now - children_at_ >= kChildrenMaxAge) {
+    children_ = CountChildren(1);
+    children_at_ = now;
+  }
+  stats.children = children_;
   stats.session_uptime = std::chrono::duration_cast<std::chrono::seconds>(
                              std::chrono::steady_clock::now() - start_time_)
                              .count();

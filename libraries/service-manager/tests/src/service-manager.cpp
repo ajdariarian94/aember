@@ -403,6 +403,17 @@ TEST_F(ServiceManagerTest, ReadyTimeoutTreatsServiceAsUp) {
   EXPECT_EQ(sm_->GetState("after"), State::Running);
 }
 
+// PID 1's reaper ticks every second only while this is true.
+TEST_F(ServiceManagerTest, AwaitingReadyWhileAReadyIsPending) {
+  AddIpcService("netd", {}, /*sends_ready=*/true);
+  EXPECT_FALSE(sm_->AwaitingReady());
+  ASSERT_TRUE(sm_->Start("netd"));
+  EXPECT_TRUE(sm_->AwaitingReady());
+  ASSERT_TRUE(ReceiveReady("netd"));
+  sm_->MarkReady("netd");
+  EXPECT_FALSE(sm_->AwaitingReady());
+}
+
 TEST_F(ServiceManagerTest, ReadyFromAStrangerIsIgnored) {
   AddSleeper("plain");
   sm_->MarkReady("plain");  // not waiting for ready

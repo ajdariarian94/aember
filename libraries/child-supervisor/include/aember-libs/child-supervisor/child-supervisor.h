@@ -78,6 +78,10 @@ class ChildSupervisor {
       std::chrono::milliseconds grace = std::chrono::seconds{2},
       const std::filesystem::path& proc_root = "/proc");
 
+  /** Whether ReapZombies() saw untracked zombies it is waiting out (the
+   *  grace period): then it must run again even without a new SIGCHLD. */
+  bool HasUntrackedZombies();
+
   /** True if @p pid was registered with AddChild and not yet reaped. */
   bool IsTracked(pid_t pid);
 

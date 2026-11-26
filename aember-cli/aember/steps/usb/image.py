@@ -25,7 +25,11 @@ from aember.core.context import Context
 from aember.core.step import Step
 from aember.utils.download import fetch_pinned
 from aember.steps.packaging.rootfs import SIZE_EXTRA_MB, SIZE_MARGIN, _tree_size
-from aember.steps.packaging.rootfs import run_guestfish, tar_in_commands
+from aember.steps.packaging.rootfs import (
+    mkfs_ext4,
+    run_guestfish,
+    tar_in_commands,
+)
 from aember.steps.releasing.get_version_from_cmake import get_version_from_cmake
 
 log = logging.getLogger("aember.usb.image")
@@ -131,7 +135,7 @@ class UsbImageStep(Step):
             "part-set-name /dev/sda 1 EFI",
             "part-set-name /dev/sda 2 aember-root",
             f"mkfs vfat /dev/sda1 label:{usb.BOOT_LABEL}",
-            f"mkfs ext4 /dev/sda2 label:{usb.ROOT_LABEL}",
+            mkfs_ext4("/dev/sda2", usb.ROOT_LABEL),
             "mount /dev/sda2 /",
             *tar_in_commands(
                 [initramfs_root, services_root, packages_root, notices_root, overlay],

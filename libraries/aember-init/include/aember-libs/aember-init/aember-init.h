@@ -25,6 +25,7 @@
 #include <aember-libs/utils/watchdog/watchdog.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <expected>
@@ -88,11 +89,22 @@ class AemberInit {
   ShutdownAction RequestedShutdown() const { return shutdown_.load(); }
 
  private:
+  /// How often the reaper and the run loop tick when nothing happens: often
+  /// enough for Alive() (10 s stale limit), rare enough to leave the
+  /// heartbeat as PID 1's only per-second work.
+  static constexpr std::chrono::seconds kTick{3};
+  /// The reaper's /proc scan without a SIGCHLD, as a safety net.
+  static constexpr std::chrono::seconds kRescan{30};
+
   // ---------------------------------------------------------------------------
   // Init phases — each returns Result<> so failures chain cleanly
   // ---------------------------------------------------------------------------
 
   Result<> InitMounts();
+  /// The status file on tmpfs, bind-mounted over log_dir's (not in chroot).
+  void SetUpStatusFile();
+  /// Where the status file really is on the device (tmpfs).
+  static constexpr std::string_view kRuntimeStatusDir = "/run/aember";
   Result<> InitServiceStack();
   /// A message from a service started with "ipc" (aember-netd,
   /// aember-containerd, ...): readiness, network status, container state.

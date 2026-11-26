@@ -170,6 +170,11 @@ void ServiceManager::MarkReady(std::string_view name) {
   StartWaiting();
 }
 
+bool ServiceManager::AwaitingReady() const {
+  std::lock_guard lock{mutex_};
+  return !ready_deadline_.empty();
+}
+
 void ServiceManager::CheckReadyTimeouts() {
   bool changed = false;
   {

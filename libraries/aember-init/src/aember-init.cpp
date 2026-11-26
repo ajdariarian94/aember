@@ -10,14 +10,15 @@
 #include <aember-libs/utils/netlink/netlink.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <ranges>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
 
+#include <sys/mount.h>
 #include <sys/wait.h>
 
 namespace aember::aember_init {
@@ -138,19 +139,15 @@ void AemberInit::StartRoot() {
   log_.info("Starting Aember in root mode{}",
             options_.chroot ? " (chroot)" : "");
 
-  // The status file exists from the start, so a container that reads it
-  // (aember-stats, through /host-logs) never finds it missing.
-  {
-    std::ofstream file{options_.log_dir + "/aember-status.json"};
-    file << "{}";
-  }
-
   Guarded(log_, "Mount phase", [this] {
     std::ignore = InitMounts().or_else([this](const Error& e) -> Result<> {
       log_.warn("Mount phase failed: {}", e.message);
       return {};
     });
   });
+
+  // /run is mounted now; before any service or container starts.
+  Guarded(log_, "Status file", [this] { SetUpStatusFile(); });
 
   // Loopback is PID 1's job, not the network service's: every board has it,
   // whatever manages the network (aember-netd, ConnMan or nothing), and
@@ -295,6 +292,33 @@ AemberInit::Result<> AemberInit::InitMounts() {
   return {};
 }
 
+void AemberInit::SetUpStatusFile() {
+  // The status file exists from the start, so a container that reads it
+  // (aember-stats, through /host-logs) never finds it missing.
+  const std::string path = options_.log_dir + "/aember-status.json";
+  if (!std::filesystem::exists(path)) { std::ofstream{path} << "{}"; }
+  if (options_.chroot) return;  // the host's /var/log: leave it as it is
+
+  // It is rewritten every heartbeat (1 s). On the root file system that was
+  // an ext4 journal commit every 5 s, all day: flash wear on an SD card. So
+  // the file lives on /run (tmpfs) and is bind-mounted over its usual path,
+  // which keeps the path for readers on the device and, through
+  // containerd's recursive bind of /var/log, for the containers.
+  std::error_code ec;
+  std::filesystem::create_directories(kRuntimeStatusDir, ec);
+  const std::string runtime =
+      std::string{kRuntimeStatusDir} + "/aember-status.json";
+  { std::ofstream{runtime} << "{}"; }
+  if (::mount(runtime.c_str(), path.c_str(), nullptr, MS_BIND, nullptr) != 0) {
+    log_.warn("Status file stays on {} (bind mount from {}: {})",
+              path,
+              runtime,
+              std::system_category().message(errno));
+    return;
+  }
+  log_.info("Status file {} is on {}", path, runtime);
+}
+
 AemberInit::Result<> AemberInit::InitServiceStack() {
   process_manager_ =
       std::make_unique<aember::process_manager::ProcessManager>();
@@ -415,17 +439,33 @@ void AemberInit::StartReaperThread() {
   if (reaper_thread_.joinable()) return;
 
   reaper_thread_ = std::jthread{[this](std::stop_token st) {
+    auto last_scan = std::chrono::steady_clock::now();
     while (!st.stop_requested()) {
+      // SIGCHLD wakes it; otherwise it ticks for the watchdog (Alive()),
+      // every second only while a service's ready timeout is pending.
+      const bool awaiting_ready =
+          service_manager_ && service_manager_->AwaitingReady();
+      bool sigchld = false;
       {
         std::unique_lock lock{reap_mtx_};
-        reap_cv_.wait_for(lock, st, std::chrono::seconds(1), [this] {
-          return reap_pending_;
-        });
+        reap_cv_.wait_for(
+            lock, st, awaiting_ready ? std::chrono::seconds(1) : kTick, [this] {
+              return reap_pending_;
+            });
+        sigchld = reap_pending_;
         reap_pending_ = false;
       }
       reap_tick_ms_ = NowMs();
-      Guarded(log_, "Reaping", [this] {
-        ReapOnce();
+      Guarded(log_, "Reaping", [this, sigchld, &last_scan] {
+        // The scan reads every process's /proc stat: only after a SIGCHLD,
+        // while an untracked zombie waits out its grace period, and every
+        // kRescan as a safety net (a SIGCHLD lost to someone else's wait).
+        const auto now = std::chrono::steady_clock::now();
+        if (sigchld || child_supervisor_.HasUntrackedZombies() ||
+            now - last_scan >= kRescan) {
+          last_scan = now;
+          ReapOnce();
+        }
         if (service_manager_) { service_manager_->CheckReadyTimeouts(); }
       });
     }
@@ -456,7 +496,7 @@ std::int64_t AemberInit::NowMs() {
 }
 
 bool AemberInit::Alive() const {
-  // Both tick at least once a second; 10 s without a tick means stuck.
+  // Both tick at least every kTick (3 s); 10 s without a tick means stuck.
   // Until the run loop starts (services still starting), boot gets 2 min.
   constexpr std::int64_t kStaleMs = 10'000;
   constexpr std::int64_t kBootMs = 120'000;
@@ -519,7 +559,7 @@ void AemberInit::RunLoop() {
   loop_started_ = true;
   while (running_.load() && shutdown_.load() == ShutdownAction::kNone) {
     loop_tick_ms_ = NowMs();
-    cv_.wait_for(lock, std::chrono::seconds(1));
+    cv_.wait_for(lock, kTick);
   }
   log_.info("Aember Init run loop exiting");
 }

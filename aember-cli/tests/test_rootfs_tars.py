@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from aember.steps.packaging.rootfs import tar_in_commands
+from aember.steps.packaging.rootfs import MKFS_FAILED, mkfs_ext4, tar_in_commands
 
 
 class TarInTest(unittest.TestCase):
@@ -47,6 +47,22 @@ class TarInTest(unittest.TestCase):
         self.assertTrue(all(m.uid == 0 and m.gid == 0 for m in members.values()))
         self.assertTrue(members["usr/bin/ssh"].issym())
         self.assertEqual(members["usr/bin/ssh"].linkname, "/usr/sbin/dropbearmulti")
+
+
+class MkfsTest(unittest.TestCase):
+    # The first boot must not run ext4lazyinit (~32 MB of background writes):
+    # the appliance's mke2fs with lazy init off (guestfish's own mke2fs
+    # ignores those flags), and a failure that run_guestfish can see.
+    def test_ext4_without_lazy_init(self):
+        cmd = mkfs_ext4("/dev/sda1")
+        self.assertTrue(cmd.startswith('debug sh "mke2fs -F -q -t ext4 '))
+        self.assertIn("-E lazy_itable_init=0,lazy_journal_init=0", cmd)
+        self.assertIn(" /dev/sda1 ", cmd)
+        self.assertIn(f"|| echo {MKFS_FAILED}", cmd)
+        self.assertNotIn(" -L ", cmd)
+        self.assertIn(
+            " -L aember-root /dev/sda2 ", mkfs_ext4("/dev/sda2", "aember-root")
+        )
 
 
 if __name__ == "__main__":

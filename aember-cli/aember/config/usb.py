@@ -11,6 +11,8 @@ UEFI only (no legacy BIOS): every x86-64 PC since ~2012 boots it. Secure
 Boot must be off (the kernel is not signed).
 """
 
+from aember.config.kernel import KERNEL_QUIET
+
 ARCHITECTURE = "x64-poky-linux"
 
 # systemd-boot from Ubuntu 24.04's release pocket (never removed from the
@@ -35,7 +37,7 @@ ESP_SECTORS = 256 * 2048
 KERNEL = "aember/bzImage"
 INITRAMFS = "aember/aember-initramfs.cpio.gz"
 
-ROOT_ARGS = f"root=LABEL={ROOT_LABEL} rootfstype=ext4 rootwait rw"
+ROOT_ARGS = f"root=LABEL={ROOT_LABEL} rootfstype=ext4 rootwait rw {KERNEL_QUIET}"
 
 # The last console= is /dev/console (aember's log and the `d` debug shell).
 # (file name, title, kernel arguments); the first entry is the default.
