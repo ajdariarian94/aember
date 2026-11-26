@@ -27,6 +27,10 @@
 #include <string>
 #include <thread>
 
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
 #include "../../../tests-common/daemon-runner.h"
 
 namespace {
@@ -189,6 +193,78 @@ TEST_F(ContainerdDaemonTest, UnsignedPackagesOnlyWhenTheBoardAllowsThem) {
   EXPECT_EQ(ctrd.Stop(SIGTERM, 15s), std::optional<int>{0});
   EXPECT_TRUE(fs::exists(dir_ / "lib" / "dev" / "package.json")) << Log();
   EXPECT_NE(Log().find("installed dev (unsigned"), std::string::npos) << Log();
+}
+
+/// One request on containerd's control socket; the answer.
+nlohmann::json Ask(const std::string& socket, const nlohmann::json& request) {
+  const int fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", socket.c_str());
+  nlohmann::json answer;
+  for (int i = 0; i < 100; ++i) {  // until containerd listens
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+      const auto text = request.dump();
+      std::ignore = ::send(fd, text.data(), text.size(), 0);
+      std::array<char, 4096> buf{};
+      const auto n = ::recv(fd, buf.data(), buf.size(), 0);
+      if (n > 0) answer = nlohmann::json::parse(std::string(buf.data(), n));
+      break;
+    }
+    std::this_thread::sleep_for(50ms);
+  }
+  ::close(fd);
+  return answer;
+}
+
+std::string Digest(const fs::path& dir) {
+  std::ifstream in{dir / "package.json"};
+  return nlohmann::json::parse(in, nullptr, false).value("digest", "");
+}
+
+// The fleet agent's update: the new package into the inbox, then "install";
+// a bad version: "rollback".
+TEST_F(ContainerdDaemonTest, ControlSocketInstallsAndRollsBack) {
+  options_.control_socket = (dir_ / "control.sock").string();
+  const auto inbox = dir_ / "lib" / "packages";
+  WritePackage(inbox / "app.aember", "app", std::nullopt);
+  Config({{"allow_unsigned", true},
+          {"containers", nlohmann::json::array({{{"name", "app"}}})}});
+  auto ctrd = Run();
+  ASSERT_TRUE(ctrd.Expect("ready", 10s)) << Log();
+  const auto v1 = Digest(dir_ / "lib" / "app");
+  ASSERT_FALSE(v1.empty()) << Log();
+
+  // Version 2 (another image, so another digest).
+  fs::create_directories(inbox);
+  {
+    const auto bytes = pkg::Seal(
+        *pkg::Compress(pkg::MakeTar(
+            nlohmann::json{{"name", "app"}, {"command", {"/app2"}}}.dump(),
+            "lxc.uts.name = app\n",
+            "IMAGE-2")),
+        std::nullopt);
+    std::ofstream{inbox / "app.aember", std::ios::binary}.write(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+  }
+  auto a = Ask(options_.control_socket, {{"op", "install"}, {"name", "app"}});
+  EXPECT_TRUE(a.value("ok", false)) << a.dump() << Log();
+  const auto v2 = Digest(dir_ / "lib" / "app");
+  EXPECT_NE(v2, v1);
+  EXPECT_EQ(Digest(dir_ / "lib" / "app.prev"), v1);
+  EXPECT_FALSE(fs::exists(inbox / "app.aember"));
+
+  a = Ask(options_.control_socket, {{"op", "rollback"}, {"name", "app"}});
+  EXPECT_TRUE(a.value("ok", false)) << a.dump() << Log();
+  EXPECT_EQ(Digest(dir_ / "lib" / "app"), v1);
+  EXPECT_EQ(Digest(dir_ / "lib" / "app.prev"), v2);
+
+  // Nothing waiting: the install says why.
+  a = Ask(options_.control_socket, {{"op", "install"}, {"name", "app"}});
+  EXPECT_FALSE(a.value("ok", true)) << a.dump();
+  EXPECT_EQ(Digest(dir_ / "lib" / "app"), v1);
+  EXPECT_EQ(ctrd.Stop(SIGTERM, 15s), std::optional<int>{0});
 }
 
 TEST_F(ContainerdDaemonTest, BridgesAreCreatedAndAddressed) {

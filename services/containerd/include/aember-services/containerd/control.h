@@ -11,6 +11,10 @@
  *   {"op": "stop",    "name": n} -> {"ok": true} | {"ok": false, "error": ...}
  *   {"op": "start",   "name": n}
  *   {"op": "restart", "name": n}
+ *   {"op": "install", "name": n} install <inbox>/n.aember (an update): stop,
+ *                                 install, start; the old version stays
+ *   {"op": "rollback", "name": n} back to the version before: stop, swap,
+ *                                 start
  *
  * A stop through the socket is a requested stop: no restart_policy restart
  * follows until a start. A container that is bind-mounted the socket's
@@ -20,6 +24,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <expected>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,6 +43,11 @@ class ControlTarget {
   [[nodiscard]] virtual bool Has(std::string_view name) const = 0;
   virtual bool Stop(std::string_view name) = 0;
   virtual bool Start(std::string_view name) = 0;
+  /// Install the package waiting as <inbox>/<name>.aember: stop the
+  /// container, install it (the old version kept for a rollback), start it.
+  virtual std::expected<void, std::string> Install(std::string_view name) = 0;
+  /// Back to the version before the last install: stop, swap, start.
+  virtual std::expected<void, std::string> Rollback(std::string_view name) = 0;
 };
 
 /// The answer to one request (never throws).

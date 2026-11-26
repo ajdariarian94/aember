@@ -111,8 +111,11 @@ aember-container.json); aember does no NAT.
 
 aember-containerd also answers on `/run/aember-containerd/control.sock`
 (SOCK_SEQPACKET, one JSON object per message): `{"op": "list"}`, and
-`{"op": "stop"|"start"|"restart", "name": "<container>"}`. aember-fleet's
-agent uses it.
+`{"op": "stop"|"start"|"restart", "name": "<container>"}`, and for updates
+`{"op": "install", "name": n}` (stop, install the package waiting as
+`/var/lib/aember/packages/<n>.aember`, start; the old version stays as
+`<n>.prev`) and `{"op": "rollback", "name": n}` (stop, swap with `<n>.prev`,
+start). An error answer says why (`"error"`). aember-fleet's agent uses it.
 
 ## network.json
 

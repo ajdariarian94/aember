@@ -70,6 +70,11 @@ class ContainerManager {
 
   bool AddContainer(const ContainerConfig& config);
   bool RemoveContainer(std::string_view name);
+  /// A new config for a registered container that is stopped (an update
+  /// or rollback changed its package). In place: entries never move, so a
+  /// start running in another thread keeps its entry. False if it isn't
+  /// registered or isn't stopped/failed.
+  bool UpdateConfig(const ContainerConfig& config);
 
   // ---------------------------------------------------------------------------
   // Lifecycle

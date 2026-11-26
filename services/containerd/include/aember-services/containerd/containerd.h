@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <aember-libs/utils/package/install.h>
+
 #include <string>
 
 namespace aember::containerd {
@@ -44,6 +46,11 @@ struct ContainerdOptions {
 /// unsigned ones only if @p allow_unsigned). A package that can't be
 /// installed is renamed <name>.aember.rejected. Returns how many failed.
 int InstallPackages(const ContainerdOptions& options, bool allow_unsigned);
+
+/// How containerd installs packages: @p options' root and keys, its parser
+/// as the check of a package's config.json.
+utils::package::InstallOptions MakeInstallOptions(
+    const ContainerdOptions& options, bool allow_unsigned);
 
 /// Bridges from the "bridges" list of @p containers_json (name, address
 /// CIDR): created if missing, addressed, up. Returns how many failed.
