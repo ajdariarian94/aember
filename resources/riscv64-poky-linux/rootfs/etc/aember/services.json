@@ -4,10 +4,7 @@
       "name": "aember-netd"
     },
     {
-      "name": "aember-containerd",
-      "dependencies": [
-        "aember-netd"
-      ]
+      "name": "aember-containerd"
     }
   ]
 }

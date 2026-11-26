@@ -319,10 +319,13 @@ first:
   dependencies, each service's settings are
   `/usr/lib/aember/services/<name>/config.json` (aember's own from
   `services/<dir>/config.json`, a board's own from its overlay).
-- [ ] containerd's own dependency on netd (boards' services.json): only
-  containers that need the network need it; with per-container
-  dependencies on services, containers without network could start next
-  to netd (~0.5 s at boot on x64).
+- [x] containerd's own dependency on netd (2026-11-26): gone from every
+  board; a container that needs a service at its start lists it in
+  containers.json `"services"`, PID 1 publishes every service's state to
+  the daemons (ipc `services`). Follow-up: aember-auth and the fleet agent
+  could say `"services": ["aember-netd"]` in their aember-container.json
+  (aember-build-helper would carry it into container.json); today they
+  just retry (auth: after 5 s).
 - [ ] Fuzz more: `lxc.container.conf` handling, the debug shell's input.
 - [ ] Past bugs still without a regression test: loopback brought up by
   PID 1 (`AemberInit::BringUpLoopback` is private; a QEMU system test or a

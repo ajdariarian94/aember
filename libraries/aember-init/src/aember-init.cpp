@@ -620,10 +620,17 @@ void AemberInit::OnHeartbeat(const nlohmann::json& base) {
 void AemberInit::OnServiceStateChange(const std::string& name,
                                       ProcessState old_state,
                                       ProcessState new_state) {
+  std::map<std::string, std::string> states;
   {
     std::lock_guard lock{status_mutex_};
     daemon_status_.since_ms[name] = BootTimeMs();
+    service_states_[name] =
+        std::string{aember::utils::process::ToString(new_state)};
+    states = service_states_;
   }
+  // containerd starts containers that need a service once it runs; the
+  // hub keeps the latest for a daemon that starts (or restarts) later.
+  hub_.Publish("services", aember::utils::ipc::Services(states));
   log_.info("Service '{}': {} -> {}",
             name,
             aember::utils::process::ToString(old_state),

@@ -19,6 +19,7 @@ namespace aember::containerd {
 StartGraph::StartGraph(const std::vector<Node>& nodes) {
   // Duplicates: the first entry counts, the others are skipped.
   std::map<std::string, std::vector<std::string>> all;
+  std::map<std::string, std::vector<std::string>> services;
   std::vector<std::string> order;
   for (const auto& node : nodes) {
     if (all.contains(node.name)) {
@@ -26,6 +27,7 @@ StartGraph::StartGraph(const std::vector<Node>& nodes) {
       continue;
     }
     all[node.name] = node.dependencies;
+    services[node.name] = node.services;
     order.push_back(node.name);
   }
 
@@ -48,6 +50,7 @@ StartGraph::StartGraph(const std::vector<Node>& nodes) {
     if (good.contains(name)) {
       names_.push_back(name);
       deps_[name] = all[name];
+      services_[name] = services[name];
       continue;
     }
     std::string why;
@@ -102,11 +105,30 @@ void StartGraph::SetRunning(const std::string& name, bool running) {
   }
 }
 
+void StartGraph::SetServiceRunning(const std::string& service, bool running) {
+  if (running) {
+    services_running_.insert(service);
+  } else {
+    services_running_.erase(service);
+  }
+}
+
+std::set<std::string> StartGraph::NeededServices() const {
+  std::set<std::string> needed;
+  for (const auto& [name, list] : services_)
+    needed.insert(list.begin(), list.end());
+  return needed;
+}
+
 bool StartGraph::DependenciesRun(const std::string& name) const {
   const auto it = deps_.find(name);
-  return it != deps_.end() &&
-         std::ranges::all_of(it->second, [&](const std::string& d) {
-           return running_.contains(d);
+  if (it == deps_.end()) return false;
+  const auto& services = services_.at(name);
+  return std::ranges::all_of(
+             it->second,
+             [&](const std::string& d) { return running_.contains(d); }) &&
+         std::ranges::all_of(services, [&](const std::string& s) {
+           return services_running_.contains(s);
          });
 }
 

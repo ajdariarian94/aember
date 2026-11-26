@@ -64,6 +64,30 @@ TEST(StartGraphTest, IndependentEntriesStartTogether) {
   EXPECT_EQ(g.Depth(), 2);
 }
 
+// Containers that need a service (aember-netd) wait for PID 1 to report it
+// running; the others start next to the services instead of after them.
+TEST(StartGraphTest, AServiceDependencyWaitsForPid1sReport) {
+  StartGraph g{
+      {{.name = "auth", .dependencies = {}, .services = {"aember-netd"}},
+       {.name = "stats", .dependencies = {}},
+       {.name = "fleet",
+        .dependencies = {"auth"},
+        .services = {"aember-netd"}}}};
+  EXPECT_TRUE(g.Skipped().empty()) << "a service isn't a container: fine";
+  EXPECT_EQ(g.NeededServices(), std::set<std::string>{"aember-netd"});
+  for (const auto& n : g.Names()) g.Want(n);
+  EXPECT_EQ(g.TakeReady(), std::vector<std::string>{"stats"});
+  g.SetServiceRunning("aember-netd", true);
+  EXPECT_EQ(g.TakeReady(), std::vector<std::string>{"auth"});
+  g.SetRunning("auth", true);
+  // The service restarts: the next start waits again.
+  g.SetServiceRunning("aember-netd", false);
+  EXPECT_TRUE(g.TakeReady().empty()) << "fleet waits for aember-netd";
+  EXPECT_FALSE(g.DependenciesRun("fleet"));
+  g.SetServiceRunning("aember-netd", true);
+  EXPECT_EQ(g.TakeReady(), std::vector<std::string>{"fleet"});
+}
+
 TEST(StartGraphTest, BadEntriesAreSkippedTheRestStarts) {
   StartGraph g{{{"a", {}},
                 {"x", {"y"}},

@@ -34,7 +34,7 @@ aember's.
 {
   "services": [
     { "name": "aember-netd" },
-    { "name": "aember-containerd", "dependencies": ["aember-netd"] }
+    { "name": "aember-containerd" }
   ]
 }
 ```
@@ -87,7 +87,7 @@ else about a container is in its `.aember` package
   "containers": [
     { "name": "aember-stats" },
     { "name": "aember-monitor", "dependencies": ["aember-stats"] },
-    { "name": "my-app" }
+    { "name": "my-app", "services": ["aember-netd"] }
   ]
 }
 ```
@@ -97,6 +97,7 @@ else about a container is in its `.aember` package
 | `allow_unsigned` | bool | `false` | install packages without a signature (development boards; aember's own boards say `true`). Signed ones are checked against `/etc/aember/keys/*.pub` |
 | `containers[].name` | string | required | the container; its package is `<name>.aember`, installed at `/var/lib/aember/<name>/` |
 | `containers[].dependencies` | array of names | `[]` | containers that must run before this one starts (and again before a restart) |
+| `containers[].services` | array of names | `[]` | services (services.json) that must run before this one starts, e.g. `["aember-netd"]` for a container that needs the network at its start; PID 1 tells containerd their states |
 
 **Start order.** Containers that don't depend on each other start at the
 same time, each in its own thread of aember-containerd; one with
@@ -105,6 +106,13 @@ cycle, behind one, with a dependency that isn't listed, or listed twice is
 not started (logged); the rest are unaffected. At shutdown, dependents stop
 first. The design is checked in [spec/tla/StartGraph.tla](../spec/tla/StartGraph.tla).
 To start everything one after another, make each depend on the one before.
+
+**Next to the services.** aember-containerd doesn't wait for aember-netd
+(aember's boards list it without dependencies): containers start while the
+network comes up, about 0.5 s earlier on x64. Only a container that lists a
+service in `services` waits for it (and, after the service restarts, its
+next start waits again). A service that isn't in services.json is waited
+for forever (logged); without PID 1 (containerd run by hand) nothing waits.
 
 **Packages.** At its start, aember-containerd installs every
 `/var/lib/aember/packages/*.aember` (an update dropped there, a package

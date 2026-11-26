@@ -92,6 +92,18 @@ std::expected<BoardContainers, std::string> ParseBoardContainers(
         node.dependencies.push_back(d.get<std::string>());
       }
     }
+    if (const auto svc = entry.find("services"); svc != entry.end()) {
+      if (!svc->is_array()) {
+        return std::unexpected("'" + node.name +
+                               "': 'services' must be a list");
+      }
+      for (const auto& s : *svc) {
+        if (!s.is_string()) {
+          return std::unexpected("'" + node.name + "': services must be names");
+        }
+        node.services.push_back(s.get<std::string>());
+      }
+    }
     board.containers.push_back(std::move(node));
   }
   return board;

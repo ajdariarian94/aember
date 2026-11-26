@@ -25,6 +25,8 @@
 
 #include <chrono>
 #include <expected>
+#include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -97,6 +99,17 @@ std::string TypeOf(const nlohmann::json& message);
 /// debug shell owns the console (false) and when it is closed (true).
 nlohmann::json Console(bool enabled);
 
+/// PID 1 -> daemon: {"type": "services", "states": {name: state}}, the
+/// state of every service in services.json ("running", "starting", ...),
+/// sent again on every change. containerd starts containers that need a
+/// service (containers.json "services") once it runs.
+nlohmann::json Services(const std::map<std::string, std::string>& states);
+
+/// The states of a "services" message; nullopt for any other message or a
+/// malformed one (entries that aren't strings are dropped).
+std::optional<std::map<std::string, std::string>> ServiceStatesOf(
+    const nlohmann::json& message);
+
 /// Daemon side: apply a message from PID 1 (today: "console" mutes or
 /// unmutes the console log). False if it isn't a control message.
 bool ApplyControl(const nlohmann::json& message);
@@ -104,6 +117,9 @@ bool ApplyControl(const nlohmann::json& message);
 /// Daemon side: apply every message waiting on @p channel, without
 /// blocking. Call it right after Inherited() (PID 1 queues its state
 /// before the daemon starts) and whenever the channel is readable.
-void ReceiveControl(Channel& channel);
+/// Messages that aren't control messages go to @p other, if given.
+void ReceiveControl(
+    Channel& channel,
+    const std::function<void(const nlohmann::json&)>& other = {});
 
 }  // namespace aember::utils::ipc
