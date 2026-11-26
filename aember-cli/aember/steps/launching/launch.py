@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from aember.config.kernel import KERNEL_QUIET
 from aember.core.context import Context
 from aember.core.step import Step
 
@@ -45,7 +46,7 @@ class QemuProfile:
             "-drive",
             f"file={rootfs},{self.drive}",
             "-append",
-            f"{self.console} {self.root} rw rootwait {kernel_args}".rstrip(),
+            f"{self.console} {self.root} rw rootwait {KERNEL_QUIET} {kernel_args}".rstrip(),
             "-netdev",
             "user,id=net0",
             "-device",

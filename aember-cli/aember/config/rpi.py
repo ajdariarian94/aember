@@ -7,6 +7,8 @@ starts the kernel with cmdline.txt. Root is the ext4 second partition, found
 by its label (aember has no udev, RootManager reads the superblocks).
 """
 
+from aember.config.kernel import KERNEL_QUIET
+
 ARCHITECTURE = "aarch64-poky-linux"
 
 # raspberrypi/firmware release; files from its boot/ dir, verified by sha256.
@@ -47,7 +49,7 @@ disable_overscan=1
 # shell): the GPIO serial port. Add aember.shell=1 for a shell at boot.
 CMDLINE_TXT = (
     "console=tty1 console=ttyS1,115200 "
-    f"root=LABEL={ROOT_LABEL} rootfstype=ext4 rootwait rw\n"
+    f"root=LABEL={ROOT_LABEL} rootfstype=ext4 rootwait rw {KERNEL_QUIET}\n"
 )
 
 # Smoke test in QEMU (the Pi 3 machine: QEMU 8.2 has no raspi4b): same
@@ -57,7 +59,7 @@ CMDLINE_TXT = (
 # there; a real Pi counts down and gets the watchdog.
 QEMU_PI3_APPEND = (
     f"console=ttyAMA0,115200 root=LABEL={ROOT_LABEL} rootfstype=ext4 rootwait rw "
-    "aember.watchdog=0"
+    f"{KERNEL_QUIET} aember.watchdog=0"
 )
 
 # `aember rpi flash` refuses anything bigger (it's not an SD card) unless
