@@ -10,6 +10,7 @@
 #include <aember-libs/utils/netlink/netlink.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <ranges>
@@ -17,6 +18,7 @@
 #include <system_error>
 #include <utility>
 
+#include <sys/mount.h>
 #include <sys/wait.h>
 
 namespace aember::aember_init {
@@ -137,19 +139,15 @@ void AemberInit::StartRoot() {
   log_.info("Starting Aember in root mode{}",
             options_.chroot ? " (chroot)" : "");
 
-  // The status file exists from the start, so a container that reads it
-  // (aember-stats, through /host-logs) never finds it missing.
-  {
-    std::ofstream file{options_.log_dir + "/aember-status.json"};
-    file << "{}";
-  }
-
   Guarded(log_, "Mount phase", [this] {
     std::ignore = InitMounts().or_else([this](const Error& e) -> Result<> {
       log_.warn("Mount phase failed: {}", e.message);
       return {};
     });
   });
+
+  // /run is mounted now; before any service or container starts.
+  Guarded(log_, "Status file", [this] { SetUpStatusFile(); });
 
   // Loopback is PID 1's job, not the network service's: every board has it,
   // whatever manages the network (aember-netd, ConnMan or nothing), and
@@ -292,6 +290,32 @@ AemberInit::Result<> AemberInit::InitMounts() {
   }
 
   return {};
+}
+
+void AemberInit::SetUpStatusFile() {
+  // The status file exists from the start, so a container that reads it
+  // (aember-stats, through /host-logs) never finds it missing.
+  const std::string path = options_.log_dir + "/aember-status.json";
+  if (!std::filesystem::exists(path)) { std::ofstream{path} << "{}"; }
+  if (options_.chroot) return;  // the host's /var/log: leave it as it is
+
+  // It is rewritten every heartbeat (1 s). On the root file system that was
+  // an ext4 journal commit every 5 s, all day: flash wear on an SD card. So
+  // the file lives on /run (tmpfs) and is bind-mounted over its usual path,
+  // which keeps the path for readers on the device and, through
+  // containerd's recursive bind of /var/log, for the containers.
+  std::error_code ec;
+  std::filesystem::create_directories(kRuntimeStatusDir, ec);
+  const std::string runtime = std::string{kRuntimeStatusDir} + "/aember-status.json";
+  { std::ofstream{runtime} << "{}"; }
+  if (::mount(runtime.c_str(), path.c_str(), nullptr, MS_BIND, nullptr) != 0) {
+    log_.warn("Status file stays on {} (bind mount from {}: {})",
+              path,
+              runtime,
+              std::system_category().message(errno));
+    return;
+  }
+  log_.info("Status file {} is on {}", path, runtime);
 }
 
 AemberInit::Result<> AemberInit::InitServiceStack() {

@@ -4,10 +4,12 @@ QEMU (doc/performance.md). An aember system-test scenario file:
 
     aember systemtest --scenarios tools/perf/measure.py \\
         [--input runs=5] [--input idle=60] [--input binaries=DIR] \\
-        [--input label=O3]
+        [--input label=O3] [--input append="loglevel=7"]
 
 - runs: boots to measure (median and spread are reported).
 - idle: seconds of idle measured after everything is running.
+- append: extra kernel command line (e.g. loglevel=7 to undo the boards'
+  `quiet`, to measure what the console costs).
 - binaries: a directory with usr/bin/aember, usr/bin/aember-netd,
   usr/bin/aember-containerd (e.g. another optimisation level's build,
   tools/perf/variant.sh): they replace the rootfs's (PID 1 after the root
@@ -24,6 +26,8 @@ What is measured, per boot (all from the debug shell, BusyBox):
 - wakeups: voluntary + involuntary context switches of all threads of
   each process over the idle window, per second.
 - memory: VmRSS and Pss (smaps_rollup) and threads, at the end of idle.
+- disk writes: KiB written to the root disk (/proc/diskstats, the disk
+  that holds /) over the idle window, per minute: flash wear at idle.
 """
 
 from __future__ import annotations
@@ -83,6 +87,22 @@ def probe(vm: Vm, pids: dict[str, str]) -> dict[str, dict[str, int]]:
     return {name: by_pid[pid] for name, pid in pids.items() if pid in by_pid}
 
 
+# KiB written to the disk that holds / (sectors are 512 bytes).
+DISK_WRITES = r"""
+d=$(awk '$2 == "/" {print $1}' /proc/mounts | sed 's|/dev/||; s|p\?[0-9]*$||' | tail -1)
+awk -v d="$d" '$3 == d {print "W", $10 / 2}' /proc/diskstats
+"""
+
+
+def disk_written_kb(vm: Vm) -> float | None:
+    out = vm.sh(DISK_WRITES.strip(), timeout=30)
+    for line in out.splitlines():
+        parts = line.split()
+        if parts[:1] == ["W"] and len(parts) == 2:
+            return float(parts[1])
+    return None
+
+
 def init_started_ms(vm: Vm) -> int | None:
     """When the kernel ran /init: its dmesg timestamp."""
     _, out = vm.run("dmesg | grep -m1 'Run /init as init process'")
@@ -104,11 +124,13 @@ def one_boot(system: System, vm: Vm, idle: int) -> dict:
             pid = str(min(found))
         pids[name] = pid
     up = probe(vm, pids)
+    written_before = disk_written_kb(vm)
     # Idle without the debug shell: PID 1 polls an open shell every 200 ms.
     vm.close_shell()
     time.sleep(idle)
     vm.open_shell()
     after = probe(vm, pids)
+    written_after = disk_written_kb(vm)
     procs = {}
     for name in pids:
         a, b = up[name], after[name]
@@ -129,6 +151,11 @@ def one_boot(system: System, vm: Vm, idle: int) -> dict:
         "all_running_ms": timeline[-1][0] if timeline else None,
         "timeline": [{"since_ms": t, "name": n} for t, n, _ in timeline],
         "processes": procs,
+        "disk_writes_kb_per_min": (
+            round((written_after - written_before) * 60 / idle, 1)
+            if written_before is not None and written_after is not None
+            else None
+        ),
     }
 
 
@@ -148,6 +175,9 @@ def summarize(runs: list[dict]) -> dict:
         "all_running_ms": stat([r["all_running_ms"] for r in runs]),
         "entries_running_ms": {},
         "processes": {},
+        "disk_writes_kb_per_min": stat(
+            [r.get("disk_writes_kb_per_min") for r in runs]
+        ),
     }
     names = {e["name"] for r in runs for e in r["timeline"]}
     for n in sorted(names):
@@ -170,6 +200,7 @@ def measure(system: System) -> None:
     runs = int(system.inputs.get("runs", "5"))
     idle = int(system.inputs.get("idle", "60"))
     label = system.inputs.get("label", "packed")
+    append = system.inputs.get("append", "")
     rootfs = None
     if "binaries" in system.inputs:
         tree = Path(system.inputs["binaries"]).resolve()
@@ -179,7 +210,7 @@ def measure(system: System) -> None:
         rootfs = system.image_with(tree, f"measure-{label}")
     results = []
     for _ in range(runs):
-        with system.boot(rootfs=rootfs) as vm:
+        with system.boot(append=append, rootfs=rootfs) as vm:
             results.append(one_boot(system, vm, idle))
     report = {
         "label": label,
@@ -205,4 +236,8 @@ def measure(system: System) -> None:
             f"rss {v['rss_kb']['median']} kB, pss {v['pss_kb']['median']} kB, "
             f"{v['threads']['median']} threads"
         )
+    print(
+        f"[measure]   disk writes at idle: "
+        f"{s['disk_writes_kb_per_min'].get('median')} KiB/min"
+    )
     print(f"[measure] written to {path}")

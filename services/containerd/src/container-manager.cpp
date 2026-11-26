@@ -456,11 +456,12 @@ bool ContainerManager::Create(ContainerEntry& e) {
     std::filesystem::create_directories(container_host_logs, ec);
 
     // 3. Perform raw Linux MS_BIND mount (host /var/log -> container
-    // /host-logs)
+    // /host-logs). Recursive: PID 1's status file is a bind mount of a file
+    // on /run (tmpfs) over /var/log/aember-status.json.
     if (mount("/var/log",
               container_host_logs.c_str(),
               nullptr,
-              MS_BIND,
+              MS_BIND | MS_REC,
               nullptr) != 0) {
       log_.error("Failed to bind mount /var/log onto '{}': errno={} ({})",
                  container_host_logs,
@@ -589,6 +590,7 @@ bool ContainerManager::Stop(ContainerEntry& e) {
     const std::string lower_dir = fmt::format("{}-lower", e.config.rootfs);
 
     UnmountPath(e.config.rootfs + kInitInContainer, log_);
+    UnmountPath(e.config.rootfs + "/host-logs/aember-status.json", log_);
     UnmountPath(e.config.rootfs + "/host-logs", log_);
     UnmountPath(e.config.rootfs, log_);
     e.init_wrapper = false;

@@ -101,6 +101,10 @@ class AemberInit {
   // ---------------------------------------------------------------------------
 
   Result<> InitMounts();
+  /// The status file on tmpfs, bind-mounted over log_dir's (not in chroot).
+  void SetUpStatusFile();
+  /// Where the status file really is on the device (tmpfs).
+  static constexpr std::string_view kRuntimeStatusDir = "/run/aember";
   Result<> InitServiceStack();
   /// A message from a service started with "ipc" (aember-netd,
   /// aember-containerd, ...): readiness, network status, container state.
