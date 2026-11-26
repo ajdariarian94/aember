@@ -198,6 +198,8 @@ class System:
             new = {"name": name}
             if entry.get("dependencies"):
                 new["dependencies"] = entry["dependencies"]
+            if entry.get("services"):  # e.g. ["aember-netd"]
+                new["services"] = entry["services"]
             entries = [c for c in entries if c.get("name") != name] + [new]
         containers = {"bridges": containers.get("bridges", []), **containers}
         containers["containers"] = entries

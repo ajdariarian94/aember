@@ -52,6 +52,15 @@ TEST(BoardContainersTest, NamesAndDependencies) {
             std::vector<std::string>{"stats"});
 }
 
+TEST(BoardContainersTest, ServicesAContainerNeeds) {
+  const auto board = ParseBoardContainers(json::parse(R"({"containers": [
+      {"name": "auth", "services": ["aember-netd"]}, {"name": "stats"}]})"));
+  ASSERT_TRUE(board) << board.error();
+  EXPECT_EQ(board->containers[0].services,
+            std::vector<std::string>{"aember-netd"});
+  EXPECT_TRUE(board->containers[1].services.empty());
+}
+
 TEST(BoardContainersTest, Defaults) {
   const auto board = ParseBoardContainers(json::object());
   ASSERT_TRUE(board);
@@ -71,6 +80,8 @@ TEST(BoardContainersTest, RejectsMalformed) {
            R"({"containers": [{"name": "Upper"}]})",
            R"({"containers": [{"name": "a", "dependencies": "b"}]})",
            R"({"containers": [{"name": "a", "dependencies": [1]}]})",
+           R"({"containers": [{"name": "a", "services": "aember-netd"}]})",
+           R"({"containers": [{"name": "a", "services": [true]}]})",
        }) {
     EXPECT_FALSE(ParseBoardContainers(json::parse(text))) << text;
   }

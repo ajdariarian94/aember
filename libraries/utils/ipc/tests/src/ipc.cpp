@@ -18,6 +18,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -337,6 +338,37 @@ TEST(ControlTest, ApplyControlMutesTheConsoleLog) {
   EXPECT_FALSE(ipc::ApplyControl(ipc::Ready()));
   EXPECT_FALSE(ipc::ApplyControl(json{{"type", "console"}}));
   EXPECT_FALSE(ipc::ApplyControl(json{{"type", "console"}, {"enabled", 1}}));
+  EXPECT_TRUE(aember::utils::logging::console_logging_enabled());
+}
+
+// PID 1 -> containerd: every service's state (containers.json "services").
+TEST(ControlTest, ServiceStatesRoundTrip) {
+  const std::map<std::string, std::string> states{
+      {"aember-netd", "running"}, {"aember-containerd", "starting"}};
+  const auto message = ipc::Services(states);
+  EXPECT_EQ(ipc::TypeOf(message), "services");
+  EXPECT_EQ(ipc::ServiceStatesOf(message), states);
+  EXPECT_FALSE(ipc::ApplyControl(message)) << "not a console message";
+
+  EXPECT_FALSE(ipc::ServiceStatesOf(ipc::Ready()));
+  EXPECT_FALSE(ipc::ServiceStatesOf(json{{"type", "services"}}));
+  EXPECT_FALSE(
+      ipc::ServiceStatesOf(json{{"type", "services"}, {"states", "x"}}));
+  const auto some = ipc::ServiceStatesOf(
+      json{{"type", "services"}, {"states", {{"a", "running"}, {"b", 1}}}});
+  ASSERT_TRUE(some);
+  EXPECT_EQ(*some, (std::map<std::string, std::string>{{"a", "running"}}));
+}
+
+TEST(ControlTest, ReceiveControlHandsOtherMessagesOn) {
+  auto [mine, theirs] = MakePair();
+  ASSERT_TRUE(mine.Send(ipc::Console(false)));
+  ASSERT_TRUE(mine.Send(ipc::Services({{"aember-netd", "running"}})));
+  ASSERT_TRUE(mine.Send(ipc::Console(true)));
+  std::vector<std::string> other;
+  ipc::ReceiveControl(theirs,
+                      [&](const json& m) { other.push_back(ipc::TypeOf(m)); });
+  EXPECT_EQ(other, std::vector<std::string>{"services"});
   EXPECT_TRUE(aember::utils::logging::console_logging_enabled());
 }
 

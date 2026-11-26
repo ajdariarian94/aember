@@ -12,6 +12,10 @@
  *    in its own thread).
  *  - A restart wants the entry again: it waits for its dependencies too.
  *  - Stopping goes dependents first.
+ *  - An entry may also need services (aember-netd, ...) that PID 1 runs:
+ *    it starts only while they run too. PID 1 reports their states
+ *    (SetServiceRunning); containers without such a need start next to
+ *    the services instead of after them.
  *
  * Pure bookkeeping (no threads, no LXC): containerd's loop drives it.
  * @version 0.1
@@ -34,6 +38,8 @@ class StartGraph {
   struct Node {
     std::string name;
     std::vector<std::string> dependencies;
+    /// Services (services.json) that must run before this entry starts.
+    std::vector<std::string> services = {};
   };
 
   explicit StartGraph(const std::vector<Node>& nodes);
@@ -57,7 +63,12 @@ class StartGraph {
   /// SetRunning(name, false).
   void SetRunning(const std::string& name, bool running);
 
-  /// Every dependency of @p name runs.
+  /// PID 1 reported @p service (a services.json entry) running or not.
+  void SetServiceRunning(const std::string& service, bool running);
+  /// The services the entries need (to check them against PID 1's list).
+  [[nodiscard]] std::set<std::string> NeededServices() const;
+
+  /// Every dependency of @p name runs, and every service it needs.
   [[nodiscard]] bool DependenciesRun(const std::string& name) const;
   [[nodiscard]] bool IsRunning(const std::string& name) const;
   [[nodiscard]] bool IsWanted(const std::string& name) const;
@@ -73,6 +84,8 @@ class StartGraph {
  private:
   std::vector<std::string> names_;  ///< good entries, file order
   std::map<std::string, std::vector<std::string>> deps_;
+  std::map<std::string, std::vector<std::string>> services_;
+  std::set<std::string> services_running_;
   std::map<std::string, std::string> skipped_;
   std::set<std::string> wanted_;
   std::set<std::string> starting_;

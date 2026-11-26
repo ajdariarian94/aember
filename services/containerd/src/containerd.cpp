@@ -182,7 +182,33 @@ int RunContainerd(const ContainerdOptions& options) {
   if (!channel.Valid()) {
     log.warn("no channel to PID 1 on fd 3; running standalone");
   }
-  ipc::ReceiveControl(channel);  // muted if a debug shell is open
+  // PID 1's service states (containers.json "services"): the latest copy.
+  std::map<std::string, std::string> service_states;
+  bool have_service_states = false;
+  std::mutex states_mutex;  // the startup listener writes them too
+  const auto on_message = [&](const nlohmann::json& message) {
+    if (auto states = ipc::ServiceStatesOf(message)) {
+      std::lock_guard lock{states_mutex};
+      service_states = std::move(*states);
+      have_service_states = true;
+    }
+  };
+  // Muted if a debug shell is open; PID 1 queued the service states too.
+  ipc::ReceiveControl(channel, on_message);
+  // Until the loop below reads the channel, a thread does: containerd
+  // starts next to the other services, so a debug shell may open while it
+  // still sets up (bridges, package installs, configs), and its log must
+  // go quiet then like the rest. It is joined right before the loop.
+  std::jthread startup_listener;
+  if (channel.Valid()) {
+    startup_listener = std::jthread{[&](std::stop_token st) {
+      while (!st.stop_requested()) {
+        pollfd pfd{channel.Fd(), POLLIN, 0};
+        if (::poll(&pfd, 1, 50) > 0) ipc::ReceiveControl(channel, on_message);
+        if (channel.Closed()) return;
+      }
+    }};
+  }
   // Keeps what the console doesn't show while a debug shell is open.
   aember::utils::logging::enable_file_logging(options.log_file);
 
@@ -226,6 +252,26 @@ int RunContainerd(const ContainerdOptions& options) {
   StartGraph graph{board.containers};
   for (const auto& [name, why] : graph.Skipped()) {
     log.error("container '{}' not started: {}", name, why);
+  }
+  const auto apply_service_states = [&] {
+    std::lock_guard lock{states_mutex};
+    for (const auto& [service, state] : service_states) {
+      graph.SetServiceRunning(service, state == "running");
+    }
+  };
+  apply_service_states();
+  for (const auto& service : graph.NeededServices()) {
+    if (!channel.Valid()) {
+      // Standalone (no PID 1): nobody reports services; don't wait.
+      log.warn("no PID 1 to report '{}': not waiting for it", service);
+      graph.SetServiceRunning(service, true);
+    } else if (std::lock_guard lock{states_mutex};
+               have_service_states && !service_states.contains(service)) {
+      log.warn(
+          "a container needs service '{}', which isn't in services.json: it "
+          "waits until PID 1 runs it",
+          service);
+    }
   }
   std::vector<std::string> names;  // registered, in file order
   for (const auto& name : graph.Names()) {
@@ -401,6 +447,13 @@ int RunContainerd(const ContainerdOptions& options) {
     }
   };
 
+  // The loop reads PID 1's channel from here on.
+  if (startup_listener.joinable()) {
+    startup_listener.request_stop();
+    startup_listener.join();
+  }
+  ipc::ReceiveControl(channel, on_message);  // what came meanwhile
+  apply_service_states();
   launch_ready();
   bool ready_sent = false;
   aember::child_supervisor::ChildSupervisor reaper;
@@ -426,7 +479,8 @@ int RunContainerd(const ContainerdOptions& options) {
                             .count();
       timeout_ms = std::clamp(static_cast<int>(left), 0, timeout_ms);
     }
-    // fds[1]: PID 1's channel (console mute), fds[2]: the control socket,
+    // fds[1]: PID 1's channel (console mute, service states), fds[2]: the
+    // control socket,
     // fds[3]: a start finished; negative = ignored by poll.
     std::vector<pollfd> fds{{sigfd, POLLIN, 0},
                             {channel.Closed() ? -1 : channel.Fd(), POLLIN, 0},
@@ -449,7 +503,10 @@ int RunContainerd(const ContainerdOptions& options) {
         if (si.ssi_signo != SIGCHLD && si.ssi_signo != SIGHUP) stop = true;
       }
     }
-    if (fds[1].revents != 0) ipc::ReceiveControl(channel);
+    if (fds[1].revents != 0) {
+      ipc::ReceiveControl(channel, on_message);
+      apply_service_states();
+    }
     if ((fds[3].revents & POLLIN) != 0) {
       std::uint64_t count = 0;
       std::ignore = ::read(wake, &count, sizeof(count));

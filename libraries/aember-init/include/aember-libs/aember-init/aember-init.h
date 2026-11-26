@@ -197,6 +197,8 @@ class AemberInit {
   aember::utils::ipc::Hub hub_;
   std::mutex status_mutex_;
   DaemonStatus daemon_status_;
+  /// Every service's state as published to the daemons (status_mutex_).
+  std::map<std::string, std::string> service_states_;
 
   Logger log_;
 };

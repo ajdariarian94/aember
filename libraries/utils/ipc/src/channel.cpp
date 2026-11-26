@@ -127,10 +127,29 @@ bool ApplyControl(const nlohmann::json& message) {
   return true;
 }
 
-void ReceiveControl(Channel& channel) {
+nlohmann::json Services(const std::map<std::string, std::string>& states) {
+  nlohmann::json out = nlohmann::json::object();
+  for (const auto& [name, state] : states) out[name] = state;
+  return {{"type", "services"}, {"states", std::move(out)}};
+}
+
+std::optional<std::map<std::string, std::string>> ServiceStatesOf(
+    const nlohmann::json& message) {
+  if (TypeOf(message) != "services") return std::nullopt;
+  const auto it = message.find("states");
+  if (it == message.end() || !it->is_object()) return std::nullopt;
+  std::map<std::string, std::string> states;
+  for (const auto& [name, state] : it->items()) {
+    if (state.is_string()) states[name] = state.get<std::string>();
+  }
+  return states;
+}
+
+void ReceiveControl(Channel& channel,
+                    const std::function<void(const nlohmann::json&)>& other) {
   if (!channel.Valid()) return;
   while (auto message = channel.Receive(std::chrono::milliseconds{0})) {
-    ApplyControl(*message);
+    if (!ApplyControl(*message) && other) other(*message);
   }
 }
 
