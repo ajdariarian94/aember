@@ -306,7 +306,8 @@ void AemberInit::SetUpStatusFile() {
   // containerd's recursive bind of /var/log, for the containers.
   std::error_code ec;
   std::filesystem::create_directories(kRuntimeStatusDir, ec);
-  const std::string runtime = std::string{kRuntimeStatusDir} + "/aember-status.json";
+  const std::string runtime =
+      std::string{kRuntimeStatusDir} + "/aember-status.json";
   { std::ofstream{runtime} << "{}"; }
   if (::mount(runtime.c_str(), path.c_str(), nullptr, MS_BIND, nullptr) != 0) {
     log_.warn("Status file stays on {} (bind mount from {}: {})",
