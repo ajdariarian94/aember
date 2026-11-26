@@ -60,7 +60,9 @@ class MkfsTest(unittest.TestCase):
         self.assertIn(" /dev/sda1 ", cmd)
         self.assertIn(f"|| echo {MKFS_FAILED}", cmd)
         self.assertNotIn(" -L ", cmd)
-        self.assertIn(" -L aember-root /dev/sda2 ", mkfs_ext4("/dev/sda2", "aember-root"))
+        self.assertIn(
+            " -L aember-root /dev/sda2 ", mkfs_ext4("/dev/sda2", "aember-root")
+        )
 
 
 if __name__ == "__main__":

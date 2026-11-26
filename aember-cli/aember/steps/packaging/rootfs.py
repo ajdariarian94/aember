@@ -65,11 +65,7 @@ def run_guestfish(script: list[str], what: str, read_only: bool = False) -> str:
     # (e.g. copy-in hitting "No space left on device"): treat any libguestfs
     # error as a failure, never ship a half-written image.
     stdout = (result.stdout or b"").decode(errors="replace")
-    if (
-        result.returncode != 0
-        or "libguestfs: error" in stderr
-        or MKFS_FAILED in stdout
-    ):
+    if result.returncode != 0 or "libguestfs: error" in stderr or MKFS_FAILED in stdout:
         raise RuntimeError(
             f"guestfish failed building {what} "
             f"(exit {result.returncode}): {(stderr or stdout).strip()[-500:]}"

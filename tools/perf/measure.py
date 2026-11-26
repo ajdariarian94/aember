@@ -175,9 +175,7 @@ def summarize(runs: list[dict]) -> dict:
         "all_running_ms": stat([r["all_running_ms"] for r in runs]),
         "entries_running_ms": {},
         "processes": {},
-        "disk_writes_kb_per_min": stat(
-            [r.get("disk_writes_kb_per_min") for r in runs]
-        ),
+        "disk_writes_kb_per_min": stat([r.get("disk_writes_kb_per_min") for r in runs]),
     }
     names = {e["name"] for r in runs for e in r["timeline"]}
     for n in sorted(names):

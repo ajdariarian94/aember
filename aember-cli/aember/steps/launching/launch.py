@@ -46,7 +46,8 @@ class QemuProfile:
             "-drive",
             f"file={rootfs},{self.drive}",
             "-append",
-            f"{self.console} {self.root} rw rootwait {KERNEL_QUIET} {kernel_args}".rstrip(),
+            f"{self.console} {self.root} rw rootwait {KERNEL_QUIET} "
+            f"{kernel_args}".rstrip(),
             "-netdev",
             "user,id=net0",
             "-device",
