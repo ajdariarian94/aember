@@ -4,12 +4,17 @@ QEMU (doc/performance.md). An aember system-test scenario file:
 
     aember systemtest --scenarios tools/perf/measure.py \\
         [--input runs=5] [--input idle=60] [--input binaries=DIR] \\
-        [--input label=O3] [--input append="loglevel=7"]
+        [--input label=O3] [--input append="loglevel=7"] [--input smp=4]
+        [--input overlay=DIR]
 
 - runs: boots to measure (median and spread are reported).
 - idle: seconds of idle measured after everything is running.
 - append: extra kernel command line (e.g. loglevel=7 to undo the boards'
   `quiet`, to measure what the console costs).
+- smp: virtual CPUs (QEMU -smp; default 1). A Raspberry Pi 4 has 4: on one
+  vCPU, things that start in parallel only take turns.
+- overlay: a directory copied over a copy of the image (e.g. another
+  etc/aember/services.json), like binaries but without the check.
 - binaries: a directory with usr/bin/aember, usr/bin/aember-netd,
   usr/bin/aember-containerd (e.g. another optimisation level's build,
   tools/perf/variant.sh): they replace the rootfs's (PID 1 after the root
@@ -199,6 +204,8 @@ def measure(system: System) -> None:
     idle = int(system.inputs.get("idle", "60"))
     label = system.inputs.get("label", "packed")
     append = system.inputs.get("append", "")
+    smp = system.inputs.get("smp")
+    extra = ["-smp", smp] if smp else []
     rootfs = None
     if "binaries" in system.inputs:
         tree = Path(system.inputs["binaries"]).resolve()
@@ -206,9 +213,12 @@ def measure(system: System) -> None:
         if missing:
             raise AssertionError(f"binaries={tree}: missing {missing}")
         rootfs = system.image_with(tree, f"measure-{label}")
+    elif "overlay" in system.inputs:
+        tree = Path(system.inputs["overlay"]).resolve()
+        rootfs = system.image_with(tree, f"measure-{label}")
     results = []
     for _ in range(runs):
-        with system.boot(append=append, rootfs=rootfs) as vm:
+        with system.boot(append=append, extra_args=extra, rootfs=rootfs) as vm:
             results.append(one_boot(system, vm, idle))
     report = {
         "label": label,

@@ -63,15 +63,18 @@ image at all. A crash in them never takes PID 1 down.
   `config/libs.py`: liblxc for aember-containerd).
 - their config.json: `"ipc": true`, `"ready_timeout_ms":
   120000`, always restarted (`max_restarts` 0, 2 s), `stop_timeout_ms`
-  10 s (netd) / 60 s (containerd); containerd depends on netd in the
-  default configs (drop that when the board has no netd).
+  10 s (netd) / 60 s (containerd); containerd starts next to netd (no
+  dependency): a container that needs a service at its start lists it in
+  containers.json `"services"` (e.g. `["aember-netd"]`).
 - Channel: `utils/ipc` (`Channel`: SOCK_SEQPACKET socketpair, the daemon
   gets its end as **fd 3**, one JSON message per packet; `Hub`: PID 1's
   thread polling all channels). Messages: `{"type":"ready"}`,
   `{"type":"event","name":"network"|"container","data":{...}}`. PID 1
   keeps the last network status and container states for the heartbeat.
   PID 1 → daemon: `{"type":"console","enabled":bool}` (debug shell
-  open/closed) through `Hub::Publish`, which also sends the last value to
+  open/closed) and `{"type":"services","states":{name:state}}` (every
+  service's state, on each change; containerd's StartGraph waits on it)
+  through `Hub::Publish`, which also sends the last value to
   channels added later, never blocking; ProcessManager hands the channel
   to the hub *before* the fork, so it is waiting when the daemon starts.
   Daemons call `ipc::ReceiveControl` right after `Channel::Inherited()`
@@ -302,7 +305,14 @@ BusyBox stays in the image for the debug shell and interactive use.
   liblxc and the debug shell wait for their own children; a blind
   `waitpid(-1)` steals their status (ECHILD). The reaper thread calls
   `ChildSupervisor::ReapZombies()`: zombies found in `/proc`, tracked pids
-  at once, untracked ones after 2 s (an orphan nobody waits for).
+  at once, untracked ones after 2 s (an orphan nobody waits for). The scan
+  reads every process's stat, so it runs only after a SIGCHLD, while
+  `HasUntrackedZombies()`, or every 30 s; the reaper and run loop tick
+  every 3 s (`kTick`; `Alive()` allows 10 s). Don't add per-second work to
+  PID 1 or containerd: measure idle cost with `tools/perf/measure.py`.
+- The status file is `/run/aember/aember-status.json` (tmpfs),
+  bind-mounted over `/var/log/aember-status.json` (`SetUpStatusFile`; not
+  in chroot); containerd binds `/var/log` recursively so containers see it.
 - Don't hold a manager's mutex while calling another manager or a
   callback that may call back: they lock it again (std::mutex, not
   recursive). Both `ServiceManager::StopInternal` (container stop) and

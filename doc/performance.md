@@ -183,48 +183,99 @@ liblxc for each container's state: about 0.7 ms each time.
   - accepts a kernel message on a command's begin-marker line (it failed
     a boot now and then).
 
-## Left for after task 9
+## After task 9: the follow-ups (2026-11-26)
 
-These touch files task 9 (`.aember`, parallel start) is changing.
+Measured on main after task 9 (`main`) and with each step, same machine,
+x64 QEMU with KVM, five boots each, 60 s idle (30 s for the last two),
+`tools/perf/measure.py`. Since task 9 every boot runs three containers
+(echo, stats, the Qt monitor), so the numbers aren't comparable with the
+first round above.
 
-1. **`std::format` → fmt** in `libraries/aember-init/src/aember-init.cpp`,
-   `libraries/device-health/src/status.cpp` and
-   `services/containerd/src/container-manager.cpp`. Then no binary carries
-   both libraries: -47 KiB each for aember and containerd.
-2. **Liveness without 1 s ticks.**
-   - The reaper and the run loop wake every second only so that the
-     watchdog sees them alive.
-   - Ticking at the watchdog interval (timeout/3) instead would leave the
-     heartbeat as PID 1's only periodic work: about 2.1 wakeups/s instead
-     of 4.6.
-   - The reaper could then wait for SIGCHLD alone (`reap_pending_`), with
-     the long timeout only as a safety net.
-3. **The status file.**
-   - It is rewritten every second on the root file system: one ext4
-     journal commit every 5 s, all day. That is flash wear on SD cards.
-   - Either keep it on tmpfs (`/run`), with the containers' bind mount
-     following, or write only when something changed, keeping a cheaper
-     liveness signal for aember-stats and aember-monitor.
-   - That's 2 ms of CPU per beat on x64; expect 5-10 ms on a Pi.
-4. **containerd's 1 s poll.** Container exits already arrive as poll
-   events on their own descriptors. The state query can go to a longer interval, or be driven by
-   those events and by the control socket.
-5. **The image's file system.**
-   - A fresh image's first boot runs `ext4lazyinit`, which wrote about
-     32 MB in the first 30 s on x64.
-   - Making the file system with `-E lazy_itable_init=0,lazy_journal_init=0`
-     at pack time moves that work to the build machine. The packed image
-     gets bigger only where it was sparse.
-6. **Console output at boot.**
-   - Default the boards' kernel command line to `quiet`.
-   - Consider an `aember.loglevel=` option, so production boots don't
-     print the info lines.
-7. **Bigger libraries.**
-   - spdlog (150 KiB per binary) and nlohmann::json (90-120 KiB) are now
-     the largest parts.
-   - A small logger on fmt alone would save most of spdlog's share: about
-     0.4 MB over the three programs.
-   - Worth it only if size still matters after the steps above. Measure
-     first.
-8. **Raspberry Pi 4:** take the same numbers on the board (`perf` is
-   available there, and the UART cost is real).
+| | main | idle work, tmpfs status, ext4, quiet (#212) | + containers next to netd |
+|---|---:|---:|---:|
+| PID 1 idle CPU | 2284 ms/min | 475 ms/min | 462 ms/min |
+| PID 1 wakeups | 14.3/s | 3.5/s | 3.3/s |
+| containerd idle CPU | 963 ms/min | 7.3 ms/min | 6.7 ms/min |
+| containerd wakeups | 6.4/s | 0.13/s | 0.12/s |
+| netd idle CPU | 80 ms/min | 71 ms/min | 68 ms/min |
+| disk writes at idle | 16.8 MB/min | 16.6 MB/min | 224 KiB/min |
+| PID 1 PSS | 2116 kB | 2047 kB | 2084 kB |
+| all running (1 vCPU) | 3002 ms | 2908 ms | 3105 ms |
+
+Stripped `-Os` binaries (`tools/perf/variant.sh`), bytes:
+
+| | main | now |
+|---|---:|---:|
+| aember | 524168 | 466656 (-56 KiB) |
+| aember-containerd | 531976 | 474488 (-56 KiB) |
+| aember-netd | 347392 | 347392 |
+
+What each step was:
+
+1. **fmt instead of `std::format`** in aember-init, the status writer and
+   containerd: no program carries both (-56 KiB each, above).
+2. **Idle work.** Most of PID 1's and containerd's idle CPU was a scan of
+   `/proc`: PID 1's reaper and containerd's loop read every process's
+   `/proc/<n>/stat` on every wakeup to find their zombies, and the status
+   writer read every `/proc/<n>/status` each heartbeat to count PID 1's
+   children (the kernel has no `CONFIG_PROC_CHILDREN`); with the three
+   containers that is ~70 processes. Now:
+   - the scans use opendir/openat/read with a stack buffer (the stat
+     line, not the status file);
+   - PID 1's reaper scans only after a SIGCHLD, while an untracked zombie
+     waits out its grace period, or every 30 s as a safety net, and
+     ticks every 3 s otherwise (`Alive()` allows 10 s; every second while
+     a ready timeout is pending); the run loop ticks every 3 s;
+   - containerd's poll timeout is 10 s (every change wakes it anyway) and
+     it scans only after a SIGCHLD;
+   - the children count is reused for 10 s.
+   PID 1's remaining wakeups are mostly the heartbeat (1 s).
+3. **The status file on tmpfs:** `/run/aember/aember-status.json`,
+   bind-mounted over `/var/log/aember-status.json` (containerd binds
+   `/var/log` recursively, so the containers see it too). No more journal
+   commits for it.
+4. **ext4 without lazy init.** The 16 MB/min "at idle" was the kernel's
+   `ext4lazyinit` zeroing inode tables in the first minute (32 MB on a
+   fresh image). The images are now made by the guestfish appliance's
+   `mke2fs -E lazy_itable_init=0,lazy_journal_init=0` (guestfish's own
+   `mke2fs` call ignores those flags: its groups had no `ITABLE_ZEROED`).
+   What is left, ~0.2 MB/min, is the file logs. The packed image is
+   ~16 MB less sparse.
+5. **`quiet`** on every board's kernel command line (`--append
+   loglevel=7` for the full log). In QEMU it changed nothing measurable
+   (all running 3105 ms with `quiet`, 3034 ms without, same spread):
+   QEMU's serial port costs no time per byte. On a real 115200-baud UART
+   each line waits ~90 µs per byte; measure it on the Pi.
+6. **Containers next to aember-netd.** containerd no longer waits for netd
+   (services.json); a container that needs a service lists it in
+   containers.json `services`, PID 1 publishes the states. On one vCPU it
+   gains nothing (netd and the container starts take turns on the CPU:
+   3105 ms). With `--input smp=4` (a Pi 4 has four cores), same image,
+   five boots each:
+
+   | 4 vCPUs | aember-netd running | containers running | all running |
+   |---|---:|---:|---:|
+   | containerd after netd (old services.json) | 2328 | 2753-2759 | 2763 (2598-3025) |
+   | containerd next to netd | 2424 | 2653-2660 | 2668 (2348-2877) |
+
+   About 100 ms earlier, within the spread of a few runs: smaller than the
+   0.5 s estimated before task 9.
+
+`measure.py` gained `smp`, `append`, `overlay` (a tree copied over the
+image, e.g. another services.json) and the disk writes.
+
+## Left
+
+1. **Bigger libraries.** spdlog (150 KiB per binary) and nlohmann::json
+   (90-120 KiB) are the largest parts. A small logger on fmt alone would
+   save most of spdlog's share, about 0.4 MB over the three programs.
+2. **The heartbeat** is now PID 1's main periodic work (1 s: the status
+   JSON, built and rewritten). Every 2-5 s, or only on change plus a
+   slower liveness beat for aember-stats/aember-monitor, would take PID 1
+   to well under 1 wakeup/s.
+3. **aember-auth and the fleet agent** need the network: their
+   aember-container.json could say `"services": ["aember-netd"]`
+   (aember-build-helper would carry it into container.json). Today they
+   retry (auth after 5 s).
+4. **Raspberry Pi 4:** the same numbers on the board (`perf` is available
+   there, and the UART cost is real), with 4 cores for the parallel start.
