@@ -35,8 +35,9 @@ kernel ─► initramfs /init ─► usr/bin/aember            AemberInit::Start
                 └─ /usr/bin/aember-containerd  LXC containers + bridges (services/containerd)
 ```
 
-`executables/aember/main.cpp` is PID 1 only: CLI11 picks the mode
-(`--root`, `--chroot`). It contains no network or container code.
+`executables/aember/main.cpp` is PID 1 only: a two-flag parser picks the
+mode (`--root`, `--chroot`; no CLI11: it was 280 KiB of PID 1,
+doc/performance.md). It contains no network or container code.
 
 **Services (`services/`, own programs).** Network and containers are
 ordinary services: a board lists them in its `services.json` or doesn't
@@ -194,7 +195,7 @@ vcpkg/                  SUBMODULE (fork) incl. x64/aarch64-poky-linux triplets
 tools/godbolt/          Dockerfile: upstream Compiler Explorer at a pinned commit (`aember godbolt`)
 tools/triplets/         overlay triplets not in the submodule (arm-poky-linux, riscv64-poky-linux),
                         passed as VCPKG_OVERLAY_TRIPLETS by ConfigureStep
-vcpkg.json              cli11, gtest, nlohmann-json, spdlog
+vcpkg.json              gtest, nlohmann-json, spdlog
 spec/tla/               TLA+ models checked with TLC (spec/tla/check.sh, CI job `tla`):
                         StartGraph = start graph, restarts, shutdown; README.md
 doc/                    Doxyfile, changelog/ (written by `aember changelog`), configuration.md
@@ -859,20 +860,28 @@ same image, `.github/workflows/ci.yml`).
     `aember app configure` for each), ids `aember-x64`, `aember-aarch64`,
     `aember-arm`, `aember-riscv64` and `..._musl`; options = that build's
     flags for `FLAGS_FROM` (process-manager: `--sysroot`, `-march`, the
-    build's `-O2 ... -O3` (last wins), `-std=c++23`, defines, warnings,
+    build's `-O2 ... -Os` (last wins), `-std=c++23`, defines, warnings,
     `-isystem` vcpkg) plus every `-I` of the database, so any
     `#include <aember-libs/...>` works. Dropped: `-flto` (CE compiles one
     file), `-Werror`, `-g`, `-pipe`, `-o`/`-c`. objdump and c++filt are the
     SDK's of the same target; production mode (`NODE_ENV`), short links
     stored in /tmp of the container.
   - Use: paste a function (or `#include` its header and call it), compare
-    targets side by side ("Add new > Compiler"), add `-Os` in the options
-    box to see the size build; "Compile to binary" (objdump of the SDK)
+    targets side by side ("Add new > Compiler"), add `-O3` in the options
+    box to compare with the speed build (Release is `-Os`); "Compile to binary" (objdump of the SDK)
     shows the real encoding. `aember godbolt -f file.cpp` prints a link that
     opens with that file. Execution is off (cross compilers).
   - Measure before optimizing: which functions matter comes from the boot
-    timeline, `perf` and a size breakdown (task 10's measuring part,
-    TODO.md), not from reading assembly.
+    timeline, CPU and a size breakdown (doc/performance.md), not from
+    reading assembly.
+- **Performance** (doc/performance.md): `tools/perf/measure.py` (a
+  system-test scenario file: boot timeline, CPU from schedstat, wakeups,
+  RSS/PSS; `--input binaries=DIR` boots another build's programs),
+  `tools/perf/variant.sh` (the same code with other flags) and
+  `tools/perf/size.py` (bloaty by library). Release is `-Os`: the programs
+  mostly wait, `-O3` bought no measurable time and cost 18-24 % size.
+  Prefer fmt (spdlog's) over `std::format`: a binary with both carries
+  ~86 KiB twice.
 
 ## Coding conventions
 

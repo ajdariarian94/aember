@@ -16,11 +16,6 @@ project(
 
 # Dependencies
 find_package(
-  CLI11
-  CONFIG
-  REQUIRED
-)
-find_package(
   aember-libs
   REQUIRED
   COMPONENTS aember-init
@@ -38,7 +33,6 @@ add_executable(
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE aember-libs::aember-init
-          CLI11::CLI11
 )
 
 target_include_directories(

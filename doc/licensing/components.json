@@ -169,23 +169,6 @@
    "vcpkg": "fmt"
   },
   {
-   "id": "cli11",
-   "name": "CLI11",
-   "version": "2.5.0",
-   "license": "BSD-3-Clause",
-   "where": "inside aember's programs",
-   "detect": [
-    "usr/bin/aember"
-   ],
-   "url": "https://github.com/CLIUtils/CLI11",
-   "linking": "header-only, compiled in",
-   "texts": [
-    "BSD-3-Clause"
-   ],
-   "obligation": "keep the copyright notice (NOTICES)",
-   "vcpkg": "cli11"
-  },
-  {
    "id": "googletest",
    "name": "GoogleTest",
    "version": "1.17.0",

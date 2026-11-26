@@ -11,10 +11,11 @@
 #include <aember-libs/utils/netlink/netlink.h>
 #include <aember-services/netd/dhcp-client.h>
 
+#include <fmt/format.h>
+
 #include <array>
 #include <cerrno>
 #include <cstring>
-#include <format>
 #include <random>
 #include <system_error>
 
@@ -395,22 +396,22 @@ struct RawChannel {
   /// Error text, or "" when ready.
   std::string Open(const std::string& interface) {
     const int ifindex = static_cast<int>(::if_nametoindex(interface.c_str()));
-    if (ifindex == 0) return std::format("no interface {}", interface);
+    if (ifindex == 0) return fmt::format("no interface {}", interface);
     fd = ::socket(AF_PACKET, SOCK_DGRAM | SOCK_CLOEXEC, htons(ETH_P_IP));
     if (fd < 0)
-      return std::format("packet socket: {}",
+      return fmt::format("packet socket: {}",
                          std::system_category().message(errno));
     sockaddr_ll local{};
     local.sll_family = AF_PACKET;
     local.sll_protocol = htons(ETH_P_IP);
     local.sll_ifindex = ifindex;
     if (::bind(fd, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
-      return std::format(
+      return fmt::format(
           "bind {}: {}", interface, std::system_category().message(errno));
     }
     const auto m = InterfaceMac(fd, interface);
     if (!m) {
-      return std::format("no MAC address for {}: {}",
+      return fmt::format("no MAC address for {}: {}",
                          interface,
                          std::system_category().message(errno));
     }
@@ -461,7 +462,7 @@ std::expected<Lease, std::string> DhcpClient::Acquire(
   while (std::chrono::steady_clock::now() < deadline) {
     const std::uint32_t xid = rng();
     if (!ch.Send(BuildDiscover(xid, ch.mac))) {
-      return std::unexpected(std::format(
+      return std::unexpected(fmt::format(
           "send DISCOVER: {}", std::system_category().message(errno)));
     }
     const auto round_end =
@@ -472,7 +473,7 @@ std::expected<Lease, std::string> DhcpClient::Acquire(
 
     if (!ch.Send(BuildRequest(
             xid, ch.mac, offer->lease.address, offer->lease.server))) {
-      return std::unexpected(std::format(
+      return std::unexpected(fmt::format(
           "send REQUEST: {}", std::system_category().message(errno)));
     }
     const auto ack =
@@ -486,7 +487,7 @@ std::expected<Lease, std::string> DhcpClient::Acquire(
     // Some servers only put the address in yiaddr of the ACK.
     return Merge(ack->lease, offer->lease);
   }
-  return std::unexpected(std::format(
+  return std::unexpected(fmt::format(
       "no DHCP lease on {} within {} ms", interface_, timeout.count()));
 }
 
@@ -503,7 +504,7 @@ std::expected<Lease, RenewError> DhcpClient::Confirm(
     if (!ch.Send(BuildInitReboot(xid, ch.mac, address))) {
       return std::unexpected(
           RenewError{false,
-                     std::format("send REQUEST: {}",
+                     fmt::format("send REQUEST: {}",
                                  std::system_category().message(errno))});
     }
     const auto reply =
@@ -533,7 +534,7 @@ std::expected<Lease, RenewError> DhcpClient::Renew(
   const int fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
   if (fd < 0)
     return fail(
-        std::format("udp socket: {}", std::system_category().message(errno)));
+        fmt::format("udp socket: {}", std::system_category().message(errno)));
   struct Closer {
     int fd;
     ~Closer() { ::close(fd); }
@@ -546,7 +547,7 @@ std::expected<Lease, RenewError> DhcpClient::Renew(
                    SO_BINDTODEVICE,
                    interface_.c_str(),
                    static_cast<socklen_t>(interface_.size())) != 0) {
-    return fail(std::format(
+    return fail(fmt::format(
         "bind to {}: {}", interface_, std::system_category().message(errno)));
   }
   sockaddr_in local{};
@@ -554,7 +555,7 @@ std::expected<Lease, RenewError> DhcpClient::Renew(
   local.sin_port = htons(kClientPort);
   local.sin_addr.s_addr = htonl(INADDR_ANY);  // unicast and broadcast replies
   if (::bind(fd, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
-    return fail(std::format(
+    return fail(fmt::format(
         "bind :{}: {}", kClientPort, std::system_category().message(errno)));
   }
 
@@ -562,7 +563,7 @@ std::expected<Lease, RenewError> DhcpClient::Renew(
   if (const auto m = InterfaceMac(fd, interface_)) {
     mac = *m;
   } else {
-    return fail(std::format("no MAC address for {}", interface_));
+    return fail(fmt::format("no MAC address for {}", interface_));
   }
 
   sockaddr_in server{};
@@ -585,7 +586,7 @@ std::expected<Lease, RenewError> DhcpClient::Renew(
                  0,
                  reinterpret_cast<sockaddr*>(&server),
                  sizeof(server)) < 0) {
-      return fail(std::format("send REQUEST: {}",
+      return fail(fmt::format("send REQUEST: {}",
                               std::system_category().message(errno)));
     }
     const auto round_end =

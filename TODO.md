@@ -31,10 +31,19 @@ the boot timeline):
 
 - [x] `aember godbolt` (2026-11-25): a local Compiler Explorer with the
   SDK's cross compilers and aember's flags, to read PID 1's assembly.
-- [ ] Measure first: a boot timeline (when each service/container was
-  started and when it was running), `perf` on PID 1, and a size breakdown
-  of aember and its libraries (bloaty); then optimize the hot spots,
-  comparing the assembly before/after in `aember godbolt`.
+- [x] Measure first (2026-11-26, doc/performance.md): boot timeline, CPU
+  time (schedstat), wakeups, RSS/PSS (`tools/perf/measure.py`) and a size
+  breakdown (`tools/perf/size.py`, bloaty). Done from it: Release `-Os`
+  (same boot and idle as `-O3`, 18-24 % smaller), CLI11 out of PID 1, fmt
+  instead of `std::format` outside task 9's files: the three programs went
+  from 2.7 MB to 1.3 MB (x64).
+- [ ] After task 9 (doc/performance.md, "Left for after task 9"): the rest
+  of `std::format` (aember-init, status, container-manager); liveness
+  ticks at the watchdog interval instead of every second; the status file
+  off the root file system (flash wear) or written on change; containerd's
+  1 s poll; `lazy_itable_init=0` at pack; `quiet` on the boards' kernel
+  command line.
+- [ ] The same measurements on the Raspberry Pi 4 (with `perf`).
 
 ## Running without QEMU
 

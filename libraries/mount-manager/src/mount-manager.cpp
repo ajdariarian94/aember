@@ -10,10 +10,11 @@
 
 #include <aember-libs/mount-manager/mount-manager.h>
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <ranges>
 #include <system_error>
@@ -124,7 +125,7 @@ std::expected<MountManager::LoopDevice, std::string> MountManager::AttachLoop(
     std::string_view image) {
   const int file = ::open(std::string{image}.c_str(), O_RDONLY | O_CLOEXEC);
   if (file < 0) {
-    return std::unexpected(std::format(
+    return std::unexpected(fmt::format(
         "open {}: {}", image, std::system_category().message(errno)));
   }
   struct FdCloser {
@@ -136,7 +137,7 @@ std::expected<MountManager::LoopDevice, std::string> MountManager::AttachLoop(
 
   const int control = ::open("/dev/loop-control", O_RDWR | O_CLOEXEC);
   if (control < 0) {
-    return std::unexpected(std::format("open /dev/loop-control: {}",
+    return std::unexpected(fmt::format("open /dev/loop-control: {}",
                                        std::system_category().message(errno)));
   }
   FdCloser control_closer{control};
@@ -146,13 +147,13 @@ std::expected<MountManager::LoopDevice, std::string> MountManager::AttachLoop(
   for (int attempt = 0; attempt < 8; ++attempt) {
     const int n = ::ioctl(control, LOOP_CTL_GET_FREE);
     if (n < 0) {
-      return std::unexpected(std::format(
+      return std::unexpected(fmt::format(
           "LOOP_CTL_GET_FREE: {}", std::system_category().message(errno)));
     }
-    const auto device = std::format("/dev/loop{}", n);
+    const auto device = fmt::format("/dev/loop{}", n);
     const int loop = ::open(device.c_str(), O_RDONLY | O_CLOEXEC);
     if (loop < 0) {
-      return std::unexpected(std::format(
+      return std::unexpected(fmt::format(
           "open {}: {}", device, std::system_category().message(errno)));
     }
     LoopDevice handle{device, loop};  // keeps the fd open for the caller
@@ -170,7 +171,7 @@ std::expected<MountManager::LoopDevice, std::string> MountManager::AttachLoop(
     if (::ioctl(loop, LOOP_CONFIGURE, &config) == 0) return handle;
     if (errno != EBUSY) {
       return std::unexpected(
-          std::format("LOOP_CONFIGURE {}: {}",
+          fmt::format("LOOP_CONFIGURE {}: {}",
                       device,
                       std::system_category().message(errno)));
     }
@@ -212,7 +213,7 @@ bool MountManager::MountSquashFS(std::string_view image,
   log_.info("Mounted {} on {} via {}", image, target, loop->path);
 
   // Overlay a writable tmpfs on <target>/tmp.
-  const auto tmp_path = std::format("{}/tmp", target);
+  const auto tmp_path = fmt::format("{}/tmp", target);
   if (!EnsureDirectory(tmp_path)) {
     log_.warn("Could not ensure tmp directory at {}", tmp_path);
     return true;  // squashfs itself succeeded

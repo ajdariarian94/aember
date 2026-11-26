@@ -10,11 +10,12 @@
 
 #include <aember-libs/root-manager/root-manager.h>
 
+#include <fmt/format.h>
+
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <optional>
 #include <system_error>
@@ -141,9 +142,9 @@ bool RootManager::MountEssentialFilesystems() {
   log_.info("Moving essential filesystems to new root");
 
   const std::array moves{
-      std::pair{"/dev", std::format("{}/dev", new_root_path_)},
-      std::pair{"/proc", std::format("{}/proc", new_root_path_)},
-      std::pair{"/sys", std::format("{}/sys", new_root_path_)},
+      std::pair{"/dev", fmt::format("{}/dev", new_root_path_)},
+      std::pair{"/proc", fmt::format("{}/proc", new_root_path_)},
+      std::pair{"/sys", fmt::format("{}/sys", new_root_path_)},
   };
 
   for (const auto& [src, dst] : moves) {
@@ -295,7 +296,7 @@ std::optional<RootManager::Ext4Id> RootManager::ReadExt4Id(
   Ext4Id id;
   for (int i = 0; i < 16; ++i) {
     if (i == 4 || i == 6 || i == 8 || i == 10) { id.uuid += '-'; }
-    id.uuid += std::format("{:02x}", sb[0x68 + i]);
+    id.uuid += fmt::format("{:02x}", sb[0x68 + i]);
   }
   const auto* label = reinterpret_cast<const char*>(&sb[0x78]);
   id.label.assign(label, strnlen(label, 16));
