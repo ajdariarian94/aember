@@ -414,17 +414,33 @@ void AemberInit::StartReaperThread() {
   if (reaper_thread_.joinable()) return;
 
   reaper_thread_ = std::jthread{[this](std::stop_token st) {
+    auto last_scan = std::chrono::steady_clock::now();
     while (!st.stop_requested()) {
+      // SIGCHLD wakes it; otherwise it ticks for the watchdog (Alive()),
+      // every second only while a service's ready timeout is pending.
+      const bool awaiting_ready =
+          service_manager_ && service_manager_->AwaitingReady();
+      bool sigchld = false;
       {
         std::unique_lock lock{reap_mtx_};
-        reap_cv_.wait_for(lock, st, std::chrono::seconds(1), [this] {
-          return reap_pending_;
-        });
+        reap_cv_.wait_for(
+            lock, st, awaiting_ready ? std::chrono::seconds(1) : kTick, [this] {
+              return reap_pending_;
+            });
+        sigchld = reap_pending_;
         reap_pending_ = false;
       }
       reap_tick_ms_ = NowMs();
-      Guarded(log_, "Reaping", [this] {
-        ReapOnce();
+      Guarded(log_, "Reaping", [this, sigchld, &last_scan] {
+        // The scan reads every process's /proc stat: only after a SIGCHLD,
+        // while an untracked zombie waits out its grace period, and every
+        // kRescan as a safety net (a SIGCHLD lost to someone else's wait).
+        const auto now = std::chrono::steady_clock::now();
+        if (sigchld || child_supervisor_.HasUntrackedZombies() ||
+            now - last_scan >= kRescan) {
+          last_scan = now;
+          ReapOnce();
+        }
         if (service_manager_) { service_manager_->CheckReadyTimeouts(); }
       });
     }
@@ -455,7 +471,7 @@ std::int64_t AemberInit::NowMs() {
 }
 
 bool AemberInit::Alive() const {
-  // Both tick at least once a second; 10 s without a tick means stuck.
+  // Both tick at least every kTick (3 s); 10 s without a tick means stuck.
   // Until the run loop starts (services still starting), boot gets 2 min.
   constexpr std::int64_t kStaleMs = 10'000;
   constexpr std::int64_t kBootMs = 120'000;
@@ -518,7 +534,7 @@ void AemberInit::RunLoop() {
   loop_started_ = true;
   while (running_.load() && shutdown_.load() == ShutdownAction::kNone) {
     loop_tick_ms_ = NowMs();
-    cv_.wait_for(lock, std::chrono::seconds(1));
+    cv_.wait_for(lock, kTick);
   }
   log_.info("Aember Init run loop exiting");
 }

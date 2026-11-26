@@ -52,6 +52,9 @@ namespace aember::containerd {
 
 namespace {
 
+/// containerd's poll timeout when nothing is due (doc/performance.md).
+constexpr int kIdleTickMs = 10'000;
+
 using aember::containerd::ContainerState;
 using aember::containerd::ContainerStateToString;
 namespace ipc = aember::utils::ipc;
@@ -413,7 +416,10 @@ int RunContainerd(const ContainerdOptions& options) {
       log.info("containerd ready ({} container(s))", names.size());
     }
 
-    int timeout_ms = 1000;
+    // Everything that changes state wakes poll (signals, PID 1's channel,
+    // the control socket, a finished start, a container init's pidfd); the
+    // timeout is only the next due restart, or a safety tick.
+    int timeout_ms = reaper.HasUntrackedZombies() ? 1000 : kIdleTickMs;
     for (const auto& [name, at] : restart_at) {
       const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
                             at - Clock::now())
@@ -435,9 +441,11 @@ int RunContainerd(const ContainerdOptions& options) {
       break;
     }
 
+    bool sigchld = false;
     if ((fds[0].revents & POLLIN) != 0) {
       signalfd_siginfo si{};
       while (::read(sigfd, &si, sizeof(si)) == sizeof(si)) {
+        if (si.ssi_signo == SIGCHLD) sigchld = true;
         if (si.ssi_signo != SIGCHLD && si.ssi_signo != SIGHUP) stop = true;
       }
     }
@@ -475,7 +483,11 @@ int RunContainerd(const ContainerdOptions& options) {
     }
 
     // Our own children (helpers liblxc waits for itself are left to it).
-    std::ignore = reaper.ReapZombies();
+    // The scan reads every process's /proc stat: only after a SIGCHLD or
+    // while an untracked zombie waits out its grace period.
+    if (sigchld || reaper.HasUntrackedZombies()) {
+      std::ignore = reaper.ReapZombies();
+    }
   }
 
   // No new starts (spec/tla/StartGraph.tla, NoStartAfterShutdown); the ones

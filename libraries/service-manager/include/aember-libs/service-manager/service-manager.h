@@ -85,6 +85,10 @@ class ServiceManager {
   /** The service reported ready over its channel. */
   void MarkReady(std::string_view name);
 
+  /** Whether a service's ready timeout is still pending (boot, a restart):
+   *  then CheckReadyTimeouts() should run about every second. */
+  bool AwaitingReady() const;
+
   /** Treat services that didn't report ready within ready_timeout as up
    *  (logged), so their dependents don't wait forever. Call periodically. */
   void CheckReadyTimeouts();

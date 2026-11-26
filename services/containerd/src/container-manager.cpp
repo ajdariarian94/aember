@@ -12,12 +12,13 @@
 #include <aember-services/containerd/init-wrapper.h>
 #include <aember-services/containerd/lxc-api.h>
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
-#include <fmt/format.h>
 #include <fstream>
 #include <ranges>
 #include <sstream>

@@ -25,6 +25,7 @@
 #include <aember-libs/utils/watchdog/watchdog.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <expected>
@@ -88,6 +89,13 @@ class AemberInit {
   ShutdownAction RequestedShutdown() const { return shutdown_.load(); }
 
  private:
+  /// How often the reaper and the run loop tick when nothing happens: often
+  /// enough for Alive() (10 s stale limit), rare enough to leave the
+  /// heartbeat as PID 1's only per-second work.
+  static constexpr std::chrono::seconds kTick{3};
+  /// The reaper's /proc scan without a SIGCHLD, as a safety net.
+  static constexpr std::chrono::seconds kRescan{30};
+
   // ---------------------------------------------------------------------------
   // Init phases — each returns Result<> so failures chain cleanly
   // ---------------------------------------------------------------------------

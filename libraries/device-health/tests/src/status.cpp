@@ -91,6 +91,27 @@ TEST(StatusReporterTest, CountsChildrenBothWays) {
   EXPECT_EQ(StatusReporter::CountChildrenByScan(::getpid()), 0);
 }
 
+// The scan reads the ppid from each /proc/<n>/stat (parsed from the last
+// ')': comm may hold spaces and parentheses); other entries are skipped.
+TEST(StatusReporterTest, CountChildrenByScanParsesStatLines) {
+  const auto root = fs::temp_directory_path() /
+                    ("aember-status-proc-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  const auto stat = [&](const std::string& dir, const std::string& line) {
+    fs::create_directories(root / dir);
+    std::ofstream{root / dir / "stat"} << line << "\n";
+  };
+  stat("10", "10 (a (b) c) S 7 1 1");   // a child of 7
+  stat("11", "11 (x) R 7 1 1");         // another
+  stat("12", "12 (x) S 8 1 1");         // someone else's
+  stat("13", "13 (x)");                 // too short
+  stat("1x", "14 (x) S 7 1 1");         // not a pid directory
+  fs::create_directories(root / "15");  // no stat
+  EXPECT_EQ(StatusReporter::CountChildrenByScan(7, root), 2);
+  EXPECT_EQ(StatusReporter::CountChildren(7, root), 2);  // no children file
+  fs::remove_all(root);
+}
+
 TEST(StatusReporterTest, DefaultFileIsAemberStatusJson) {
   EXPECT_EQ(aember::device_health::kStatusFile, "/var/log/aember-status.json");
 }

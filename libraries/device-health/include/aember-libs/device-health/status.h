@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <filesystem>
 #include <string_view>
 
 #include <sys/types.h>
@@ -70,13 +71,23 @@ class StatusReporter {
   [[nodiscard]] static Pid1Stats ReadPid1Stats();
 
   /// Children of @p pid: /proc/<pid>/task/<pid>/children, or a scan of
-  /// every /proc/<n>/status PPid: line where that file doesn't exist
-  /// (kernels without CONFIG_PROC_CHILDREN).
-  static int CountChildren(pid_t pid);
-  static int CountChildrenByScan(pid_t pid);
+  /// the ppid in every /proc/<n>/stat where that file doesn't exist
+  /// (kernels without CONFIG_PROC_CHILDREN, like aember's).
+  static int CountChildren(pid_t pid,
+                           const std::filesystem::path& proc_root = "/proc");
+  static int CountChildrenByScan(
+      pid_t pid, const std::filesystem::path& proc_root = "/proc");
+
+  /// How long Snapshot() reuses the children count: the scan reads every
+  /// process's /proc stat, too much for every heartbeat.
+  static constexpr std::chrono::seconds kChildrenMaxAge{10};
 
  private:
   static long ReadUptimeSeconds();
+
+  /// Snapshot()'s cached children count and when it was taken.
+  mutable int children_{0};
+  mutable std::chrono::steady_clock::time_point children_at_{};
 
   std::chrono::steady_clock::time_point start_time_{
       std::chrono::steady_clock::now()};

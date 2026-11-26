@@ -7,11 +7,15 @@
 
 #include <aember-libs/child-supervisor/child-supervisor.h>
 
+#include <array>
 #include <charconv>
 #include <fstream>
+#include <string_view>
 #include <unordered_set>
 
+#include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -66,34 +70,47 @@ std::vector<pid_t> ChildSupervisor::ListZombieChildren(
   std::vector<pid_t> zombies;
   const pid_t self = ::getpid();
 
-  std::error_code ec;
-  for (const auto& entry : std::filesystem::directory_iterator{proc_root, ec}) {
-    const auto name = entry.path().filename().string();
+  // Plain syscalls and one stack buffer per entry: this runs over every
+  // process on the device (no CONFIG_PROC_CHILDREN), and ifstream + getline
+  // per /proc/<pid>/stat cost PID 1 milliseconds per scan.
+  DIR* dir = ::opendir(proc_root.c_str());
+  if (dir == nullptr) return zombies;
+  const int dir_fd = ::dirfd(dir);
+  std::array<char, 512> buf{};
+  while (const dirent* entry = ::readdir(dir)) {
+    const std::string_view name{entry->d_name};
     pid_t pid = 0;
     const auto [end, err] =
         std::from_chars(name.data(), name.data() + name.size(), pid);
     if (err != std::errc{} || end != name.data() + name.size()) { continue; }
 
+    const std::string stat_path = std::string{name} + "/stat";
+    const int fd = ::openat(dir_fd, stat_path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) { continue; }
+    const ssize_t n = ::read(fd, buf.data(), buf.size() - 1);
+    ::close(fd);
+    if (n <= 0) { continue; }
+
     // "<pid> (<comm>) <state> <ppid> ..." — comm may contain spaces and
     // parentheses, so parse from the last ')'.
-    std::ifstream stat{entry.path() / "stat"};
-    std::string line;
-    if (!std::getline(stat, line)) { continue; }
+    const std::string_view line{buf.data(), static_cast<std::size_t>(n)};
     const auto close = line.rfind(')');
-    if (close == std::string::npos || close + 2 >= line.size()) { continue; }
-
-    char state = 0;
+    if (close == std::string_view::npos || close + 4 >= line.size()) {
+      continue;
+    }
+    const char state = line[close + 2];
     pid_t ppid = 0;
-    const char* p = line.c_str() + close + 2;
-    state = *p;
-    const char* ppid_begin = p + 2;
-    const char* line_end = line.c_str() + line.size();
-    if (ppid_begin >= line_end) { continue; }
-    std::from_chars(ppid_begin, line_end, ppid);
+    std::from_chars(line.data() + close + 4, line.data() + line.size(), ppid);
 
     if (state == 'Z' && ppid == self) { zombies.push_back(pid); }
   }
+  ::closedir(dir);
   return zombies;
+}
+
+bool ChildSupervisor::HasUntrackedZombies() {
+  std::lock_guard lock{children_mutex_};
+  return !untracked_seen_.empty();
 }
 
 std::vector<ChildSupervisor::Exit> ChildSupervisor::ReapZombies(

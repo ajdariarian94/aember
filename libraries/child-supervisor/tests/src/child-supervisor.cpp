@@ -141,6 +141,33 @@ TEST_F(ChildSupervisorTest, ListZombieChildrenFindsOnlyZombies) {
   EXPECT_EQ(std::ranges::find(zombies, running), zombies.end());
 }
 
+// PID 1's reaper and containerd scan /proc only after a SIGCHLD, or while
+// this says an untracked zombie waits out its grace period.
+TEST_F(ChildSupervisorTest, HasUntrackedZombiesDuringTheGracePeriod) {
+  using aember::child_supervisor::ChildSupervisor;
+  using namespace std::chrono_literals;
+  ChildSupervisor supervisor;
+  EXPECT_FALSE(supervisor.HasUntrackedZombies());
+  const pid_t pid = ::fork();
+  ASSERT_GE(pid, 0);
+  if (pid == 0) ::_exit(0);  // untracked: never AddChild'ed
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+  const auto is_zombie = [pid] {
+    const auto zombies = ChildSupervisor::ListZombieChildren();
+    return std::ranges::find(zombies, pid) != zombies.end();
+  };
+  while (!is_zombie() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(10ms);
+  }
+  ASSERT_TRUE(is_zombie());
+  EXPECT_TRUE(supervisor.ReapZombies(1h).empty());  // within the grace
+  EXPECT_TRUE(supervisor.HasUntrackedZombies());
+  const auto exits = supervisor.ReapZombies(0ms);
+  ASSERT_EQ(exits.size(), 1u);
+  EXPECT_EQ(exits[0].pid, pid);
+  EXPECT_FALSE(supervisor.HasUntrackedZombies());
+}
+
 // A fake /proc with malformed entries: only well-formed stat lines count.
 TEST_F(ChildSupervisorTest, ProcParsingSkipsMalformedEntries) {
   namespace fs = std::filesystem;
