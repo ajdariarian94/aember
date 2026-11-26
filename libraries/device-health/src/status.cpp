@@ -13,7 +13,7 @@
 #include <charconv>
 #include <cmath>
 #include <filesystem>
-#include <format>
+#include <fmt/format.h>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -31,7 +31,7 @@ namespace aember::device_health {
 namespace {
 
 long read_status_field(pid_t pid, std::string_view field) {
-  std::ifstream f{std::format("/proc/{}/status", pid)};
+  std::ifstream f{fmt::format("/proc/{}/status", pid)};
   std::string line;
   while (std::getline(f, line)) {
     if (line.starts_with(field)) {
@@ -45,7 +45,7 @@ long read_status_field(pid_t pid, std::string_view field) {
 }
 
 int read_thread_count(pid_t pid) {
-  std::ifstream f{std::format("/proc/{}/status", pid)};
+  std::ifstream f{fmt::format("/proc/{}/status", pid)};
   std::string line;
   while (std::getline(f, line)) {
     if (line.starts_with("Threads:")) {
@@ -76,7 +76,7 @@ Pid1Stats StatusReporter::ReadPid1Stats() {
 }
 
 int StatusReporter::CountChildren(pid_t pid) {
-  const auto path = std::format("/proc/{}/task/{}/children", pid, pid);
+  const auto path = fmt::format("/proc/{}/task/{}/children", pid, pid);
   if (std::ifstream f{path}; f.is_open()) {
     std::string content;
     std::getline(f, content);
@@ -95,7 +95,7 @@ int StatusReporter::CountChildrenByScan(pid_t pid) {
     const auto name = entry.path().filename().string();
     if (!std::ranges::all_of(name, ::isdigit)) continue;
 
-    std::ifstream status{std::format("/proc/{}/status", name)};
+    std::ifstream status{fmt::format("/proc/{}/status", name)};
     std::string line;
     while (std::getline(status, line)) {
       if (line.starts_with("PPid:")) {

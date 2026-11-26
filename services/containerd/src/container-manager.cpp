@@ -17,7 +17,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
-#include <format>
+#include <fmt/format.h>
 #include <fstream>
 #include <ranges>
 #include <sstream>
@@ -402,9 +402,9 @@ bool ContainerManager::Create(ContainerEntry& e) {
       mount_manager_->IsMounted(e.config.rootfs)) {
     log_.info("Reusing the existing rootfs mount of '{}'", e.config.name);
   } else if (!e.config.squashfs.empty()) {
-    const std::string lower_dir = std::format("{}-lower", e.config.rootfs);
+    const std::string lower_dir = fmt::format("{}-lower", e.config.rootfs);
     const std::string overlay_base =
-        std::format("/tmp/aember-overlay/{}", e.config.name);
+        fmt::format("/tmp/aember-overlay/{}", e.config.name);
     const std::string upper_dir = overlay_base + "/upper";
     const std::string work_dir = overlay_base + "/work/work";
 
@@ -423,7 +423,7 @@ bool ContainerManager::Create(ContainerEntry& e) {
     }
 
     // Mount OverlayFS onto container rootfs
-    const std::string overlay_opts = std::format(
+    const std::string overlay_opts = fmt::format(
         "lowerdir={},upperdir={},workdir={}", lower_dir, upper_dir, work_dir);
 
     if (mount("overlay",
@@ -585,7 +585,7 @@ bool ContainerManager::Stop(ContainerEntry& e) {
   // overlay busy, so it was only detached lazily and the SquashFS under it
   // stayed in use), then the overlay, then the SquashFS lowerdir.
   if (!e.config.squashfs.empty()) {
-    const std::string lower_dir = std::format("{}-lower", e.config.rootfs);
+    const std::string lower_dir = fmt::format("{}-lower", e.config.rootfs);
 
     UnmountPath(e.config.rootfs + kInitInContainer, log_);
     UnmountPath(e.config.rootfs + "/host-logs", log_);
@@ -614,7 +614,7 @@ bool ContainerManager::Stop(ContainerEntry& e) {
     // Clean up temporary overlay work/upper directories
     std::error_code ec;
     std::filesystem::remove_all(
-        std::format("/tmp/aember-overlay/{}", e.config.name), ec);
+        fmt::format("/tmp/aember-overlay/{}", e.config.name), ec);
   }
 
   return stopped;
