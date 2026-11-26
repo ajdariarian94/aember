@@ -6,6 +6,7 @@
 #include <exception>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include <unistd.h>
 
@@ -60,14 +61,14 @@ int main(int argc, char** argv) {
   const Args args = Parse(argc, argv);
   if (::getpid() != 1) {
     if (args.help) {
-      std::fputs(kUsage.data(), stdout);
+      std::ignore = std::fputs(kUsage.data(), stdout);
       return EXIT_SUCCESS;
     }
     if (!args.bad.empty()) {
-      std::fprintf(stderr,
-                   "The following argument was not expected: %s\n"
-                   "Run with --help for more information.\n",
-                   args.bad.c_str());
+      std::ignore = std::fprintf(stderr,
+                                 "The following argument was not expected: %s\n"
+                                 "Run with --help for more information.\n",
+                                 args.bad.c_str());
       return 109;  // CLI11's exit code for extra arguments, as before
     }
   } else if (!args.bad.empty()) {
