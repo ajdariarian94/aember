@@ -187,6 +187,7 @@ struct Sandbox {
   init::InitOptions Options() const {
     return {.chroot = true,
             .config_dir = dir.string(),
+            .services_dir = (dir / "services").string(),
             .log_dir = dir.string(),
             .console = console};
   }
@@ -194,11 +195,23 @@ struct Sandbox {
   /// A std::vector, not a json: nlohmann turns a one-element braced list
   /// into that element instead of an array (that's how this test once
   /// wrote "processes": {...}).
+  /// services.json (names, dependencies) and one folder per service with
+  /// its config.json (the rest of each entry), as on a device.
   void Services(const std::vector<nlohmann::json>& processes) const {
     auto list = nlohmann::json::array();
-    for (const auto& p : processes) list.push_back(p);
+    for (auto p : processes) {
+      nlohmann::json item{{"name", p["name"]}};
+      if (p.contains("dependencies")) {
+        item["dependencies"] = p["dependencies"];
+        p.erase("dependencies");
+      }
+      list.push_back(item);
+      const auto folder = dir / "services" / p["name"].get<std::string>();
+      std::filesystem::create_directories(folder);
+      WriteFile(folder / "config.json", p.dump(2));
+    }
     WriteFile(dir / "services.json",
-              nlohmann::json{{"processes", list}}.dump(2));
+              nlohmann::json{{"services", list}}.dump(2));
   }
 
   /// A service running `sh -c <script>`; $D is the sandbox directory.

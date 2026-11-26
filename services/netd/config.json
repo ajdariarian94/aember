@@ -1,0 +1,11 @@
+{
+  "name": "aember-netd",
+  "description": "Network: interfaces, DHCP, DNS, connectivity (services/netd)",
+  "executable": "/usr/bin/aember-netd",
+  "ipc": true,
+  "ready_timeout_ms": 120000,
+  "restart_on_failure": true,
+  "max_restarts": 0,
+  "restart_delay_ms": 2000,
+  "stop_timeout_ms": 10000
+}

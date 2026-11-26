@@ -21,6 +21,8 @@
 
 #include <unistd.h>
 
+#include "services-files.h"
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -38,13 +40,11 @@ class ProcessConfigParserTest : public ::testing::Test {
   }
   void TearDown() override { fs::remove_all(dir_); }
 
-  /// Parse @p json; returns success, error in error_.
+  /// Parse @p json (written as services.json + one folder per service);
+  /// returns success, error in error_.
   bool Parse(const std::string& json) {
-    const auto path = dir_ / "services.json";
-    std::ofstream{path} << json;
-    error_ = {};
     bool ok = false;
-    EXPECT_NO_THROW(ok = parser_.ParseFile(path.string(), error_));
+    EXPECT_NO_THROW(ok = services_test::Parse(dir_, json, parser_, error_));
     return ok;
   }
 
@@ -129,8 +129,10 @@ TEST_F(ProcessConfigParserTest, RejectsBadFiles) {
   EXPECT_FALSE(Parse(""));
   EXPECT_FALSE(Parse("{"));
   EXPECT_FALSE(Parse("[]"));
-  EXPECT_FALSE(Parse(R"({"services": []})"));
   EXPECT_FALSE(Parse(R"({"processes": {}})"));
+  EXPECT_FALSE(Parse(R"({"services": {}})"));
+  EXPECT_FALSE(Parse(R"({"services": [{"name": "../x"}]})"));
+  EXPECT_FALSE(Parse(R"({"services": [{"name": "a", "dependencies": "b"}]})"));
   EXPECT_FALSE(error_.message.empty());
 
   ConfigError error;
@@ -186,6 +188,64 @@ TEST(ProcessStateTest, ToStringCoversEveryState) {
     EXPECT_NE(ToString(s), "unknown");
   }
   EXPECT_NE(ToString(ProcessState::Running), ToString(ProcessState::Stopped));
+}
+
+}  // namespace
+
+namespace {
+
+// services.json lists names and dependencies; each service's settings are in
+// its own folder.
+TEST(ServiceFoldersTest, SettingsFromTheFolderOrderFromServicesJson) {
+  const auto dir = fs::temp_directory_path() /
+                   ("aember-service-folders-" + std::to_string(::getpid()));
+  fs::create_directories(dir / "s" / "net");
+  fs::create_directories(dir / "s" / "app");
+  std::ofstream{dir / "s" / "net" / "config.json"}
+      << R"({"executable": "/usr/bin/net", "ipc": true})";
+  std::ofstream{dir / "s" / "app" / "config.json"}
+      << R"({"name": "app", "executable": "/usr/bin/app"})";
+  std::ofstream{dir / "services.json"} << R"({"services": [
+    {"name": "net"}, {"name": "app", "dependencies": ["net"]},
+    {"name": "gone"}]})";
+  ProcessConfigParser parser;
+  parser.SetServicesDir((dir / "s").string());
+  ConfigError error;
+  ASSERT_TRUE(parser.ParseFile((dir / "services.json").string(), error))
+      << error.message;
+  const auto& procs = parser.GetProcesses();
+  ASSERT_EQ(procs.size(), 2U);
+  EXPECT_EQ(procs[0].name, "net");  // the folder's name when it has none
+  EXPECT_TRUE(procs[0].ipc);
+  EXPECT_EQ(procs[1].dependencies, std::vector<std::string>{"net"});
+  // A service without its folder is skipped, the rest still load.
+  ASSERT_EQ(parser.GetSkipped().size(), 1U);
+  EXPECT_EQ(parser.GetSkipped()[0].first, "gone");
+  fs::remove_all(dir);
+}
+
+TEST(ServiceFoldersTest, DependenciesBelongInServicesJson) {
+  ConfigError error;
+  aember::utils::process::ProcessConfig cfg;
+  EXPECT_FALSE(ProcessConfigParser::ParseServiceConfig(
+      nlohmann::json::parse(
+          R"({"name": "a", "executable": "/a", "dependencies": ["b"]})"),
+      cfg,
+      error));
+  EXPECT_NE(error.message.find("services.json"), std::string::npos);
+}
+
+TEST(ServiceFoldersTest, TheOldFormatIsNamedInTheError) {
+  const auto dir = fs::temp_directory_path() /
+                   ("aember-service-old-" + std::to_string(::getpid()));
+  fs::create_directories(dir);
+  std::ofstream{dir / "services.json"}
+      << R"({"processes": [{"name": "a", "executable": "/a"}]})";
+  ProcessConfigParser parser;
+  ConfigError error;
+  EXPECT_FALSE(parser.ParseFile((dir / "services.json").string(), error));
+  EXPECT_NE(error.message.find("before service folders"), std::string::npos);
+  fs::remove_all(dir);
 }
 
 }  // namespace

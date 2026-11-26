@@ -41,6 +41,7 @@ bool ProcessConfigParser::ParseFile(const std::string& path,
   if (!LoadJsonFromFile(path, json, error)) { return false; }
 
   processes_.clear();
+  skipped_.clear();
   return Parse(json, error);
 }
 
@@ -54,25 +55,90 @@ const std::vector<ProcessConfig>& ProcessConfigParser::GetProcesses() const {
 
 bool ProcessConfigParser::Parse(const nlohmann::json& json,
                                 config::ConfigError& error) {
-  if (!json.is_object() || !json.contains("processes")) {
-    error = config::ConfigError("Missing or invalid 'processes' array");
+  if (json.is_object() && json.contains("processes")) {
+    error = config::ConfigError(
+        "services.json in the format before service folders: list "
+        "{\"name\", \"dependencies\"} under \"services\"; each service's "
+        "settings are in " +
+        services_dir_ + "/<name>/config.json");
+    return false;
+  }
+  if (!json.is_object() || !json.contains("services") ||
+      !json["services"].is_array()) {
+    error = config::ConfigError("Missing or invalid 'services' array");
     return false;
   }
 
-  if (!json["processes"].is_array()) {
-    error = config::ConfigError("'processes' must be an array");
-    return false;
-  }
+  for (const auto& item : json["services"]) {
+    if (!item.is_object() || !item.contains("name") ||
+        !item["name"].is_string()) {
+      error = config::ConfigError("A service entry without a 'name'");
+      return false;
+    }
+    const auto name = item["name"].get<std::string>();
+    if (name.empty() || name.front() == '.' ||
+        name.find('/') != std::string::npos) {
+      error = config::ConfigError("'" + name + "' is not a service name");
+      return false;
+    }
+    std::vector<std::string> dependencies;
+    if (item.contains("dependencies")) {
+      if (!item["dependencies"].is_array()) {
+        error = config::ConfigError("'" + name +
+                                    "': 'dependencies' must be an array");
+        return false;
+      }
+      for (const auto& dep : item["dependencies"]) {
+        if (!dep.is_string()) {
+          error =
+              config::ConfigError("'" + name + "': dependencies must be names");
+          return false;
+        }
+        dependencies.push_back(dep.get<std::string>());
+      }
+    }
 
-  for (const auto& item : json["processes"]) {
+    // The service's own settings; one that can't be read is skipped.
+    const std::string path = services_dir_ + "/" + name + "/config.json";
+    nlohmann::json settings;
+    config::ConfigError why;
     ProcessConfig cfg;
-
-    if (!ParseProcess(item, cfg, error)) { return false; }
-
+    if (!LoadJsonFromFile(path, settings, why)) {
+      skipped_.emplace_back(name, path + ": " + why.message);
+      continue;
+    }
+    if (settings.is_object() && !settings.contains("name")) {
+      settings["name"] = name;
+    }
+    if (!ParseServiceConfig(settings, cfg, why)) {
+      skipped_.emplace_back(name, path + ": " + why.message);
+      continue;
+    }
+    if (cfg.name != name) {
+      skipped_.emplace_back(name, path + ": names '" + cfg.name + "'");
+      continue;
+    }
+    cfg.dependencies = std::move(dependencies);
     processes_.push_back(std::move(cfg));
   }
 
   return true;
+}
+
+bool ProcessConfigParser::ParseServiceConfig(const nlohmann::json& json,
+                                             ProcessConfig& cfg,
+                                             config::ConfigError& error) {
+  if (!json.is_object()) {
+    error = config::ConfigError("not a JSON object");
+    return false;
+  }
+  if (json.contains("dependencies")) {
+    error = config::ConfigError(
+        "'dependencies' belong in services.json (the board decides the "
+        "order)");
+    return false;
+  }
+  return ParseProcess(json, cfg, error);
 }
 
 bool ProcessConfigParser::ParseProcess(const nlohmann::json& json,

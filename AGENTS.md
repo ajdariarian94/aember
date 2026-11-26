@@ -51,12 +51,17 @@ image at all. A crash in them never takes PID 1 down.
   `build/install/<arch>/<type>/services/`). How to write one:
   `services/README.md`. Headers: `<aember-services/<name>/...>`,
   namespaces `aember::netd`, `aember::containerd`.
+- Each service has its own folder: `services/<dir>/config.json` (its
+  settings: executable, ipc, timeouts, restart policy) is installed as
+  `/usr/lib/aember/services/<name>/config.json`; a board's own service
+  brings its folder in the overlay (it wins). services.json lists only
+  names and dependencies (`ProcessConfigParser`, `utils/services.py`).
 - Pack: only the services the overlay's `services.json` starts
-  (`/usr/bin/<name>` + a built `services/<name>`) go into `services_root`,
+  (`/usr/bin/<name>` + a built `services/<name>`, and its folder) go into `services_root`,
   a rootfs-only tree (no initramfs RAM), with the libraries they need
   that the initramfs doesn't have (NEEDED, plus `SERVICE_DLOPEN_LIBS` in
   `config/libs.py`: liblxc for aember-containerd).
-- services.json entries for them: `"ipc": true`, `"ready_timeout_ms":
+- their config.json: `"ipc": true`, `"ready_timeout_ms":
   120000`, always restarted (`max_restarts` 0, 2 s), `stop_timeout_ms`
   10 s (netd) / 60 s (containerd); containerd depends on netd in the
   default configs (drop that when the board has no netd).

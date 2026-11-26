@@ -21,6 +21,7 @@
 
 #include <unistd.h>
 
+#include "services-files.h"
 #include <aember-test/property.h>
 
 namespace {
@@ -49,7 +50,8 @@ unsigned int AnyUnsigned(Gen& g) {
 std::pair<ProcessConfig, nlohmann::json> RandomProcess(Gen& g) {
   ProcessConfig c;
   nlohmann::json j;
-  c.name = "s" + AnyText(g);
+  // A name that is also a folder name (each service has its own folder).
+  c.name = "s" + g.Text("abcdefghijklmnopqrstuvwxyz0123456789-_", 0, 12);
   c.executable = "/usr/bin/" + AnyText(g);
   j["name"] = c.name;
   j["executable"] = c.executable;
@@ -89,15 +91,13 @@ std::pair<ProcessConfig, nlohmann::json> RandomProcess(Gen& g) {
   return {c, j};
 }
 
-/// Parse @p json as services.json from a temp file.
+/// Parse @p text as services.json with one folder per service.
 bool ParseText(const std::string& text, ProcessConfigParser& parser,
                ConfigError& error) {
-  const std::string path =
-      std::filesystem::temp_directory_path() /
-      ("aember-services-" + std::to_string(::getpid()) + ".json");
-  std::ofstream{path} << text;
-  const bool ok = parser.ParseFile(path, error);
-  std::filesystem::remove(path);
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("aember-services-" + std::to_string(::getpid()));
+  const bool ok = services_test::Parse(dir, text, parser, error);
+  std::filesystem::remove_all(dir);
   return ok;
 }
 
@@ -123,6 +123,8 @@ TEST(ProcessConfigProperty, WhatIsWrittenComesBack) {
     nlohmann::json list = nlohmann::json::array();
     for (int i = g.Size(4); i > 0; --i) {
       auto [c, j] = RandomProcess(g);
+      c.name += "-" + std::to_string(i);  // one folder each
+      j["name"] = c.name;
       want.push_back(c);
       list.push_back(j);
     }

@@ -413,12 +413,16 @@ std::optional<ProcessManager::ProcessConfig> ProcessManager::GetConfig(
 // ---------------------------------------------------------------------------
 
 std::vector<ProcessManager::ProcessConfig> ProcessManager::LoadProcesses(
-    std::string_view source) {
+    std::string_view source, std::string_view services_dir) {
   aember::utils::config::ConfigError error;
 
+  parser_.SetServicesDir(std::string{services_dir});
   if (!parser_.ParseFile(std::string{source}, error)) {
     log_.error("Failed to load processes from '{}': {}", source, error.message);
     return {};
+  }
+  for (const auto& [name, why] : parser_.GetSkipped()) {
+    log_.error("Service '{}' not started: {}", name, why);
   }
 
   log_.info("Loaded process configs from '{}'", source);

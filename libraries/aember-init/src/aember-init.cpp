@@ -388,7 +388,8 @@ AemberInit::Result<> AemberInit::InitSignals() {
 
 AemberInit::Result<> AemberInit::LoadAndRegisterProcesses(
     std::string_view path) {
-  auto configs = process_manager_->LoadProcesses(std::string{path});
+  auto configs =
+      process_manager_->LoadProcesses(std::string{path}, options_.services_dir);
   log_.info("Loaded {} process config(s) from {}", configs.size(), path);
 
   // A plain loop: AddProcess has a side effect, so it must run exactly once

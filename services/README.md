@@ -51,7 +51,9 @@ binaries `<something>-unittest` and install them to
 `${CMAKE_INSTALL_BINDIR}/tests`; `aember test` then runs them (see
 `netd/tests/`).
 
-Then list it in `resources/<arch>/rootfs/etc/aember/services.json`:
+Give it its settings in `config.json` next to its code
+(`services/<dir>/config.json`; `aember app pack` installs it as
+`/usr/lib/aember/services/<name>/config.json`):
 
 ```json
 {
@@ -59,12 +61,19 @@ Then list it in `resources/<arch>/rootfs/etc/aember/services.json`:
   "executable": "/usr/bin/aember-hello",
   "ipc": true,
   "ready_timeout_ms": 10000,
-  "dependencies": ["aember-netd"],
   "restart_on_failure": true,
   "max_restarts": 0,
   "restart_delay_ms": 2000,
   "stop_timeout_ms": 5000
 }
+```
+
+Then list it, with what it needs first, in
+`resources/<arch>/rootfs/etc/aember/services.json`:
+
+```json
+{"services": [{"name": "aember-netd"},
+              {"name": "aember-hello", "dependencies": ["aember-netd"]}]}
 ```
 
 `max_restarts` 0 means "always restart". The executable must be

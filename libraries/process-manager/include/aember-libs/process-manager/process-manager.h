@@ -133,7 +133,11 @@ class ProcessManager {
   // Config loading
   // ---------------------------------------------------------------------------
 
-  std::vector<ProcessConfig> LoadProcesses(std::string_view source);
+  /// services.json at @p source, each service's settings from
+  /// @p services_dir/<name>/config.json (skipped ones are logged).
+  std::vector<ProcessConfig> LoadProcesses(
+      std::string_view source,
+      std::string_view services_dir = aember::utils::process::kServicesDir);
 
  private:
   pid_t SpawnProcess(const ProcessConfig& config);

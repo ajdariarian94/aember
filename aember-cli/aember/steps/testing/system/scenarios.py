@@ -213,7 +213,18 @@ class System:
         return self.image_with(tree, label)
 
     def services(self) -> list[dict]:
-        return self.config("services.json").get("processes", [])
+        """services.json's entries (name, dependencies)."""
+        return self.config("services.json").get("services", [])
+
+    def service_config(self, name: str) -> dict:
+        """The config.json in a service's folder (executable, timeouts)."""
+        path = f"usr/lib/aember/services/{name}/config.json"
+        for tree in ("services_root", "overlay_root"):
+            file = self.package_dir / tree / path
+            if file.is_file():
+                return json.loads(file.read_text())
+        text = self.image_file(f"/{path}")
+        return json.loads(text) if text else {}
 
     def containers(self) -> list[dict]:
         """containers.json's entries (name, dependencies)."""
@@ -383,7 +394,7 @@ def service_restart(system: System) -> None:
     service = next((s for s in system.services() if s["name"] == KILLED_SERVICE), None)
     if not service:
         raise AssertionError(f"{KILLED_SERVICE} isn't in services.json")
-    exe = service["executable"]
+    exe = system.service_config(KILLED_SERVICE)["executable"]
     with system.boot() as vm:
         vm.wait_ready(UP_TIMEOUT)
         vm.open_shell()

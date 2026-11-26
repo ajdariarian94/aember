@@ -315,8 +315,10 @@ first:
   `/var/lib/aember/<name>/`. x64 KVM boot, everything running: 3.53-3.63 s
   before, 2.82-3.23 s after (the three containers now come up within
   ~30 ms of each other instead of ~0.25 s apart).
-- [ ] Services the same way: services.json only names and dependencies,
-  each service's settings in its own folder (`config.json`).
+- [x] Services the same way (2026-11-26): services.json lists names and
+  dependencies, each service's settings are
+  `/usr/lib/aember/services/<name>/config.json` (aember's own from
+  `services/<dir>/config.json`, a board's own from its overlay).
 - [ ] containerd's own dependency on netd (boards' services.json): only
   containers that need the network need it; with per-container
   dependencies on services, containers without network could start next

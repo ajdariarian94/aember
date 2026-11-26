@@ -204,7 +204,7 @@ class ScenarioTest(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         etc = tmp / "overlay_root" / "etc" / "aember"
         etc.mkdir(parents=True)
-        (etc / "services.json").write_text('{"processes": [{"name": "a"}]}')
+        (etc / "services.json").write_text('{"services": [{"name": "a"}]}')
         system = System(QEMU_PROFILES["x64-poky-linux"], tmp, tmp)
         self.assertEqual(system.services(), [{"name": "a"}])
         self.assertEqual(system.containers(), [])

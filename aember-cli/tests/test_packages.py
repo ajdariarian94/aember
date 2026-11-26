@@ -179,8 +179,14 @@ class FetchFilterTest(_Fixture):
 
 class ServiceExecutablesTest(_Fixture):
     def check(self, *executables):
-        processes = [{"name": Path(e).name, "executable": e} for e in executables]
-        (self.etc / "services.json").write_text(json.dumps({"processes": processes}))
+        names = [Path(e).name for e in executables]
+        (self.etc / "services.json").write_text(
+            json.dumps({"services": [{"name": n} for n in names]})
+        )
+        for name, exe in zip(names, executables):
+            folder = self.overlay / "usr/lib/aember/services" / name
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "config.json").write_text(json.dumps({"executable": exe}))
         ctx = Context(architecture=ARCH, build_type="Release", root=self.root)
         PackStep().check_service_executables(ctx, [self.dest, self.overlay])
 
@@ -194,6 +200,15 @@ class ServiceExecutablesTest(_Fixture):
         self.stage()
         with self.assertRaisesRegex(FileNotFoundError, "packages.json"):
             self.check("/usr/sbin/dropbear")
+
+    def test_a_service_without_its_folder_fails(self):
+        self.stage()
+        (self.etc / "services.json").write_text(
+            json.dumps({"services": [{"name": "nowhere"}]})
+        )
+        ctx = Context(architecture=ARCH, build_type="Release", root=self.root)
+        with self.assertRaisesRegex(FileNotFoundError, "nowhere"):
+            PackStep().check_service_executables(ctx, [self.dest, self.overlay])
 
 
 if __name__ == "__main__":

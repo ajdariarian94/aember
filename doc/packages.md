@@ -27,14 +27,21 @@ have (an SSH server without its package) fails the pack.
 
 Time sync needs no package: BusyBox has `ntpd`.
 
+**A service of a package** is two things in the board's overlay: its
+folder, `usr/lib/aember/services/<name>/config.json` (the settings below),
+and its name in `etc/aember/services.json`, with what it needs first:
+`{"name": "dropbear", "dependencies": ["aember-netd"]}`.
+
 ## SSH (`dropbear`)
+
+`usr/lib/aember/services/dropbear/config.json`, listed in services.json
+with `"dependencies": ["aember-netd"]`:
 
 ```json
 {
   "name": "dropbear",
   "executable": "/usr/sbin/dropbear",
   "args": ["-F", "-E", "-R", "-p", "22"],
-  "dependencies": ["aember-netd"],
   "restart_on_failure": true, "max_restarts": 0, "restart_delay_ms": 2000
 }
 ```
@@ -49,12 +56,14 @@ console.
 Boards without a real-time clock (the Raspberry Pi) start in the past;
 TLS in containers and log times need the right time.
 
+`usr/lib/aember/services/ntpd/config.json`, listed with
+`"dependencies": ["aember-netd"]`:
+
 ```json
 {
   "name": "ntpd",
   "executable": "/bin/busybox",
   "args": ["ntpd", "-n", "-p", "pool.ntp.org"],
-  "dependencies": ["aember-netd"],
   "restart_on_failure": true, "max_restarts": 0, "restart_delay_ms": 10000
 }
 ```
@@ -94,7 +103,8 @@ partition from a service.
    of `psk`. Enterprise networks: `key_mgmt=WPA-EAP` with PEAP, TTLS or
    TLS.
 
-4. The service:
+4. The service (`usr/lib/aember/services/wpa_supplicant/config.json`, and
+   `{"name": "wpa_supplicant"}` in services.json):
 
    ```json
    {
@@ -158,16 +168,24 @@ the `wifi` package too: `{"packages": ["wifi", "connman"]}`.
   up:
 
   ```json
+  {"services": [
+    {"name": "dbus"},
+    {"name": "wpa_supplicant", "dependencies": ["dbus"]},
+    {"name": "connman", "dependencies": ["dbus", "wpa_supplicant"]},
+    {"name": "aember-containerd", "dependencies": ["connman"]}]}
+  ```
+
+  and their folders, `usr/lib/aember/services/<name>/config.json`:
+
+  ```json
   {"name": "dbus", "executable": "/bin/sh",
    "args": ["-c", "mkdir -p /run/dbus; [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id; exec /usr/bin/dbus-daemon --system --nofork --nopidfile"],
-   "restart_on_failure": true, "max_restarts": 0, "restart_delay_ms": 2000},
+   "restart_on_failure": true, "max_restarts": 0, "restart_delay_ms": 2000}
   {"name": "wpa_supplicant", "executable": "/bin/sh",
    "args": ["-c", "while [ ! -S /run/dbus/system_bus_socket ]; do sleep 0.2; done; exec /usr/sbin/wpa_supplicant -u"],
-   "dependencies": ["dbus"],
-   "restart_on_failure": true, "max_restarts": 0, "restart_delay_ms": 3000},
+   "restart_on_failure": true, "max_restarts": 0, "restart_delay_ms": 3000}
   {"name": "connman", "executable": "/bin/sh",
    "args": ["-c", "while [ ! -S /run/dbus/system_bus_socket ]; do sleep 0.2; done; exec /usr/sbin/connmand -n"],
-   "dependencies": ["dbus", "wpa_supplicant"],
    "restart_on_failure": true, "max_restarts": 0, "restart_delay_ms": 3000}
   ```
 

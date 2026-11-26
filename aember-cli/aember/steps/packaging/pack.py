@@ -9,6 +9,7 @@ from aember.core.context import Context
 from aember.core.step import Step
 from aember.steps.cmake.sdk_build import build_dir, install_dir
 from aember.utils.packages import listed_packages
+from aember.utils.services import SERVICES_DIR, service_config, service_names
 
 from .busybox import install_busybox
 from .initramfs import create_initramfs_tree, pack_initramfs
@@ -118,23 +119,34 @@ class PackStep(Step):
     def copy_services(self, ctx: Context, services_root: Path) -> list[Path]:
         """
         The services (built from services/) that this board's services.json
-        starts, into services_root/usr/bin. Only the rootfs gets this tree:
-        services run after the switch to the real root, so they cost no
-        initramfs RAM, and a service nobody lists isn't packed at all.
+        starts, into services_root/usr/bin, each with its folder
+        (usr/lib/aember/services/<name>/config.json, from
+        services/<dir>/config.json; one the overlay brings itself stays the
+        overlay's). Only the rootfs gets this tree: services run after the
+        switch to the real root, so they cost no initramfs RAM, and a service
+        nobody lists isn't packed at all.
         """
         if services_root.exists():
             shutil.rmtree(services_root)
         built = ctx.data["install_dir"] / "services"
-        services_json = self.overlay_dir(ctx) / "etc" / "aember" / "services.json"
+        overlay = self.overlay_dir(ctx)
         try:
-            processes = json.loads(services_json.read_text())["processes"]
-        except (OSError, ValueError, KeyError, TypeError) as e:
-            log.warning("Cannot read %s (%s): no services packed", services_json, e)
+            entries = service_names(overlay)
+        except ValueError as e:
+            log.warning("%s: no services packed", e)
             return []
 
         packed: list[Path] = []
-        for entry in processes:
-            exe = Path(str(entry.get("executable", "")))
+        for entry in entries:
+            found = service_config(entry["name"], overlay, ctx.root)
+            if found is None:
+                continue  # check_service_executables reports it
+            config, source = found
+            if not source.is_relative_to(overlay):
+                folder = services_root / SERVICES_DIR / entry["name"]
+                folder.mkdir(parents=True, exist_ok=True)
+                (folder / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+            exe = Path(str(config.get("executable", "")))
             src = built / exe.name
             if exe.parent != Path("/usr/bin") or not src.is_file():
                 continue  # not one of ours (BusyBox, ConnMan, ...)
@@ -152,27 +164,34 @@ class PackStep(Step):
         return packed
 
     def check_service_executables(self, ctx: Context, trees: list[Path]) -> None:
-        """Every executable services.json starts must be in the image: one
-        that isn't (an SSH server without its package) would only restart
-        forever on the device."""
-        services_json = self.overlay_dir(ctx) / "etc" / "aember" / "services.json"
+        """Every service services.json starts must have its folder and its
+        executable in the image: one that doesn't (an SSH server without its
+        package) would never start, or restart forever, on the device."""
+        overlay = self.overlay_dir(ctx)
         try:
-            processes = json.loads(services_json.read_text())["processes"]
-        except (OSError, ValueError, KeyError, TypeError):
+            entries = service_names(overlay)
+        except ValueError:
             return  # copy_services already warned
         missing = []
-        for entry in processes:
-            exe = str(entry.get("executable", "")).lstrip("/")
+        for entry in entries:
+            found = service_config(entry["name"], overlay, ctx.root)
+            if found is None:
+                missing.append(
+                    f"{entry['name']} (no {SERVICES_DIR}/{entry['name']}/config.json)"
+                )
+                continue
+            exe = str(found[0].get("executable", "")).lstrip("/")
             if exe and not any(
                 (t / exe).exists() or (t / exe).is_symlink() for t in trees
             ):
-                missing.append(f"{entry.get('name', exe)} (/{exe})")
+                missing.append(f"{entry['name']} (/{exe})")
         if missing:
             raise FileNotFoundError(
-                "services.json starts programs the image doesn't have: "
+                "services.json starts services the image doesn't have: "
                 + ", ".join(missing)
                 + ". A program from an opt-in package needs the package in "
-                "etc/aember/packages.json."
+                "etc/aember/packages.json; a service of the board's own needs "
+                f"its folder in the overlay ({SERVICES_DIR}/<name>/)."
             )
 
     def copy_kernel(self, ctx: Context, package_dir: Path) -> Path:

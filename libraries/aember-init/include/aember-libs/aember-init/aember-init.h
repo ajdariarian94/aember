@@ -47,6 +47,8 @@ struct InitOptions {
   bool chroot = false;
   /// Where services.json and modules.json are.
   std::string config_dir = "/etc/aember";
+  /// Where each service's folder (<name>/config.json) is.
+  std::string services_dir = "/usr/lib/aember/services";
   /// Where aember-init.log and aember-status.json go.
   std::string log_dir = "/var/log";
   /// The debug shell's console.
