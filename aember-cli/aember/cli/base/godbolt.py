@@ -60,7 +60,19 @@ def godbolt(
     url = f"http://localhost:{port}/"
     typer.echo(f"Compiler Explorer: {url}")
     typer.echo("Compilers: " + ", ".join(c.id for c in compilers))
+    with_libs = [c.arch for c in compilers if c.library]
+    if with_libs:
+        typer.echo(
+            "aember's libraries (Libraries menu, then Compile to binary): "
+            + ", ".join(with_libs)
+        )
     if file:
+        first = compilers[0]
+        state = ce.session_state(
+            file.read_text(),
+            first.id,
+            library_id=first.library_id if first.library else "",
+        )
         typer.echo("With your file:")
-        typer.echo(ce.client_state_url(url, file.read_text(), compilers[0].id))
+        typer.echo(ce.file_link(f"http://127.0.0.1:{port}", state, public=url))
     typer.echo("Stop it with: aember godbolt --stop")

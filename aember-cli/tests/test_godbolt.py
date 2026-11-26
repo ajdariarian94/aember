@@ -2,6 +2,7 @@
 Explorer config written from them, the docker command and the source link."""
 
 import base64
+import io
 import json
 import tempfile
 import unittest
@@ -175,16 +176,185 @@ class DockerAndLinkTest(unittest.TestCase):
         dockerfile = Path(__file__).parents[2] / "tools/godbolt/Dockerfile"
         self.assertIn(ce.IMAGE.split(":")[1], dockerfile.read_text())
 
-    def test_client_state_link_carries_source_and_compiler(self):
-        url = ce.client_state_url(
-            "http://localhost:1/", "int f();", "aember-x64", "-Os"
-        )
+    def test_client_state_link_carries_source_compiler_and_libraries(self):
+        state = ce.session_state("int f();", "aember-x64", "-Os", "aember_x64_libs")
+        url = ce.client_state_url("http://localhost:1/", state)
         prefix = "http://localhost:1/clientstate/"
         self.assertTrue(url.startswith(prefix))
         state = json.loads(base64.urlsafe_b64decode(url[len(prefix) :]))
         session = state["sessions"][0]
         self.assertEqual(session["source"], "int f();")
-        self.assertEqual(session["compilers"], [{"id": "aember-x64", "options": "-Os"}])
+        self.assertEqual(
+            session["compilers"],
+            [
+                {
+                    "id": "aember-x64",
+                    "options": "-Os",
+                    "libs": [{"id": "aember_x64_libs", "ver": "build"}],
+                }
+            ],
+        )
+        no_libs = ce.session_state("x", "aember-x64")["sessions"][0]["compilers"]
+        self.assertNotIn("libs", no_libs[0])
+
+    def test_server_accepts_long_links(self):
+        # Regression: `aember godbolt -f` of process-manager.cpp printed a
+        # 22 KB /clientstate/ link; node's 16 KiB header limit answered 431.
+        joined = " ".join(ce.docker_run_command("/h", 1, 1, 1))
+        self.assertIn(
+            f"NODE_OPTIONS=--max-http-header-size={ce.MAX_HEADER_BYTES}", joined
+        )
+        self.assertGreaterEqual(ce.MAX_HEADER_BYTES, 1024 * 1024)
+
+
+class _Reply(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class ShortLinkTest(unittest.TestCase):
+    def test_short_link_posts_the_state_and_prints_our_host(self):
+        seen = {}
+
+        def opener(req, timeout):
+            seen["url"], seen["body"] = req.full_url, json.loads(req.data)
+            return _Reply(b'{"url": "http://127.0.0.1:10240/z/AbC123"}')
+
+        state = ce.session_state("x" * 30000, "aember-x64")
+        link = ce.file_link(
+            "http://127.0.0.1:10240", state, opener, public="http://localhost:10240/"
+        )
+        self.assertEqual(link, "http://localhost:10240/z/AbC123")
+        self.assertEqual(seen["url"], "http://127.0.0.1:10240/api/shortener")
+        self.assertEqual(seen["body"], state)
+
+    def test_long_link_when_the_shortener_fails(self):
+        def opener(req, timeout):
+            raise OSError("connection refused")
+
+        state = ce.session_state("int f();", "aember-x64")
+        link = ce.file_link("http://127.0.0.1:1", state, opener, public="http://h:1/")
+        self.assertTrue(link.startswith("http://h:1/clientstate/"))
+
+
+EXPORTS = {
+    # An aember-libs export tree as CMake installs it (abridged).
+    "utils/utilsTargets.cmake": """
+add_library(aember-libs::utils::logging STATIC IMPORTED)
+
+set_target_properties(aember-libs::utils::logging PROPERTIES
+  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include"
+  INTERFACE_LINK_LIBRARIES "spdlog::spdlog"
+)
+
+add_library(aember-libs::utils::mount INTERFACE IMPORTED)
+
+add_library(aember-libs::utils::package STATIC IMPORTED)
+
+set_target_properties(aember-libs::utils::package PROPERTIES
+  INTERFACE_LINK_LIBRARIES "nlohmann_json::nlohmann_json;\\$<LINK_ONLY:LibLZMA::LibLZMA>"
+)
+""",  # noqa: E501
+    "utils/utilsTargets-release.cmake": """
+set_target_properties(aember-libs::utils::logging PROPERTIES
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libutils_logging.a"
+  )
+set_target_properties(aember-libs::utils::package PROPERTIES
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libutils_package.a"
+  )
+""",
+    "mount-manager/mount-managerTargets.cmake": """
+add_library(aember-libs::mount-manager STATIC IMPORTED)
+
+set_target_properties(aember-libs::mount-manager PROPERTIES
+  INTERFACE_LINK_LIBRARIES "aember-libs::utils::logging;aember-libs::utils::mount"
+)
+""",
+    "mount-manager/mount-managerTargets-release.cmake": """
+set_target_properties(aember-libs::mount-manager PROPERTIES
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libmount-manager_aember-libs.a"
+  )
+""",
+    "root-manager/root-managerTargets.cmake": """
+add_library(aember-libs::root-manager STATIC IMPORTED)
+
+set_target_properties(aember-libs::root-manager PROPERTIES
+  INTERFACE_LINK_LIBRARIES "aember-libs::mount-manager;aember-libs::utils::logging"
+)
+""",
+    "root-manager/root-managerTargets-release.cmake": """
+set_target_properties(aember-libs::root-manager PROPERTIES
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libroot-manager_aember-libs.a"
+  )
+""",
+}
+
+
+def export_tree(root: Path, arch: str = "x64-poky-linux") -> Path:
+    base = root / "build/install" / arch / "Release/lib/cmake/aember-libs"
+    for rel, text in EXPORTS.items():
+        (base / rel).parent.mkdir(parents=True, exist_ok=True)
+        (base / rel).write_text(text)
+    return base
+
+
+class LibrariesTest(unittest.TestCase):
+    def test_link_order_puts_each_library_before_what_it_needs(self):
+        # Regression: `-l` in the options box comes before the compiled
+        # source on CE's command line, so nothing resolved; the libraries
+        # go through CE's Libraries mechanism, in dependency order.
+        with tempfile.TemporaryDirectory() as tmp:
+            links = ce.link_order(export_tree(Path(tmp)))
+        aember = [n for n in links if "_" in n]
+        for before, after in [
+            ("root-manager_aember-libs", "mount-manager_aember-libs"),
+            ("mount-manager_aember-libs", "utils_logging"),
+            ("root-manager_aember-libs", "utils_logging"),
+        ]:
+            self.assertLess(aember.index(before), aember.index(after))
+        # Third-party ones last, spdlog before fmt; header-only and
+        # INTERFACE targets link nothing.
+        self.assertEqual(links[len(aember) :], ["lzma", "spdlog", "fmt"])
+        self.assertNotIn("nlohmann_json", " ".join(links))
+        self.assertEqual(len(links), len(set(links)))
+
+    def test_find_library_paths_are_the_containers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            export_tree(root)
+            vcpkg = "build/configure/x64-poky-linux/Release/vcpkg_installed"
+            (root / vcpkg / "x64-poky-linux/lib").mkdir(parents=True)
+            lib = ce.find_library(root, "x64-poky-linux", "Release")
+            self.assertIsNone(ce.find_library(root, "arm-poky-linux", "Release"))
+        install = "/aember_ws/aember/build/install/x64-poky-linux/Release"
+        self.assertEqual(lib.include, install + "/include")
+        self.assertEqual(
+            lib.libpath,
+            [install + "/lib", f"/aember_ws/aember/{vcpkg}/x64-poky-linux/lib"],
+        )
+
+    def test_properties_give_each_compiler_its_own_libraries(self):
+        lib = ce.Library("/i", ["/l1", "/l2"], ["a", "b"])
+        x64 = ce.Compiler("x64-poky-linux", "/s/x-g++", [], lib)
+        arm = ce.Compiler("aarch64-poky-linux", "/s/a-g++", [])
+        props = dict(
+            line.split("=", 1)
+            for line in ce.properties([x64, arm]).splitlines()
+            if "=" in line
+        )
+        self.assertEqual(props["libs"], "aember_x64_libs")
+        self.assertEqual(
+            props["compiler.aember-x64.supportsLibraries"], "aember_x64_libs"
+        )
+        self.assertNotIn("compiler.aember-aarch64.supportsLibraries", props)
+        v = "libs.aember_x64_libs.versions.build"
+        self.assertEqual(props["libs.aember_x64_libs.versions"], "build")
+        self.assertEqual(props[v + ".path"], "/i")
+        self.assertEqual(props[v + ".libpath"], "/l1:/l2")
+        self.assertEqual(props[v + ".staticliblink"], "a:b")
 
 
 if __name__ == "__main__":
