@@ -21,6 +21,7 @@ from .base.fuzz import fuzz
 from .base.mutate import mutate
 from .base.systemtest import systemtest
 from .base.godbolt import godbolt
+from .package import commands as package_commands
 from .qemu.build import build_qemu
 from .rpi import commands as rpi_commands
 from .usb import commands as usb_commands
@@ -116,3 +117,11 @@ usb_app.command("image")(usb_commands.image)
 usb_app.command("flash")(usb_commands.flash)
 usb_app.command("launch")(usb_commands.launch)
 aember.add_typer(usb_app, name="usb")
+
+package_app = typer.Typer(
+    help=".aember packages: keys, make, inspect (doc/aember-format.md)"
+)
+package_app.command("keygen")(package_commands.keygen)
+package_app.command("create")(package_commands.create)
+package_app.command("inspect")(package_commands.inspect)
+aember.add_typer(package_app, name="package")

@@ -181,6 +181,7 @@ all 8 targets, with the opt-in packages).
 .devcontainer/          Ubuntu 24.04 dev image (published as ghcr.io/ajdariarian94/aember-dev
                         by .github/workflows/dev-image.yml; pulled, never built)
 aember-cli/             the `aember` CLI (Python, Typer): cli/, steps/, config/, utils/
+third_party/            vendored sources, unmodified (monocypher: SHA-512, Ed25519); not linted or analyzed
 CMakeLists.txt          Superbuild: ExternalProject libraries → executables, services
                         project VERSION here is the app version (CLI reads it)
 libraries/              aember-libs: one static lib per dir, + utils/<x>
@@ -226,7 +227,7 @@ under `include/aember-libs/<lib>/`, CMake target `aember-libs::<lib>`.
 | `child-supervisor`  | Tracks service pids; `ReapZombies()` is PID 1's only reaper (see below) |
 | `service-manager`   | PID 1's service supervisor: dependency order, readiness, stop order |
 | `device-health`     | Heartbeat + `StatusReporter`: PID 1's status file `/var/log/aember-status.json` (read by the aember-stats container) |
-| `utils/*`           | config, ipc (service channels), logging (spdlog), module, mount, netlink (rtnetlink), process, root, shell, signal (signalfd + epoll) |
+| `utils/*`           | config, ipc (service channels), logging (spdlog), module, mount, netlink (rtnetlink), package (`.aember`: verify, unpack, install, rollback; doc/aember-format.md), process, root, shell, signal (signalfd + epoll) |
 
 Services (`services/<name>/`, not libraries): `netd` (interfaces, DHCP,
 DNS, connectivity; `network.json`), `containerd` (LXC lifecycle, bridges;
@@ -665,6 +666,7 @@ same image, `.github/workflows/ci.yml`).
 | `aember mutate -k <unit> [-n N] [--root]` | mutation testing of one unit (a library/service directory with `tests/`, or one of its suites): one operator at a time changed in its `src/*.cpp`, all its suites rebuilt and run against each mutant (`--root`: as root, each in a read-only sandbox); survivors = lines no test checks (`build/mutation/<unit>.json` and `.md`); `--list` names the units with their mutant counts. Weekly in CI for every unit (`.github/workflows/mutation.yml`) |
 | `aember fuzz [-k <target>] [--time S] [-j N]` | libFuzzer + ASan + UBSan over the code that reads input (`fuzz/`): each target for S seconds (60), up to 4 at once; failing inputs in `build/fuzz/crashes/<target>/`, logs in `build/fuzz/<target>.log`; `--list` names them |
 | `aember systemtest [-k <scenario>] [--timeout-scale F] [--kvm/--no-kvm]` | system tests: each scenario boots the packed image (`aember app pack`, Release by default) in its own QEMU and checks the whole system through the serial console; `--list` names them; consoles in `build/system-tests/<arch>/`; `--scenarios FILE --input k=v` runs another repository's scenarios, `--package-dir` boots another image |
+| `aember package keygen <name>` / `create --config --lxc --image [--key]` / `inspect FILE [--keys DIR] [--extract DIR]` | `.aember` packages (doc/aember-format.md): an Ed25519 key pair (.key private, .pub for `etc/aember/keys/`), a package from its three files, a package's footer, signature and contents. Python side: `aember/utils/aember_package.py` + `ed25519.py` (pure Python, RFC 8032; no crypto library in the dev image); device side: `libraries/utils/package` |
 | `aember godbolt [--port N] [-f FILE] [--build-type T]` / `--stop` | local Compiler Explorer: upstream's, pinned (`tools/godbolt/Dockerfile`), in Docker on 127.0.0.1; one compiler per target configured under `build/configure/<arch>/<type>/` with that build's flags (see "Compiler Explorer" below) |
 
 | `aember lint [--check]` | ruff, black, clang-format, cmake-format, cmakelint; `--check` changes nothing and fails on anything to fix (CI) |

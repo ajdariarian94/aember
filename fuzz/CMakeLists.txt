@@ -64,6 +64,10 @@ find_package(
   CONFIG
   REQUIRED
 )
+find_package(
+  LibLZMA
+  REQUIRED
+)
 
 get_filename_component(
   AEMBER_ROOT
@@ -105,6 +109,12 @@ add_library(
   ${AEMBER_ROOT}/libraries/utils/logging/src/logging.cpp
   ${AEMBER_ROOT}/libraries/utils/module/src/module-parser.cpp
   ${AEMBER_ROOT}/libraries/utils/netlink/src/netlink.cpp
+  ${AEMBER_ROOT}/libraries/utils/package/src/install.cpp
+  ${AEMBER_ROOT}/libraries/utils/package/src/package.cpp
+  ${AEMBER_ROOT}/libraries/utils/package/src/tar.cpp
+  ${AEMBER_ROOT}/libraries/utils/package/src/writer.cpp
+  ${AEMBER_ROOT}/third_party/monocypher/monocypher.c
+  ${AEMBER_ROOT}/third_party/monocypher/monocypher-ed25519.c
   ${AEMBER_ROOT}/libraries/utils/process/src/process-config-parser.cpp
   ${AEMBER_ROOT}/services/containerd/src/container-parser.cpp
   ${AEMBER_ROOT}/services/containerd/src/control.cpp
@@ -125,6 +135,7 @@ foreach (
   libraries/utils/logging
   libraries/utils/module
   libraries/utils/netlink
+  libraries/utils/package
   libraries/utils/process
   services/containerd
   services/netd
@@ -134,10 +145,26 @@ foreach (
     PUBLIC ${AEMBER_ROOT}/${dir}/include
   )
 endforeach ()
+set_source_files_properties(
+  ${AEMBER_ROOT}/third_party/monocypher/monocypher.c
+  ${AEMBER_ROOT}/third_party/monocypher/monocypher-ed25519.c
+  PROPERTIES LANGUAGE
+             CXX
+             COMPILE_OPTIONS
+             "-w"
+)
+target_include_directories(
+  aember-fuzzed
+  PRIVATE ${AEMBER_ROOT}/third_party/monocypher
+)
 target_link_libraries(
   aember-fuzzed
   PUBLIC nlohmann_json::nlohmann_json
          spdlog::spdlog
+         # The library alone: LibLZMA::LibLZMA's include directory is the
+         # sysroot's /usr/include, which as -isystem breaks libstdc++'s
+         # #include_next (lzma.h comes through --sysroot anyway).
+         ${LIBLZMA_LIBRARY}
 )
 
 set(AEMBER_FUZZ_TARGETS
@@ -147,6 +174,7 @@ set(AEMBER_FUZZ_TARGETS
     fuzz_ipc
     fuzz_modules_json
     fuzz_network_json
+    fuzz_package
     fuzz_services_json
     fuzz_status
 )
