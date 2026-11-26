@@ -12,11 +12,13 @@
  */
 
 #include <aember-libs/utils/ipc/channel.h>
+#include <aember-libs/utils/package/writer.h>
 #include <aember-services/containerd/containerd.h>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -49,6 +51,10 @@ class ContainerdDaemonTest : public ::testing::Test {
     dir_ = tmpl;
     options_.containers_json = (dir_ / "containers.json").string();
     options_.log_file = (dir_ / "containerd.log").string();
+    options_.packages_root = (dir_ / "lib").string();
+    options_.inbox = (dir_ / "lib" / "packages").string();
+    options_.keys_dir = (dir_ / "keys").string();
+    options_.control_socket.clear();
   }
   void TearDown() override {
     std::error_code ec;
@@ -95,19 +101,15 @@ TEST_F(ContainerdDaemonTest, SighupAndConsoleMessagesDontStopIt) {
 }
 
 TEST_F(ContainerdDaemonTest, ContainerThatCannotStartIsRetriedAndReported) {
-  const auto missing = (dir_ / "missing").string();
-  Config({{"containers",
-           nlohmann::json::array(
-               {{{"name", "broken"},
-                 {"type", "container"},
-                 {"container",
-                  {{"squashfs", missing + "/broken.squashfs"},
-                   {"rootfs", missing + "/rootfs"},
-                   {"config_path", missing + "/lxc.container.conf"},
-                   {"args", {"/bin/true"}}}},
-                 {"restart_policy", "always"},
-                 {"max_restart_attempts", 2},
-                 {"restart_delay", 1}}})}});
+  // Installed (its directory), but its image is missing: the start fails.
+  fs::create_directories(dir_ / "lib" / "broken");
+  std::ofstream{dir_ / "lib" / "broken" / "config.json"} << nlohmann::json{
+      {"name", "broken"},
+      {"command", {"/bin/true"}},
+      {"restart_policy", "always"},
+      {"max_restart_attempts", 2},
+      {"restart_delay", 1}}.dump();
+  Config({{"containers", nlohmann::json::array({{{"name", "broken"}}})}});
   auto ctrd = Run();
   ASSERT_TRUE(ctrd.Expect("ready", 10s)) << Log();
   // The failed start shows up as the container's state, then the retries.
@@ -117,6 +119,76 @@ TEST_F(ContainerdDaemonTest, ContainerThatCannotStartIsRetriedAndReported) {
   std::this_thread::sleep_for(2500ms);
   EXPECT_EQ(ctrd.Stop(SIGTERM, 15s), std::optional<int>{0});
   EXPECT_NE(Log().find("containerd ready (1 container(s))"), std::string::npos);
+  EXPECT_NE(Log().find("restart 2/2"), std::string::npos) << Log();
+}
+
+TEST_F(ContainerdDaemonTest, NotInstalledOrSkippedIsReportedTheRestGoesOn) {
+  Config({{"containers",
+           nlohmann::json::array({{{"name", "missing"}},
+                                  {{"name", "x"}, {"dependencies", {"y"}}},
+                                  {{"name", "y"}, {"dependencies", {"x"}}}})}});
+  auto ctrd = Run();
+  // Reported before ready (nothing of it can start).
+  const auto event = ctrd.Expect("event", 10s);
+  ASSERT_TRUE(event) << Log();
+  EXPECT_EQ((*event)["data"].value("name", ""), "missing");
+  EXPECT_EQ((*event)["data"].value("state", ""), "failed");
+  ASSERT_TRUE(ctrd.Expect("ready", 10s)) << Log();
+  EXPECT_EQ(ctrd.Stop(SIGTERM, 15s), std::optional<int>{0});
+  EXPECT_NE(Log().find("container 'x' not started"), std::string::npos)
+      << Log();
+}
+
+namespace pkg = aember::utils::package;
+
+void WritePackage(const fs::path& path, const std::string& name,
+                  const std::optional<pkg::KeyPair>& key) {
+  fs::create_directories(path.parent_path());
+  const auto bytes = pkg::Seal(
+      *pkg::Compress(pkg::MakeTar(
+          nlohmann::json{{"name", name}, {"command", {"/app"}}}.dump(),
+          "lxc.uts.name = " + name + "\n",
+          "IMAGE")),
+      key);
+  std::ofstream{path, std::ios::binary}.write(
+      reinterpret_cast<const char*>(bytes.data()),
+      static_cast<std::streamsize>(bytes.size()));
+}
+
+TEST_F(ContainerdDaemonTest, PackagesAreInstalledFromTheInbox) {
+  std::array<std::uint8_t, 32> seed{};
+  seed.fill(3);
+  const auto key = pkg::KeyPairFromSeed(seed);
+  fs::create_directories(dir_ / "keys");
+  std::ofstream{dir_ / "keys" / "board.pub"}
+      << pkg::PublicKeyText(key.public_key);
+  const auto inbox = dir_ / "lib" / "packages";
+  WritePackage(inbox / "good.aember", "good", key);
+  WritePackage(inbox / "unsigned.aember", "unsigned", std::nullopt);
+  WritePackage(inbox / "wrong.aember", "other", key);  // config names "other"
+  Config({{"containers", nlohmann::json::array()}});   // signed only
+
+  auto ctrd = Run();
+  ASSERT_TRUE(ctrd.Expect("ready", 10s)) << Log();
+  EXPECT_EQ(ctrd.Stop(SIGTERM, 15s), std::optional<int>{0});
+  EXPECT_TRUE(fs::exists(dir_ / "lib" / "good" / "image.squashfs")) << Log();
+  EXPECT_FALSE(fs::exists(inbox / "good.aember"));
+  EXPECT_NE(Log().find("installed good (signed by board"), std::string::npos)
+      << Log();
+  // Refused, kept aside so they aren't tried on every start.
+  EXPECT_FALSE(fs::exists(dir_ / "lib" / "unsigned"));
+  EXPECT_TRUE(fs::exists(inbox / "unsigned.aember.rejected"));
+  EXPECT_TRUE(fs::exists(inbox / "wrong.aember.rejected"));
+}
+
+TEST_F(ContainerdDaemonTest, UnsignedPackagesOnlyWhenTheBoardAllowsThem) {
+  WritePackage(dir_ / "lib" / "packages" / "dev.aember", "dev", std::nullopt);
+  Config({{"allow_unsigned", true}, {"containers", nlohmann::json::array()}});
+  auto ctrd = Run();
+  ASSERT_TRUE(ctrd.Expect("ready", 10s)) << Log();
+  EXPECT_EQ(ctrd.Stop(SIGTERM, 15s), std::optional<int>{0});
+  EXPECT_TRUE(fs::exists(dir_ / "lib" / "dev" / "package.json")) << Log();
+  EXPECT_NE(Log().find("installed dev (unsigned"), std::string::npos) << Log();
 }
 
 TEST_F(ContainerdDaemonTest, BridgesAreCreatedAndAddressed) {

@@ -38,6 +38,7 @@ aember_service(
   src/containerd.cpp
   src/control.cpp
   src/lxc-api.cpp
+  src/start-graph.cpp
   LIBRARIES
   aember-libs::child-supervisor
   aember-libs::mount-manager
@@ -45,6 +46,7 @@ aember_service(
   aember-libs::utils::ipc
   aember-libs::utils::logging
   aember-libs::utils::netlink
+  aember-libs::utils::package
   nlohmann_json::nlohmann_json
   ${CMAKE_DL_LIBS}
   PRIVATE_INCLUDES

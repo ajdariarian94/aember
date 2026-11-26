@@ -31,11 +31,14 @@ from pathlib import Path
 from aember.steps.launching.launch import QemuProfile
 from aember.steps.packaging.rootfs import run_guestfish, tar_in_commands
 from aember.steps.testing.system.vm import Vm, vm_command
+from aember.utils import aember_package, ed25519
 
 log = logging.getLogger("aember.systemtest")
 
-# Where a container goes in an image (aember-build-helper's layout).
-IMAGES_DIR = Path("var/lib/aember")
+# Where packages wait to be installed (containerd installs them at its
+# start) and where they are installed.
+PACKAGES_DIR = Path("var/lib/aember/packages")
+INSTALL_DIR = Path("var/lib/aember")
 CONTAINERS_JSON = "etc/aember/containers.json"
 
 
@@ -131,6 +134,21 @@ class System:
             shutil.rmtree(tars, ignore_errors=True)
         return image
 
+    def image_with_files(self, files: Mapping[str, str | bytes], label: str) -> Path:
+        """A copy of the packed image with @p files (path in the image ->
+        content) put in (`image_with`)."""
+        tree = self.log_dir / f"{label}-tree"
+        shutil.rmtree(tree, ignore_errors=True)
+        tree.mkdir(parents=True)
+        for path, content in files.items():
+            dst = tree / path.lstrip("/")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(content, bytes):
+                dst.write_bytes(content)
+            else:
+                dst.write_text(content)
+        return self.image_with(tree, label)
+
     def image_with_containers(
         self,
         bundles: Sequence[Path],
@@ -139,12 +157,16 @@ class System:
     ) -> Path:
         """
         A copy of the packed image with more containers and files: each of
-        @p bundles is a packed container (aember-build-helper's
-        `build/aember-out/<arch>/<name>/`: container.json and
-        overlay/var/lib/aember/<name>/), added to the image's containers.json
-        (an entry of the same name is replaced), like `aember-cli/run.py
-        install` does for a board's overlay. @p files: path in the image ->
-        content (configs, keys). Returns the image (`image_with`).
+        @p bundles is a built container (aember-build-helper's
+        `build/aember-out/<arch>/<name>/`: <name>.aember and container.json,
+        its containers.json entry), put where containerd installs packages
+        from at its start (var/lib/aember/packages/) and added to the
+        image's containers.json (an entry of the same name is replaced),
+        like `aember-cli/run.py install` does for a board's overlay. A
+        bundle of the layout before packages (overlay/var/lib/aember/<name>/
+        with the image and lxc.container.conf) is made into an unsigned
+        package. @p files: path in the image -> content (configs, keys).
+        Returns the image (`image_with`).
         """
         label = label or self.name
         tree = self.log_dir / f"{label}-tree"
@@ -153,13 +175,30 @@ class System:
         containers = self.config("containers.json") or {}
         entries = list(containers.get("containers", []))
         for bundle in bundles:
-            entry = json.loads((Path(bundle) / "container.json").read_text())
+            bundle = Path(bundle)
+            entry = json.loads((bundle / "container.json").read_text())
             name = entry["name"]
-            src = Path(bundle) / "overlay" / IMAGES_DIR / name
-            if not src.is_dir():
-                raise AssertionError(f"{bundle}: no {IMAGES_DIR / name} in it")
-            shutil.copytree(src, tree / IMAGES_DIR / name)
-            entries = [c for c in entries if c.get("name") != name] + [entry]
+            target = tree / PACKAGES_DIR / f"{name}{aember_package.EXTENSION}"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            package = bundle / f"{name}{aember_package.EXTENSION}"
+            if package.is_file():
+                shutil.copy2(package, target)
+            else:
+                old = bundle / "overlay" / INSTALL_DIR / name
+                if not (old / f"{name}.squashfs").is_file():
+                    raise AssertionError(f"{bundle}: no {package.name} in it")
+                aember_package.write_package(
+                    target,
+                    aember_package.container_config(name, entry),
+                    aember_package.container_lxc_config(
+                        name, (old / "lxc.container.conf").read_text()
+                    ),
+                    old / f"{name}.squashfs",
+                )
+            new = {"name": name}
+            if entry.get("dependencies"):
+                new["dependencies"] = entry["dependencies"]
+            entries = [c for c in entries if c.get("name") != name] + [new]
         containers = {"bridges": containers.get("bridges", []), **containers}
         containers["containers"] = entries
         (tree / CONTAINERS_JSON).parent.mkdir(parents=True, exist_ok=True)
@@ -177,7 +216,18 @@ class System:
         return self.config("services.json").get("processes", [])
 
     def containers(self) -> list[dict]:
+        """containers.json's entries (name, dependencies)."""
         return self.config("containers.json").get("containers", [])
+
+    def container_config(self, name: str) -> dict:
+        """The config.json of an installed container (how it starts)."""
+        overlay = self.package_dir / "overlay_root"
+        path = f"{INSTALL_DIR}/{name}/config.json"
+        if overlay.is_dir():
+            file = overlay / path
+            return json.loads(file.read_text()) if file.exists() else {}
+        text = self.image_file(f"/{path}")
+        return json.loads(text) if text else {}
 
     @contextlib.contextmanager
     def boot(
@@ -354,11 +404,10 @@ def service_restart(system: System) -> None:
         )
 
 
-def _container_app(container: dict) -> str:
+def _container_app(config: dict) -> str:
     """The text of the container's own PID 1 in `ps` (aember-init runs its
-    args; see the container's lxc.container.conf)."""
-    args = container.get("container", {}).get("args", [])
-    return "aember-init " + " ".join(args)
+    command; see the container's config.json)."""
+    return "aember-init " + " ".join(config.get("command", []))
 
 
 @scenario(
@@ -366,15 +415,14 @@ def _container_app(container: dict) -> str:
     "A container's application is killed; containerd starts the container again",
 )
 def container_restart(system: System) -> None:
+    configs = [system.container_config(c["name"]) for c in system.containers()]
     candidates = [
-        c
-        for c in system.containers()
-        if c.get("restart_policy") == "always" and c.get("container", {}).get("args")
+        c for c in configs if c.get("restart_policy") == "always" and c.get("command")
     ]
     if not candidates:
-        raise AssertionError("no container with restart_policy always and args")
-    container = candidates[0]
-    name, app = container["name"], _container_app(container)
+        raise AssertionError("no container with restart_policy always and a command")
+    config = candidates[0]
+    name, app = config["name"], _container_app(config)
     with system.boot() as vm:
         vm.wait_ready(UP_TIMEOUT)
         vm.open_shell()
@@ -425,3 +473,65 @@ def _shutdown(system: System, signal: str, action: str, kernel_says: str) -> Non
             raise vm.fail(f"QEMU exited {code}")
         if "reboot(2) failed" in vm.console.text[start:]:
             raise vm.fail("reboot(2) failed")
+
+
+# The key the package-install scenario signs with (a test key: its seed is
+# here for anyone to read).
+TEST_KEY_SEED = bytes(range(1, 33))
+
+
+@scenario(
+    "package-install",
+    "containerd installs a signed .aember package at its start (the old "
+    "version kept for a rollback) and refuses an unsigned one",
+)
+def package_install(system: System) -> None:
+    containers = system.containers()
+    if not containers:
+        raise AssertionError("containers.json lists no container")
+    name = containers[0]["name"]
+    work = system.log_dir / "package-install-work"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    installed = f"/{INSTALL_DIR}/{name}"
+    image = system.image_copy_out(
+        f"{installed}/image.squashfs", work / "image.squashfs"
+    )
+    config = system.container_config(name)
+    lxc = system.image_file(f"{installed}/lxc.container.conf") or ""
+
+    signed = work / f"{name}.aember"
+    footer = aember_package.write_package(signed, config, lxc, image, TEST_KEY_SEED)
+    rogue_config = dict(config, name="rogue")
+    rogue = work / "rogue.aember"
+    aember_package.write_package(rogue, rogue_config, lxc, image)  # unsigned
+
+    board = dict(system.config("containers.json"), allow_unsigned=False)
+    public = aember_package.public_key_text(ed25519.public_key(TEST_KEY_SEED))
+    disk = system.image_with_files(
+        {
+            f"/{PACKAGES_DIR}/{signed.name}": signed.read_bytes(),
+            f"/{PACKAGES_DIR}/{rogue.name}": rogue.read_bytes(),
+            "/etc/aember/keys/systemtest.pub": public,
+            f"/{CONTAINERS_JSON}": json.dumps(board, indent=2) + "\n",
+        },
+        "package-install",
+    )
+    with system.boot(rootfs=disk) as vm:
+        vm.wait_ready(UP_TIMEOUT)
+        vm.open_shell()
+        wait_all_running(system, vm)
+        now = json.loads(vm.sh(f"cat {installed}/package.json"))
+        if now.get("signed_by") != "systemtest":
+            raise vm.fail(f"{name} wasn't installed from the signed package: {now}")
+        if now.get("digest") != footer.digest.hex():
+            raise vm.fail(f"{name}: installed digest {now.get('digest')}")
+        prev = json.loads(vm.sh(f"cat {installed}.prev/package.json"))
+        if prev.get("signed_by") is not None:
+            raise vm.fail(f"{name}.prev isn't the version from the image: {prev}")
+        listing = vm.sh(f"ls /{PACKAGES_DIR}").split()
+        if listing != ["rogue.aember.rejected"]:
+            raise vm.fail(f"/{PACKAGES_DIR} holds {listing}")
+        code, _ = vm.run(f"test -e /{INSTALL_DIR}/rogue")
+        if code == 0:
+            raise vm.fail("the unsigned package was installed")

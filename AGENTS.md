@@ -86,12 +86,22 @@ image at all. A crash in them never takes PID 1 down.
   kernel's network configuration, so a restart doesn't drop the network.
 - containerd: creates the container bridges (`"bridges"` in
   containers.json, `netlink::EnsureBridge`; network.json no longer has
-  them, so containers work with any network manager), starts the
-  containers from containers.json, or **adopts**
-  the ones still running after a crash/restart (LXC keeps their state);
-  follows each container's init with a pidfd; SIGTERM stops all
-  containers.
-  - **Init wrapper** (containers.json `"init"`, default true): the app
+  them, so containers work with any network manager), installs the
+  `.aember` packages waiting in `/var/lib/aember/packages/`
+  (`InstallPackages`: `utils/package` `Recover` + `Install`, keys from
+  `/etc/aember/keys`, `allow_unsigned` from containers.json; refused ones
+  become `.rejected`), reads each listed container's `config.json` from
+  `/var/lib/aember/<name>/`, and starts them along containers.json's
+  dependency graph (`StartGraph`, spec/tla/StartGraph.tla): every
+  container whose dependencies run starts in its own `std::jthread`
+  (`ContainerManager::StartContainer` holds its lock only for the state
+  changes; `MountManager` locks its list), the loop learns of finished
+  starts through an eventfd; a restart is "wanted again" and waits for its
+  dependencies. Ready goes to PID 1 once the first wave is through. It
+  **adopts** the ones still running after a crash/restart (LXC keeps their
+  state); follows each container's init with a pidfd; SIGTERM lets
+  running starts finish, then stops all containers, dependents first.
+  - **Init wrapper** (config.json `"init"`, default true): the app
     runs under `/busybox.aember-init sh -c <trap script>` (the host's
     static `/bin/busybox` bind mounted into the rootfs; the name must
     start with "busybox" or BusyBox looks for an applet of that name).
@@ -188,7 +198,7 @@ CMakeLists.txt          Superbuild: ExternalProject libraries → executables, s
 libraries/              aember-libs: one static lib per dir, + utils/<x>
 executables/aember/     main.cpp → the `aember` binary (PID 1)
 services/               one dir per service program (netd, containerd), README.md
-resources/<arch>/rootfs rootfs overlay: configs tracked, *.squashfs images from the release
+resources/<arch>/rootfs rootfs overlay: configs tracked, *.aember packages from the release
 tools/toolchains/       <arch>.cmake, chain-loaded by vcpkg (SDK compilers, sysroot, flags)
 tools/scripts/          init.sh (postStart), prerequisites.sh, bashrc.d/
 vcpkg/                  SUBMODULE (fork) incl. x64/aarch64-poky-linux triplets
@@ -337,14 +347,18 @@ the kernel's console timestamps), so the status is also the boot timeline. The o
 its per-second console box and the X11/lxc-extra.conf passthrough are gone;
 don't bring them back.
 
-The overlay's text files (the JSON configs, `lxc.container.conf`) are
-**tracked in git**; edit them here and commit. The container
-images (`*.squashfs`) are git-ignored and
-come from aember's own release `v<project VERSION>` as
-`aember-resources-v<V>.tar.gz` (public, plain HTTPS). `CheckResources`
-(`utils/check_resources.py`) downloads it when an image that some
-board's `containers.json` lists is missing (`utils/containers.py`), and
-extracts only files that don't exist yet, so tracked configs always win.
+The overlay's JSON configs are **tracked in git**; edit them here and
+commit. A board's `containers.json` lists only names and dependencies;
+each container is a `.aember` package (doc/aember-format.md) at
+`var/lib/aember/packages/<name>.aember`, git-ignored, from aember's own
+release `v<project VERSION>` as `aember-resources-v<V>.tar.gz` (public,
+plain HTTPS). `CheckResources` (`utils/check_resources.py`) downloads it
+when a package some board's `containers.json` lists is missing
+(`utils/containers.py`) and takes only the missing packages out of it; a
+release from before packages (v0.14.0: `<name>/<name>.squashfs`,
+`lxc.container.conf`, the old containers.json entry) is made into unsigned
+packages (`aember_package.container_config` / `container_lxc_config`, the
+latter moving `lxc.rootfs.path` to `/var/lib/aember/containers/<name>`).
 `aember release` packs the whole overlay into that tarball.
 
 **Opt-in packages** (`utils/packages.py`, `steps/packaging/packages.py`,
@@ -364,15 +378,21 @@ SDK here. `check_service_executables` fails the pack when `services.json`
 starts a program no tree has. The Pi/USB images and the AppImage include
 `packages_root`.
 
-**Only listed containers ship.** The overlay may hold more container
-directories (`var/lib/aember/<name>/`) than a board runs: `PackStep`
-stages `build/package/<arch>/<type>/overlay_root` (hard links,
-`steps/packaging/overlay.py`) without the ones `containers.json` doesn't
-list, and the rootfs image, `aember rpi image`, `aember usb image` and
+**Only listed containers ship, installed.** The overlay may hold more
+packages than a board runs: `PackStep` stages
+`build/package/<arch>/<type>/overlay_root` (hard links,
+`steps/packaging/overlay.py`) with the listed ones installed as a device
+installs them (`aember_package.install`: verified against the overlay's
+`etc/aember/keys` and `allow_unsigned`, unpacked into
+`var/lib/aember/<name>/` with `package.json`) and no package files (an
+empty `var/lib/aember/packages/` stays), so the image carries each
+container once and its first boot unpacks nothing. Container directories
+of the old layout (git-ignored `*.squashfs` leftovers) are left out with
+a warning. The rootfs image, `aember rpi image`, `aember usb image` and
 the AppImage all use that tree, never `resources/<arch>/rootfs` directly.
-A listed container whose image or `lxc.container.conf` is missing fails
-the pack. Drop a container from `containers.json` and its image is gone
-from the next image.
+A listed container whose package is missing, invalid or signed by an
+unknown key fails the pack. Drop a container from `containers.json` and
+it is gone from the next image.
 
 ## From a fresh clone (x64)
 
@@ -731,7 +751,8 @@ same image, `.github/workflows/ci.yml`).
   `@scenario("name", "what it shows")` that takes a `System` and uses
   `with system.boot(append=..., extra_args=[...]) as vm:`;
   `system.services()` / `system.containers()` are the packed
-  services.json / containers.json; fail with `raise vm.fail("...")`
+  services.json / containers.json, `system.container_config(name)` an
+  installed container's config.json; fail with `raise vm.fail("...")`
   (an AssertionError with the end of the console). The fake-device tests
   in `aember-cli/tests/test_systemtest.py` cover the harness without QEMU.
   **Scenarios of other repositories** (a container's end-to-end test, e.g.
@@ -742,8 +763,11 @@ same image, `.github/workflows/ci.yml`).
   unpacked under `build/`; configs then come from the image itself via
   guestfish). `system.image_with_containers(bundles, files)` copies the
   packed image (`<log_dir>/<label>.img`) and puts packed containers
-  (aember-build-helper bundles, merged into containers.json like `run.py
-  install`) and files in with guestfish; `image_copy_out()` gets a file out;
+  (aember-build-helper bundles: their `<name>.aember` into
+  `var/lib/aember/packages/`, which containerd installs at boot; a bundle
+  of the old layout is made into an unsigned package; their names merged
+  into containers.json like `run.py install`) and files in with guestfish;
+  `image_with_files(files, label)` only files; `image_copy_out()` gets a file out;
   `boot(rootfs=..., snapshot=False)` keeps what a run writes, for a second
   boot of the same disk (power loss: leaving the `with` kills QEMU).
 - **Regression tests** carry a comment starting `Regression:` saying which
@@ -776,7 +800,10 @@ same image, `.github/workflows/ci.yml`).
   the model finds gets an `EXPECTED TO FAIL` model plus a regression test.
 - **Fuzzing** (`fuzz/`, `aember fuzz`, CI job `fuzz`): one target per
   input aember reads: `fuzz_services_json` (parser + start order),
-  `fuzz_containers_json` (containers + `ParseBridges`), `fuzz_modules_json`,
+  `fuzz_containers_json` (containers.json through `LoadBoardContainers`
+  and the `StartGraph`, `ParseBridges`, the bytes as a config.json),
+  `fuzz_package` (bytes as a package payload, sealed and `Install`ed into
+  a scratch directory; and as a bare tar), `fuzz_modules_json`,
   `fuzz_network_json` (netd's `NetworkManager` constructor; a
   `std::exception` is fine, netd exits on it), `fuzz_ipc` (raw bytes through
   a real channel pair into `Channel::Receive`, PID 1's

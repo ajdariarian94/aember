@@ -13,30 +13,36 @@
 #include <aember-libs/utils/ipc/channel.h>
 #include <aember-libs/utils/logging/logging.h>
 #include <aember-libs/utils/netlink/netlink.h>
+#include <aember-libs/utils/package/install.h>
 #include <aember-services/containerd/container-manager.h>
 #include <aember-services/containerd/container-parser.h>
 #include <aember-services/containerd/container-state.h>
 #include <aember-services/containerd/containerd.h>
 #include <aember-services/containerd/control.h>
 #include <aember-services/containerd/lxc-api.h>
+#include <aember-services/containerd/start-graph.h>
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <tuple>
 #include <vector>
 
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/eventfd.h>
 #include <sys/prctl.h>
 #include <sys/signalfd.h>
 #include <sys/syscall.h>
@@ -81,6 +87,58 @@ int EnsureBridges(const std::string& containers_json) {
   return failed;
 }
 
+int InstallPackages(const ContainerdOptions& options, bool allow_unsigned) {
+  namespace pkg = aember::utils::package;
+  aember::utils::logging::Logger log{"containerd"};
+
+  std::vector<std::string> notes;
+  pkg::Recover(options.packages_root, notes);
+  for (const auto& note : notes) log.warn("recovered an install: {}", note);
+
+  std::error_code ec;
+  if (!std::filesystem::is_directory(options.inbox, ec)) return 0;
+  std::vector<std::string> packages;
+  for (const auto& entry :
+       std::filesystem::directory_iterator{options.inbox, ec}) {
+    if (entry.path().extension() == pkg::kExtension) {
+      packages.push_back(entry.path().string());
+    }
+  }
+  if (packages.empty()) return 0;
+  std::ranges::sort(packages);
+
+  std::vector<std::string> errors;
+  pkg::InstallOptions install{
+      .root = options.packages_root,
+      .policy = {.keys = pkg::LoadKeys(options.keys_dir, errors),
+                 .allow_unsigned = allow_unsigned},
+      .check_config = [&](const nlohmann::json& config)
+          -> std::expected<void, std::string> {
+        auto parsed = ParseContainerConfig(config, options.packages_root);
+        if (!parsed) return std::unexpected(parsed.error());
+        return {};
+      }};
+  for (const auto& error : errors) log.error("key {}", error);
+
+  int failed = 0;
+  for (const auto& package : packages) {
+    const auto result = pkg::Install(package, install);
+    if (!result) {
+      log.error("not installed: {}", result.error());
+      std::filesystem::rename(package, package + ".rejected", ec);
+      ++failed;
+      continue;
+    }
+    log.info("{} {} ({}, {})",
+             result->changed ? "installed" : "already installed",
+             result->name,
+             result->signed_by ? "signed by " + *result->signed_by
+                               : std::string{"unsigned"},
+             result->digest.substr(0, 16));
+  }
+  return failed;
+}
+
 int RunContainerd(const ContainerdOptions& options) {
   aember::utils::logging::Logger log{"containerd"};
   ::prctl(PR_SET_NAME, "aember-ctrd");
@@ -121,46 +179,83 @@ int RunContainerd(const ContainerdOptions& options) {
     return 1;
   }
 
+  // The state events come from the threads that start containers too: one
+  // datagram each, sent whole.
+  std::mutex send_mutex;
+  const auto report = [&](const std::string& name, std::string_view state) {
+    std::lock_guard lock{send_mutex};
+    channel.Send(ipc::Event("container",
+                            {{"name", name}, {"state", std::string{state}}}));
+  };
   ContainerManager containers{
       std::make_shared<aember::mount_manager::MountManager>(),
       [&](const std::string& name, ContainerState, ContainerState state) {
-        channel.Send(ipc::Event(
-            "container",
-            {{"name", name}, {"state", ContainerStateToString(state)}}));
+        report(name, ContainerStateToString(state));
       }};
 
-  // Start (or adopt) every container.
   // Container networking is ours, so it works with any network service
   // (or none). A failed bridge only affects the containers that use it.
   std::ignore = EnsureBridges(options.containers_json);
 
-  const auto configs = containers.LoadContainers(options.containers_json);
-  for (const auto& cfg : configs) {
-    if (!containers.HasContainer(cfg.name)) containers.AddContainer(cfg);
+  // The board's list; a broken one starts nothing (logged).
+  BoardContainers board;
+  std::error_code ec;
+  if (std::filesystem::exists(options.containers_json, ec)) {
+    auto loaded = LoadBoardContainers(options.containers_json);
+    if (loaded) {
+      board = std::move(*loaded);
+    } else {
+      log.error("{}", loaded.error());
+    }
   }
-  for (const auto& cfg : configs) {
-    if (!containers.Adopt(cfg.name)) containers.StartContainer(cfg.name);
-  }
-  channel.Send(ipc::Ready());
-  log.info("containerd ready ({} container(s))", configs.size());
+  // New packages (the image's first boot, an update) before anything runs.
+  std::ignore = InstallPackages(options, board.allow_unsigned);
 
-  // Watch each running container's init: a pidfd works for processes that
-  // aren't our children (the init is the LXC monitor's child).
-  std::map<std::string, std::pair<pid_t, int>> watched;  // name -> pid, fd
-  const auto watch_running = [&] {
-    for (const auto& cfg : configs) {
-      if (watched.contains(cfg.name) || !containers.IsRunning(cfg.name)) {
-        continue;
-      }
-      const auto pid = containers.GetInitPid(cfg.name);
-      if (!pid) continue;
-      const int fd = PidfdOpen(*pid);
-      if (fd >= 0) watched[cfg.name] = {*pid, fd};
+  StartGraph graph{board.containers};
+  for (const auto& [name, why] : graph.Skipped()) {
+    log.error("container '{}' not started: {}", name, why);
+  }
+  std::vector<std::string> names;  // registered, in file order
+  for (const auto& name : graph.Names()) {
+    auto cfg = LoadContainerConfig(name, options.packages_root);
+    if (!cfg) {
+      log.error("container '{}': {}", name, cfg.error());
+      report(name, "failed");
+      continue;
+    }
+    containers.AddContainer(*cfg);
+    names.push_back(name);
+    if (containers.Adopt(name)) {
+      graph.SetRunning(name, true);
+    } else {
+      graph.Want(name);
+    }
+  }
+  log.info("{} container(s), {} start wave(s)", names.size(), graph.Depth());
+
+  // Starts run in threads (independent containers start together); a
+  // finished one is reported through `done` and the eventfd.
+  const int wake = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  std::mutex done_mutex;
+  std::vector<std::pair<std::string, bool>> done;
+  std::map<std::string, std::jthread> jobs;
+  bool stop = false;
+  const auto launch_ready = [&] {
+    if (stop) return;
+    for (const auto& name : graph.TakeReady()) {
+      jobs[name] = std::jthread{[&, name] {
+        const bool ok = containers.StartContainer(name);
+        {
+          std::lock_guard lock{done_mutex};
+          done.emplace_back(name, ok);
+        }
+        const std::uint64_t one = 1;
+        std::ignore = ::write(wake, &one, sizeof(one));
+      }};
     }
   };
-  watch_running();
 
-  // Restarts (restart_policy): name -> when to start it again.
+  // Restarts (restart_policy): name -> when to want it again.
   using Clock = std::chrono::steady_clock;
   std::map<std::string, Clock::time_point> restart_at;
   const auto schedule_restart = [&](const std::string& name) {
@@ -168,47 +263,61 @@ int RunContainerd(const ContainerdOptions& options) {
       restart_at[name] = Clock::now() + *delay;
     }
   };
-  for (const auto& cfg : configs) {
-    if (!containers.IsRunning(cfg.name)) schedule_restart(cfg.name);
-  }
+  const auto finish_jobs = [&] {
+    std::vector<std::pair<std::string, bool>> finished;
+    {
+      std::lock_guard lock{done_mutex};
+      finished.swap(done);
+    }
+    for (const auto& [name, ok] : finished) {
+      jobs.erase(name);  // joins (the thread has ended or is ending)
+      graph.SetRunning(name, ok);
+      if (!ok && !stop) schedule_restart(name);
+    }
+  };
 
   // The control socket (the aember-fleet agent): requests act like the
   // restart logic does, a requested stop clears a pending restart.
   struct Control final : ControlTarget {
-    ContainerManager& containers;
-    const std::vector<ContainerConfig>& configs;
-    std::map<std::string, Clock::time_point>& restart_at;
-    std::function<void(const std::string&)> schedule_restart;
-    Control(ContainerManager& c, const std::vector<ContainerConfig>& cfgs,
-            std::map<std::string, Clock::time_point>& r,
-            std::function<void(const std::string&)> s)
-        : containers(c),
-          configs(cfgs),
-          restart_at(r),
-          schedule_restart(std::move(s)) {}
-    [[nodiscard]] std::vector<Entry> List() const override {
-      std::vector<Entry> list(configs.size());
-      std::ranges::transform(configs, list.begin(), [&](const auto& cfg) {
-        return Entry{
-            cfg.name,
-            ContainerStateToString(containers.GetContainerState(cfg.name))};
-      });
-      return list;
+    std::function<std::vector<Entry>()> list;
+    std::function<bool(std::string_view)> has, stop, start;
+    [[nodiscard]] std::vector<Entry> List() const override { return list(); }
+    [[nodiscard]] bool Has(std::string_view n) const override { return has(n); }
+    bool Stop(std::string_view n) override { return stop(n); }
+    bool Start(std::string_view n) override { return start(n); }
+  } control;
+  control.list = [&] {
+    std::vector<ControlTarget::Entry> list;
+    list.reserve(names.size());
+    for (const auto& name : names) {
+      list.push_back(
+          {name, ContainerStateToString(containers.GetContainerState(name))});
     }
-    [[nodiscard]] bool Has(std::string_view name) const override {
-      return containers.HasContainer(name);
+    return list;
+  };
+  control.has = [&](std::string_view n) { return containers.HasContainer(n); };
+  control.stop = [&](std::string_view n) {
+    const std::string name{n};
+    if (graph.IsStarting(name)) return false;  // busy: ask again
+    restart_at.erase(name);
+    graph.Unwant(name);
+    const bool ok = containers.StopContainer(name);
+    graph.SetRunning(name, false);
+    return ok;
+  };
+  control.start = [&](std::string_view n) {
+    const std::string name{n};
+    restart_at.erase(name);
+    if (graph.IsStarting(name) || graph.IsRunning(name)) return true;
+    if (!graph.DependenciesRun(name)) {
+      graph.Want(name);  // starts as soon as they do
+      return true;
     }
-    bool Stop(std::string_view name) override {
-      restart_at.erase(std::string{name});
-      return containers.StopContainer(name);
-    }
-    bool Start(std::string_view name) override {
-      restart_at.erase(std::string{name});
-      if (containers.StartContainer(name)) return true;
-      schedule_restart(std::string{name});
-      return false;
-    }
-  } control{containers, configs, restart_at, schedule_restart};
+    const bool ok = containers.StartContainer(name);
+    graph.SetRunning(name, ok);
+    if (!ok) schedule_restart(name);
+    return ok;
+  };
   int control_fd = -1;
   if (!options.control_socket.empty()) {
     control_fd = OpenControlSocket(options.control_socket);
@@ -221,9 +330,34 @@ int RunContainerd(const ContainerdOptions& options) {
     }
   }
 
+  // Watch each running container's init: a pidfd works for processes that
+  // aren't our children (the init is the LXC monitor's child).
+  std::map<std::string, std::pair<pid_t, int>> watched;  // name -> pid, fd
+  const auto watch_running = [&] {
+    for (const auto& name : names) {
+      if (watched.contains(name) || !containers.IsRunning(name)) continue;
+      const auto pid = containers.GetInitPid(name);
+      if (!pid) continue;
+      const int fd = PidfdOpen(*pid);
+      if (fd >= 0) watched[name] = {*pid, fd};
+    }
+  };
+
+  launch_ready();
+  bool ready_sent = false;
   aember::child_supervisor::ChildSupervisor reaper;
-  bool stop = false;
   while (!stop) {
+    finish_jobs();
+    launch_ready();
+    watch_running();
+    // Ready once the first wave is through: nothing starting, nothing more
+    // that can start now (an entry waiting for a failed one keeps waiting).
+    if (!ready_sent && !graph.Busy()) {
+      channel.Send(ipc::Ready());
+      ready_sent = true;
+      log.info("containerd ready ({} container(s))", names.size());
+    }
+
     int timeout_ms = 1000;
     for (const auto& [name, at] : restart_at) {
       const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -231,15 +365,16 @@ int RunContainerd(const ContainerdOptions& options) {
                             .count();
       timeout_ms = std::clamp(static_cast<int>(left), 0, timeout_ms);
     }
-    // fds[1]: PID 1's channel (console mute), fds[2]: the control socket;
-    // negative = ignored by poll.
+    // fds[1]: PID 1's channel (console mute), fds[2]: the control socket,
+    // fds[3]: a start finished; negative = ignored by poll.
     std::vector<pollfd> fds{{sigfd, POLLIN, 0},
                             {channel.Closed() ? -1 : channel.Fd(), POLLIN, 0},
-                            {control_fd, POLLIN, 0}};
-    std::vector<std::string> names;
+                            {control_fd, POLLIN, 0},
+                            {wake, POLLIN, 0}};
+    std::vector<std::string> watched_names;
     for (const auto& [name, w] : watched) {
       fds.push_back({w.second, POLLIN, 0});
-      names.push_back(name);
+      watched_names.push_back(name);
     }
     if (::poll(fds.data(), fds.size(), timeout_ms) < 0 && errno != EINTR) {
       break;
@@ -251,48 +386,59 @@ int RunContainerd(const ContainerdOptions& options) {
         if (si.ssi_signo != SIGCHLD && si.ssi_signo != SIGHUP) stop = true;
       }
     }
-
     if (fds[1].revents != 0) ipc::ReceiveControl(channel);
+    if ((fds[3].revents & POLLIN) != 0) {
+      std::uint64_t count = 0;
+      std::ignore = ::read(wake, &count, sizeof(count));
+    }
+    finish_jobs();
     if ((fds[2].revents & POLLIN) != 0 && !stop) {
       ServeControlConnection(control_fd, control);
     }
 
-    for (std::size_t i = 3; i < fds.size(); ++i) {
+    for (std::size_t i = 4; i < fds.size(); ++i) {
       if (fds[i].revents == 0) continue;
-      const auto it = watched.find(names[i - 3]);
+      const auto it = watched.find(watched_names[i - 4]);
       log.info(
           "container '{}' init (pid {}) exited", it->first, it->second.first);
       const std::string name = it->first;
       containers.HandleExit(it->second.first, 1);
       ::close(it->second.second);
       watched.erase(it);
+      graph.SetRunning(name, false);
       if (!stop) schedule_restart(name);
     }
 
-    // Due restarts (a failed start counts as another attempt).
+    // Due restarts: wanted again, they start once their dependencies run.
     for (auto it = restart_at.begin(); !stop && it != restart_at.end();) {
       if (it->second > Clock::now()) {
         ++it;
         continue;
       }
-      const std::string name = it->first;
+      graph.Want(it->first);
       it = restart_at.erase(it);
-      if (!containers.StartContainer(name)) schedule_restart(name);
     }
 
     // Our own children (helpers liblxc waits for itself are left to it).
     std::ignore = reaper.ReapZombies();
-    watch_running();
   }
 
+  // No new starts (spec/tla/StartGraph.tla, NoStartAfterShutdown); the ones
+  // in progress finish first, then everything stops, dependents first.
   restart_at.clear();
+  jobs.clear();  // joins
+  finish_jobs();
   if (control_fd >= 0) {
     ::close(control_fd);
     ::unlink(options.control_socket.c_str());
   }
   log.info("stopping all containers");
   for (const auto& [name, w] : watched) ::close(w.second);
-  containers.StopAll();
+  for (const auto& name : graph.StopOrder()) {
+    if (containers.HasContainer(name)) containers.StopContainer(name);
+  }
+  containers.StopAll();  // anything left (adopted, not in the graph)
+  if (wake >= 0) ::close(wake);
   log.info("containerd stopped");
   return 0;
 }

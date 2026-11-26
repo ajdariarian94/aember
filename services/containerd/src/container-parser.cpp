@@ -1,50 +1,26 @@
 /**
  * @file container-parser.cpp
  * @author Arian Ajdari
- * @brief Library implementation for ContainersConfigParser
- * @version 0.2
- * @date 2026-06-12
+ * @brief containers.json and a container's config.json (see
+ *        container-parser.h).
+ * @version 0.3
+ * @date 2026-11-26
  *
- * @copyright Copyright (c) 2025, Aember, All rights reserved.
+ * @copyright Copyright (c) 2026, Aember, All rights reserved.
  */
 
+#include <aember-libs/utils/package/package.h>
 #include <aember-services/containerd/container-parser.h>
 
 #include <chrono>
 #include <cstdint>
+#include <fstream>
 #include <limits>
+#include <set>
+#include <sstream>
 #include <string>
 
 namespace aember::containerd {
-
-bool ContainersConfigParser::ParseFile(const std::string& path,
-                                       config::ConfigError& error) {
-  nlohmann::json json;
-  if (!LoadJsonFromFile(path, json, error)) { return false; }
-  containers_.clear();
-  return Parse(json, error);
-}
-
-bool ContainersConfigParser::Parse(const nlohmann::json& json,
-                                   config::ConfigError& error) {
-  if (!json.is_object() || !json.contains("containers")) {
-    error = config::ConfigError("Missing 'containers'");
-    return false;
-  }
-
-  if (!json["containers"].is_array()) {
-    error = config::ConfigError("'containers' must be an array");
-    return false;
-  }
-
-  for (const auto& item : json["containers"]) {
-    ContainerConfig cfg;
-    if (!ParseContainer(item, cfg, error)) { return false; }
-    containers_.push_back(std::move(cfg));
-  }
-
-  return true;
-}
 
 namespace {
 
@@ -55,112 +31,160 @@ bool FitsUnsigned(const nlohmann::json& value) {
          value.get<std::uint64_t>() <= std::numeric_limits<unsigned>::max();
 }
 
+std::string Dump(const nlohmann::json& j) {
+  return j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+std::expected<nlohmann::json, std::string> ReadJson(const std::string& path) {
+  std::ifstream file{path};
+  if (!file) return std::unexpected(path + ": cannot be read");
+  std::stringstream text;
+  text << file.rdbuf();
+  auto json = nlohmann::json::parse(text.str(), nullptr, false);
+  if (json.is_discarded()) return std::unexpected(path + ": not JSON");
+  return json;
+}
+
 }  // namespace
 
-bool ContainersConfigParser::ParseContainer(const nlohmann::json& json,
-                                            ContainerConfig& cfg,
-                                            config::ConfigError& error) {
-  // -------------------------
-  // NAME (required)
-  // -------------------------
-  if (!json.contains("name") || !json["name"].is_string()) {
-    error = config::ConfigError("Container missing 'name'");
-    return false;
-  }
-  cfg.name = json["name"].get<std::string>();
-
-  // -------------------------
-  // CONTAINER OBJECT (required)
-  // -------------------------
-  if (!json.contains("container") || !json["container"].is_object()) {
-    error = config::ConfigError("Missing 'container' object");
-    return false;
-  }
-
-  const auto& ctr = json["container"];
-
-  // squashfs (required)
-  if (!ctr.contains("squashfs") || !ctr["squashfs"].is_string()) {
-    error = config::ConfigError("Missing 'container.squashfs'");
-    return false;
-  }
-  cfg.squashfs = ctr["squashfs"].get<std::string>();
-
-  // rootfs (required)
-  if (!ctr.contains("rootfs") || !ctr["rootfs"].is_string()) {
-    error = config::ConfigError("Missing 'container.rootfs'");
-    return false;
-  }
-  cfg.rootfs = ctr["rootfs"].get<std::string>();
-
-  // config_path (required) — path to lxc.container.conf
-  if (!ctr.contains("config_path") || !ctr["config_path"].is_string()) {
-    error = config::ConfigError(
-        "Missing 'container.config_path' — lxc.container.conf path is "
-        "required");
-    return false;
-  }
-  cfg.config_path = ctr["config_path"].get<std::string>();
-
-  // args (optional)
-  if (ctr.contains("args")) {
-    if (!ctr["args"].is_array()) {
-      error = config::ConfigError("'container.args' must be an array");
-      return false;
+std::expected<BoardContainers, std::string> ParseBoardContainers(
+    const nlohmann::json& json) {
+  if (!json.is_object()) return std::unexpected("not a JSON object");
+  BoardContainers board;
+  if (const auto it = json.find("allow_unsigned"); it != json.end()) {
+    if (!it->is_boolean()) {
+      return std::unexpected("'allow_unsigned' must be true or false");
     }
-    for (const auto& arg : ctr["args"]) {
-      if (!arg.is_string()) {
-        error = config::ConfigError("Container args must be strings");
-        return false;
+    board.allow_unsigned = it->get<bool>();
+  }
+  const auto list = json.find("containers");
+  if (list == json.end()) return board;  // no containers
+  if (!list->is_array()) return std::unexpected("'containers' must be a list");
+  for (const auto& entry : *list) {
+    if (!entry.is_object()) {
+      return std::unexpected("a container entry isn't an object: " +
+                             Dump(entry));
+    }
+    if (entry.contains("container")) {
+      return std::unexpected(
+          "containers.json in the format before .aember packages (entry " +
+          Dump(entry.value("name", nlohmann::json{})) +
+          " has \"container\"): list only names and dependencies, the rest "
+          "is in the package (doc/aember-format.md)");
+    }
+    const auto name = entry.find("name");
+    if (name == entry.end() || !name->is_string() ||
+        !utils::package::ValidName(name->get_ref<const std::string&>())) {
+      return std::unexpected("a container entry without a valid name: " +
+                             Dump(entry));
+    }
+    StartGraph::Node node{.name = name->get<std::string>(), .dependencies = {}};
+    if (const auto deps = entry.find("dependencies"); deps != entry.end()) {
+      if (!deps->is_array()) {
+        return std::unexpected("'" + node.name +
+                               "': 'dependencies' must be a list");
       }
-      cfg.args.push_back(arg.get<std::string>());
+      for (const auto& d : *deps) {
+        if (!d.is_string()) {
+          return std::unexpected("'" + node.name +
+                                 "': dependencies must be names");
+        }
+        node.dependencies.push_back(d.get<std::string>());
+      }
     }
+    board.containers.push_back(std::move(node));
+  }
+  return board;
+}
+
+std::expected<BoardContainers, std::string> LoadBoardContainers(
+    const std::string& path) {
+  auto json = ReadJson(path);
+  if (!json) return std::unexpected(json.error());
+  auto board = ParseBoardContainers(*json);
+  if (!board) return std::unexpected(path + ": " + board.error());
+  return board;
+}
+
+std::expected<ContainerConfig, std::string> ParseContainerConfig(
+    const nlohmann::json& json, std::string_view root) {
+  if (!json.is_object()) return std::unexpected("not a JSON object");
+  const auto name = json.find("name");
+  if (name == json.end() || !name->is_string() ||
+      !utils::package::ValidName(name->get_ref<const std::string&>())) {
+    return std::unexpected("no valid 'name'");
+  }
+  ContainerConfig cfg;
+  cfg.name = name->get<std::string>();
+  const std::string dir = std::string{root} + "/" + cfg.name;
+  cfg.squashfs = dir + "/" + std::string{utils::package::kImageFile};
+  cfg.config_path = dir + "/" + std::string{utils::package::kLxcFile};
+  cfg.rootfs = std::string{root} + "/containers/" + cfg.name;
+
+  const auto command = json.find("command");
+  if (command == json.end() || !command->is_array() || command->empty()) {
+    return std::unexpected("'command' must be a non-empty list");
+  }
+  for (const auto& arg : *command) {
+    if (!arg.is_string()) {
+      return std::unexpected("'command' must be a list of strings");
+    }
+    cfg.args.push_back(arg.get<std::string>());
   }
 
-  // -------------------------
-  // Lifecycle (optional, top level)
-  // -------------------------
+  std::string error;
   const auto seconds = [&](const char* key, std::chrono::seconds& out) {
-    if (!json.contains(key)) return true;
-    if (!FitsUnsigned(json[key])) {
-      error = config::ConfigError(std::string{"'"} + key +
-                                  "' must be a number of seconds");
+    const auto it = json.find(key);
+    if (it == json.end()) return true;
+    if (!FitsUnsigned(*it)) {
+      error = std::string{"'"} + key + "' must be a number of seconds";
       return false;
     }
-    out = std::chrono::seconds{json[key].get<unsigned>()};
+    out = std::chrono::seconds{it->get<unsigned>()};
     return true;
   };
-
-  if (json.contains("init")) {
-    if (!json["init"].is_boolean()) {
-      error = config::ConfigError("'init' must be true or false");
-      return false;
-    }
-    cfg.init = json["init"].get<bool>();
+  if (const auto it = json.find("init"); it != json.end()) {
+    if (!it->is_boolean())
+      return std::unexpected("'init' must be true or false");
+    cfg.init = it->get<bool>();
   }
-  if (!seconds("stop_timeout", cfg.stop_timeout)) return false;
-  if (json.contains("restart_policy")) {
-    const auto policy =
-        json["restart_policy"].is_string()
-            ? RestartPolicyFromString(json["restart_policy"].get<std::string>())
-            : std::nullopt;
+  if (!seconds("stop_timeout", cfg.stop_timeout)) {
+    return std::unexpected(error);
+  }
+  if (const auto it = json.find("restart_policy"); it != json.end()) {
+    const auto policy = it->is_string()
+                            ? RestartPolicyFromString(it->get<std::string>())
+                            : std::nullopt;
     if (!policy) {
-      error = config::ConfigError(
+      return std::unexpected(
           "'restart_policy' must be \"no\", \"on-failure\" or \"always\"");
-      return false;
     }
     cfg.restart_policy = *policy;
   }
-  if (json.contains("max_restart_attempts")) {
-    if (!FitsUnsigned(json["max_restart_attempts"])) {
-      error = config::ConfigError("'max_restart_attempts' must be >= 0");
-      return false;
+  if (const auto it = json.find("max_restart_attempts"); it != json.end()) {
+    if (!FitsUnsigned(*it)) {
+      return std::unexpected("'max_restart_attempts' must be >= 0");
     }
-    cfg.max_restart_attempts = json["max_restart_attempts"].get<unsigned>();
+    cfg.max_restart_attempts = it->get<unsigned>();
   }
-  if (!seconds("restart_delay", cfg.restart_delay)) return false;
+  if (!seconds("restart_delay", cfg.restart_delay)) {
+    return std::unexpected(error);
+  }
+  return cfg;
+}
 
-  return true;
+std::expected<ContainerConfig, std::string> LoadContainerConfig(
+    std::string_view name, std::string_view root) {
+  const auto path = std::string{root} + "/" + std::string{name} + "/" +
+                    std::string{utils::package::kConfigFile};
+  auto json = ReadJson(path);
+  if (!json) return std::unexpected(json.error() + " (not installed?)");
+  auto cfg = ParseContainerConfig(*json, root);
+  if (!cfg) return std::unexpected(path + ": " + cfg.error());
+  if (cfg->name != name) {
+    return std::unexpected(path + ": names '" + cfg->name + "'");
+  }
+  return cfg;
 }
 
 std::vector<BridgeConfig> ParseBridges(const nlohmann::json& config,
@@ -179,9 +203,7 @@ std::vector<BridgeConfig> ParseBridges(const nlohmann::json& config,
     const auto name = entry.is_object() ? entry.find("name") : entry.end();
     if (name == entry.end() || !name->is_string() ||
         name->get_ref<const std::string&>().empty()) {
-      errors.emplace_back(
-          "bridge without a name: " +
-          entry.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
+      errors.emplace_back("bridge without a name: " + Dump(entry));
       continue;
     }
     BridgeConfig bridge{.name = name->get<std::string>(), .address = {}};
@@ -196,11 +218,6 @@ std::vector<BridgeConfig> ParseBridges(const nlohmann::json& config,
     bridges.push_back(std::move(bridge));
   }
   return bridges;
-}
-
-const std::vector<ContainerConfig>& ContainersConfigParser::GetContainers()
-    const {
-  return containers_;
 }
 
 }  // namespace aember::containerd

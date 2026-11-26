@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -26,6 +27,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -199,6 +201,38 @@ class ContainerLifecycleTest : public ::testing::Test {
   std::unique_ptr<ContainerManager> cm_;
   std::vector<std::pair<std::string, State>> transitions_;
 };
+
+// containerd starts containers that don't depend on each other together,
+// one thread each: the manager doesn't hold its lock while one starts.
+TEST_F(ContainerLifecycleTest, ContainersStartAtTheSameTimeFromThreads) {
+  const std::vector<std::string> names{"a", "b", "c", "d", "e", "f"};
+  for (const auto& n : names) {
+    Fakes()[n];  // the fake's map is set up before the threads
+    ASSERT_TRUE(cm_->AddContainer(Config(n, n == "c")));
+  }
+  std::vector<std::jthread> threads;
+  std::atomic<int> ok{0};
+  for (const auto& n : names) {
+    threads.emplace_back([&, n] {
+      if (cm_->StartContainer(n)) ++ok;
+    });
+  }
+  threads.clear();  // joins
+  EXPECT_EQ(ok, 6);
+  std::set<pid_t> pids;
+  for (const auto& n : names) {
+    EXPECT_TRUE(cm_->IsRunning(n)) << n;
+    EXPECT_EQ(Fakes()[n].starts, 1) << n;
+    const auto pid = cm_->GetInitPid(n);
+    ASSERT_TRUE(pid) << n;
+    pids.insert(*pid);
+    EXPECT_TRUE(Saw(n, State::kRunning)) << n;
+  }
+  EXPECT_EQ(pids.size(), names.size());
+  // A start of one that is starting or running does nothing more.
+  EXPECT_TRUE(cm_->StartContainer("a"));
+  EXPECT_EQ(Fakes()["a"].starts, 1);
+}
 
 TEST_F(ContainerLifecycleTest, StartRunsTheAppDirectlyWithoutTheWrapper) {
   ASSERT_TRUE(cm_->AddContainer(Config("plain")));

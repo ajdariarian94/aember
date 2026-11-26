@@ -1,0 +1,1 @@
+{"name": "aember-monitor", "command": ["/usr/bin/aember-monitor"], "init": true, "stop_timeout": 5, "restart_policy": "always", "max_restart_attempts": 0, "restart_delay": 2}

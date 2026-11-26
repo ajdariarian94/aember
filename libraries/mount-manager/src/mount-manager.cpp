@@ -108,7 +108,10 @@ bool MountManager::Mount(const MountPoint& mp) {
     return false;
   }
 
-  mounted_targets_.push_back(mp.target);
+  {
+    std::lock_guard lock{mutex_};
+    mounted_targets_.push_back(mp.target);
+  }
   log_.info("Mounted {} on {}", mp.source, mp.target);
   return true;
 }
@@ -209,7 +212,10 @@ bool MountManager::MountSquashFS(std::string_view image,
     return false;
   }
 
-  mounted_targets_.emplace_back(target);
+  {
+    std::lock_guard lock{mutex_};
+    mounted_targets_.emplace_back(target);
+  }
   log_.info("Mounted {} on {} via {}", image, target, loop->path);
 
   // Overlay a writable tmpfs on <target>/tmp.
@@ -224,6 +230,7 @@ bool MountManager::MountSquashFS(std::string_view image,
               tmp_path,
               std::system_category().message(errno));
   } else {
+    std::lock_guard lock{mutex_};
     mounted_targets_.push_back(tmp_path);
     log_.info("Mounted tmpfs on {}", tmp_path);
   }
@@ -252,7 +259,10 @@ bool MountManager::Unmount(std::string_view target, bool force) {
     return false;
   }
 
-  std::erase(mounted_targets_, target_str);
+  {
+    std::lock_guard lock{mutex_};
+    std::erase(mounted_targets_, target_str);
+  }
 
   log_.info("Unmounted {}", target);
   return true;
@@ -261,10 +271,18 @@ bool MountManager::Unmount(std::string_view target, bool force) {
 void MountManager::UnmountAll(bool force) {
   log_.info("Unmounting all tracked filesystems...");
 
-  for (const auto& target : mounted_targets_ | std::views::reverse) {
+  // A copy: Unmount() removes each target from the list (iterating the list
+  // itself while it shrinks was undefined behaviour).
+  std::vector<std::string> targets;
+  {
+    std::lock_guard lock{mutex_};
+    targets = mounted_targets_;
+  }
+  for (const auto& target : targets | std::views::reverse) {
     Unmount(target, force);
   }
 
+  std::lock_guard lock{mutex_};
   mounted_targets_.clear();
 }
 

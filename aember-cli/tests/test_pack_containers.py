@@ -1,5 +1,6 @@
 """Only the containers a board's containers.json lists go into its image,
-and only their images are fetched."""
+installed from their .aember packages, and only their packages are fetched
+(made from the release's old layout when the release has no package)."""
 
 import io
 import json
@@ -10,23 +11,13 @@ from pathlib import Path
 from unittest import mock
 
 from aember.steps.packaging.overlay import stage_overlay
+from aember.utils import aember_package as pkg
 from aember.utils import check_resources as cr
+from aember.utils import ed25519
 from aember.utils.containers import container_files, missing_images
 
 ARCH = "x64-poky-linux"
-
-
-def entry(name, **extra):
-    return {
-        "name": name,
-        "type": "container",
-        "container": {
-            "squashfs": f"/var/lib/aember/{name}/{name}.squashfs",
-            "rootfs": f"/var/lib/aember/containers/{name}",
-            "config_path": f"/var/lib/aember/{name}/lxc.container.conf",
-            **extra,
-        },
-    }
+SEED = bytes(range(32))
 
 
 class _Fixture(unittest.TestCase):
@@ -38,20 +29,32 @@ class _Fixture(unittest.TestCase):
         self.etc.mkdir(parents=True)
         (self.etc / "services.json").write_text("{}")
         self.dest = self.root / "package" / "overlay_root"
+        self.image = self.root / "image.squashfs"
+        self.image.write_bytes(b"hsqs-image")
 
     def tearDown(self):
         self._tmp.cleanup()
 
-    def add_container(self, name, image=True):
-        d = self.overlay / "var" / "lib" / "aember" / name
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "lxc.container.conf").write_text(f"# {name}\n")
-        if image:
-            (d / f"{name}.squashfs").write_bytes(b"hsqs" + name.encode())
+    def add_package(self, name, seed=None):
+        out = self.overlay / "var/lib/aember/packages" / f"{name}.aember"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pkg.write_package(
+            out,
+            {"name": name, "command": [f"/{name}"]},
+            f"# {name}\n",
+            self.image,
+            seed,
+        )
+        return out
 
-    def list_containers(self, *names):
+    def list_containers(self, *names, allow_unsigned=True):
         (self.etc / "containers.json").write_text(
-            json.dumps({"containers": [entry(n) for n in names]})
+            json.dumps(
+                {
+                    "allow_unsigned": allow_unsigned,
+                    "containers": [{"name": n} for n in names],
+                }
+            )
         )
 
     def staged(self):
@@ -60,72 +63,89 @@ class _Fixture(unittest.TestCase):
 
 
 class OverlayTest(_Fixture):
-    def test_only_listed_containers_are_staged(self):
+    def test_only_listed_containers_are_installed(self):
         for name in ("aember-stats", "aember-monitor", "alpine"):
-            self.add_container(name)
+            self.add_package(name)
         self.list_containers("aember-stats")
-        self.assertEqual(self.staged(), ["aember-stats"])
-        image = self.dest / "var/lib/aember/aember-stats/aember-stats.squashfs"
-        self.assertEqual(image.read_bytes(), b"hsqsaember-stats")
-        self.assertTrue((self.dest / "etc/aember/containers.json").is_file())
+        # packages/ stays (empty): where a device's updates arrive.
+        self.assertEqual(self.staged(), ["aember-stats", "packages"])
+        d = self.dest / "var/lib/aember/aember-stats"
+        self.assertEqual((d / "image.squashfs").read_bytes(), b"hsqs-image")
+        self.assertEqual((d / "lxc.container.conf").read_text(), "# aember-stats\n")
+        installed = json.loads((d / "package.json").read_text())
+        self.assertEqual(installed["name"], "aember-stats")
+        self.assertIsNone(installed["signed_by"])
+        self.assertEqual(list((self.dest / "var/lib/aember/packages").iterdir()), [])
         self.assertTrue((self.dest / "etc/aember/services.json").is_file())
 
-    def test_no_containers_json_stages_no_container(self):
-        self.add_container("alpine")
-        self.assertEqual(self.staged(), [])
+    def test_signed_packages_against_the_boards_keys(self):
+        self.add_package("app", seed=SEED)
+        keys = self.etc / "keys"
+        keys.mkdir()
+        (keys / "board.pub").write_text(pkg.public_key_text(ed25519.public_key(SEED)))
+        self.list_containers("app", allow_unsigned=False)
+        self.staged()
+        installed = json.loads(
+            (self.dest / "var/lib/aember/app/package.json").read_text()
+        )
+        self.assertEqual(installed["signed_by"], "board")
 
-    def test_other_files_are_kept(self):
-        self.add_container("alpine")
-        other = self.overlay / "var" / "lib" / "aember" / "state"
-        other.mkdir(parents=True)
-        (other / "keep").write_text("x")
-        (self.overlay / "etc" / "hostname").write_text("aember\n")
-        self.list_containers()
-        self.assertEqual(self.staged(), ["state"])
-        self.assertTrue((self.dest / "etc/hostname").is_file())
-
-    def test_listed_container_without_image_fails(self):
-        self.add_container("aember-monitor", image=False)
-        self.list_containers("aember-monitor")
-        with self.assertRaisesRegex(FileNotFoundError, "aember-monitor.squashfs"):
+    def test_unsigned_package_on_a_board_that_wants_signed_ones_fails(self):
+        self.add_package("app")
+        self.list_containers("app", allow_unsigned=False)
+        with self.assertRaises(pkg.PackageError):
             stage_overlay(self.overlay, self.dest)
 
-    def test_malformed_containers_json_fails(self):
+    def test_no_containers_json_installs_nothing(self):
+        self.add_package("alpine")
+        self.assertEqual(self.staged(), ["packages"])
+
+    def test_listed_container_without_package_fails(self):
+        self.list_containers("aember-monitor")
+        with self.assertRaisesRegex(FileNotFoundError, "aember-monitor.aember"):
+            stage_overlay(self.overlay, self.dest)
+
+    def test_malformed_or_old_containers_json_fails(self):
         (self.etc / "containers.json").write_text("{ not json")
         with self.assertRaises(ValueError):
             stage_overlay(self.overlay, self.dest)
+        (self.etc / "containers.json").write_text(
+            json.dumps({"containers": [{"name": "a", "container": {}}]})
+        )
+        with self.assertRaisesRegex(ValueError, "before .aember packages"):
+            stage_overlay(self.overlay, self.dest)
+
+    def test_old_layout_leftovers_are_left_out(self):
+        old = self.overlay / "var/lib/aember/alpine"
+        old.mkdir(parents=True)
+        (old / "alpine.squashfs").write_bytes(b"old")
+        state = self.overlay / "var/lib/aember/state"
+        state.mkdir()
+        (state / "keep").write_text("x")
+        self.list_containers()
+        with self.assertLogs("aember.pack.overlay", level="WARNING"):
+            self.assertEqual(self.staged(), ["packages", "state"])
 
     def test_restaging_starts_clean(self):
         for name in ("aember-stats", "alpine"):
-            self.add_container(name)
+            self.add_package(name)
         self.list_containers("aember-stats", "alpine")
-        self.assertEqual(self.staged(), ["aember-stats", "alpine"])
+        self.assertEqual(self.staged(), ["aember-stats", "alpine", "packages"])
         self.list_containers("alpine")
-        self.assertEqual(self.staged(), ["alpine"])
-
-    def test_staging_does_not_change_the_overlay(self):
-        self.add_container("alpine")
-        self.add_container("aember-stats")
-        self.list_containers("aember-stats")
-        self.staged()
-        self.assertTrue(
-            (self.overlay / "var/lib/aember/alpine/alpine.squashfs").is_file()
-        )
+        self.assertEqual(self.staged(), ["alpine", "packages"])
 
     def test_container_files_and_missing_images(self):
-        self.add_container("aember-stats")
-        self.add_container("aember-monitor", image=False)
+        self.add_package("aember-stats")
         self.list_containers("aember-stats", "aember-monitor")
-        self.assertEqual(len(container_files(self.overlay)), 4)
+        self.assertEqual(len(container_files(self.overlay)), 2)
         self.assertEqual(
-            [p.name for p in missing_images(self.overlay)],
-            ["aember-monitor.squashfs"],
+            [p.name for p in missing_images(self.overlay)], ["aember-monitor.aember"]
         )
 
 
 class CheckResourcesTest(_Fixture):
-    """check_resources() fetches the release tarball only when a listed image
-    is missing, and never overwrites existing (git-tracked) files."""
+    """check_resources() fetches the release tarball only when a listed
+    package is missing, and takes only the missing packages out of it."""
 
     def make_tarball(self, files):
         buf = io.BytesIO()
@@ -150,48 +170,83 @@ class CheckResourcesTest(_Fixture):
             cr.check_resources(self.root)
         return downloads
 
-    def test_nothing_fetched_when_listed_images_exist(self):
-        self.add_container("aember-stats")
+    def test_nothing_fetched_when_listed_packages_exist(self):
+        self.add_package("aember-stats")
         self.list_containers("aember-stats")
         self.assertEqual(self.run_check(), [])
 
-    def test_unlisted_missing_image_is_not_fetched(self):
-        self.add_container("aember-stats")
-        self.add_container("alpine", image=False)
-        self.list_containers("aember-stats")
-        self.assertEqual(self.run_check(), [])
-
-    def test_one_missing_listed_image_fetches_and_keeps_configs(self):
-        self.add_container("aember-stats")
-        self.add_container("aember-monitor", image=False)
+    def test_a_package_in_the_release_is_taken(self):
+        self.add_package("aember-stats")
         self.list_containers("aember-stats", "aember-monitor")
-        tarball = self.make_tarball(
-            {
-                "var/lib/aember/aember-monitor/aember-monitor.squashfs": b"new",
-                "var/lib/aember/aember-monitor/lxc.container.conf": b"old conf",
-                "var/lib/aember/aember-stats/aember-stats.squashfs": b"old",
-            }
+        made = self.add_package("aember-monitor")
+        data = made.read_bytes()
+        made.unlink()
+        downloads = self.run_check(
+            self.make_tarball({"var/lib/aember/packages/aember-monitor.aember": data})
         )
-        downloads = self.run_check(tarball)
         self.assertEqual(len(downloads), 1)
         self.assertIn("v9.9.9/aember-resources-v9.9.9.tar.gz", downloads[0])
-        d = self.overlay / "var/lib/aember"
+        self.assertEqual(made.read_bytes(), data)
+
+    def test_a_release_of_the_old_layout_is_made_into_packages(self):
+        self.list_containers("alpine-echo")
+        old_json = {
+            "containers": [
+                {
+                    "name": "alpine-echo",
+                    "container": {
+                        "squashfs": "/var/lib/aember/alpine/alpine.squashfs",
+                        "rootfs": "/var/lib/aember/containers/alpine",
+                        "config_path": "/var/lib/aember/alpine/lxc.container.conf",
+                        "args": ["/bin/sh", "/echo.sh"],
+                    },
+                    "restart_policy": "always",
+                    "max_restart_attempts": 5,
+                }
+            ]
+        }
+        self.run_check(
+            self.make_tarball(
+                {
+                    "etc/aember/containers.json": json.dumps(old_json).encode(),
+                    "var/lib/aember/alpine/alpine.squashfs": b"hsqs-alpine",
+                    "var/lib/aember/alpine/lxc.container.conf": (
+                        b"lxc.rootfs.path = /var/lib/aember/containers/alpine\n"
+                        b"lxc.uts.name = alpine-echo\n"
+                    ),
+                }
+            )
+        )
+        package = self.overlay / "var/lib/aember/packages/alpine-echo.aember"
+        self.assertIsNone(pkg.verify(package, {}, allow_unsigned=True))
+        out = self.root / "out"
+        config = pkg.extract(package, out)
         self.assertEqual(
-            (d / "aember-monitor/aember-monitor.squashfs").read_bytes(), b"new"
+            config,
+            {
+                "name": "alpine-echo",
+                "command": ["/bin/sh", "/echo.sh"],
+                "restart_policy": "always",
+                "max_restart_attempts": 5,
+            },
         )
         self.assertEqual(
-            (d / "aember-monitor/lxc.container.conf").read_text(), "# aember-monitor\n"
+            (out / "lxc.container.conf").read_text(),
+            "lxc.rootfs.path = dir:/var/lib/aember/containers/alpine-echo\n"
+            "lxc.uts.name = alpine-echo\n",
         )
+        self.assertEqual((out / "image.squashfs").read_bytes(), b"hsqs-alpine")
+        # The release's own containers.json doesn't replace the board's.
         self.assertEqual(
-            (d / "aember-stats/aember-stats.squashfs").read_bytes(), b"hsqsaember-stats"
+            json.loads((self.etc / "containers.json").read_text())["containers"],
+            [{"name": "alpine-echo"}],
         )
 
-    def test_image_not_in_release_only_warns(self):
-        self.add_container("brand-new", image=False)
+    def test_package_not_in_release_only_warns(self):
         self.list_containers("brand-new")
         with self.assertLogs("aember.check_resources", level="WARNING") as logs:
             self.run_check(self.make_tarball({}))
-        self.assertIn("brand-new.squashfs", "\n".join(logs.output))
+        self.assertIn("brand-new.aember", "\n".join(logs.output))
 
 
 if __name__ == "__main__":

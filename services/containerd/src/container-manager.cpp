@@ -12,6 +12,7 @@
 #include <aember-services/containerd/init-wrapper.h>
 #include <aember-services/containerd/lxc-api.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -142,31 +143,35 @@ bool ContainerManager::RemoveContainer(std::string_view name) {
 // ---------------------------------------------------------------------------
 
 bool ContainerManager::StartContainer(std::string_view name) {
+  ContainerEntry* e = nullptr;
+  {
+    std::lock_guard lock{mutex_};
+    e = Find(name);
+    if (!e) {
+      log_.error("StartContainer: '{}' not found", name);
+      return false;
+    }
+    if (e->state == ContainerState::kRunning ||
+        e->state == ContainerState::kStarting) {
+      log_.warn(
+          "Container '{}' already {}", name, ContainerStateToString(e->state));
+      return true;
+    }
+    log_.info("Starting container '{}'", name);
+    SetState(*e, ContainerState::kStarting);
+  }
+
+  // Without the lock: mounting and starting take a while, and other
+  // containers start meanwhile. Only this entry is touched (the entries
+  // never move: the list is fixed before anything starts), and nothing else
+  // acts on a container that is starting.
+  const bool ok = Create(*e) && Start(*e);
+
   std::lock_guard lock{mutex_};
-
-  auto* e = Find(name);
-  if (!e) {
-    log_.error("StartContainer: '{}' not found", name);
-    return false;
-  }
-
-  if (e->state == ContainerState::kRunning) {
-    log_.warn("Container '{}' already running", name);
-    return true;
-  }
-
-  log_.info("Starting container '{}'", name);
-  SetState(*e, ContainerState::kStarting);
-
-  if (!Create(*e)) {
+  if (!ok) {
     SetState(*e, ContainerState::kFailed);
     return false;
   }
-  if (!Start(*e)) {
-    SetState(*e, ContainerState::kFailed);
-    return false;
-  }
-
   if (e->lxc) {
     if (const pid_t pid = e->lxc->init_pid(e->lxc); pid > 0) {
       pid_to_name_[pid] = std::string{name};
@@ -175,7 +180,6 @@ bool ContainerManager::StartContainer(std::string_view name) {
       log_.warn("Container '{}' started but init_pid() returned {}", name, pid);
     }
   }
-
   e->stop_requested = false;
   e->started_at = std::chrono::steady_clock::now();
   SetState(*e, ContainerState::kRunning);
@@ -349,7 +353,11 @@ bool ContainerManager::IsRunning(std::string_view name) const {
 std::optional<pid_t> ContainerManager::GetInitPid(std::string_view name) const {
   std::lock_guard lock{mutex_};
   const auto* e = Find(name);
-  if (!e || !e->lxc) return std::nullopt;
+  // Only while it runs: a starting container's handle is being set up by
+  // the thread that starts it.
+  if (!e || !e->lxc || e->state != ContainerState::kRunning) {
+    return std::nullopt;
+  }
   const pid_t pid = e->lxc->init_pid(e->lxc);
   return pid > 0 ? std::optional<pid_t>{pid} : std::nullopt;
 }
@@ -361,23 +369,6 @@ std::optional<pid_t> ContainerManager::GetInitPid(std::string_view name) const {
 void ContainerManager::SetStateCallback(StateCallback callback) {
   std::lock_guard lock{mutex_};
   callback_ = std::move(callback);
-}
-
-std::vector<ContainerManager::ContainerConfig> ContainerManager::LoadContainers(
-    std::string_view source) {
-  aember::utils::config::ConfigError error;
-
-  if (!parser_.ParseFile(std::string{source}, error)) {
-    log_.error(
-        "Failed to load containers from '{}': {}", source, error.message);
-    return {};
-  }
-
-  log_.info("Loaded container configs from '{}'", source);
-  const auto& containers = parser_.GetContainers();
-  log_.info("Parser returned {} containers:", containers.size());
-  for (const auto& c : containers) { log_.info("  - {}", c.name); }
-  return containers;
 }
 
 // ---------------------------------------------------------------------------

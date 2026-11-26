@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from aember.steps.launching.launch import QEMU_PROFILES
+from aember.utils import aember_package
 from aember.steps.testing.system.scenarios import (
     boot_timeline,
     SCENARIOS,
@@ -254,35 +255,84 @@ class ScenarioTest(unittest.TestCase):
         (etc / "containers.json").write_text(
             json.dumps(
                 {
+                    "allow_unsigned": True,
                     "bridges": [{"name": "lxcbr0"}],
                     "containers": [{"name": "echo"}, {"name": "auth", "old": 1}],
                 }
             )
         )
-        bundle = tmp / "bundle"
-        files = bundle / "overlay" / "var" / "lib" / "aember" / "auth"
+        # A bundle of today's aember-build-helper: the package itself.
+        bundle = tmp / "auth"
+        bundle.mkdir()
+        (bundle / "auth.aember").write_bytes(b"package")
+        (bundle / "container.json").write_text(
+            '{"name": "auth", "dependencies": ["echo"]}'
+        )
+        # One of the layout before packages: made into a package.
+        old = tmp / "agent"
+        files = old / "overlay" / "var" / "lib" / "aember" / "agent"
         files.mkdir(parents=True)
-        (files / "auth.squashfs").write_bytes(b"img")
-        (bundle / "container.json").write_text('{"name": "auth", "new": 1}')
+        (files / "agent.squashfs").write_bytes(b"hsqs-img")
+        (files / "lxc.container.conf").write_text(
+            "lxc.rootfs.path = dir:/somewhere\nlxc.uts.name = agent\n"
+        )
+        (old / "container.json").write_text(
+            json.dumps(
+                {
+                    "name": "agent",
+                    "container": {"args": ["/usr/bin/agent"]},
+                    "restart_policy": "always",
+                }
+            )
+        )
         system = System(QEMU_PROFILES["x64-poky-linux"], tmp, tmp / "log")
         with mock.patch.object(System, "image_with", return_value=Path("/i")) as w:
             image = system.image_with_containers(
-                [bundle], {"/etc/aember/auth/auth.json": "{}", "key": b"k"}, "x"
+                [bundle, old], {"/etc/aember/auth/auth.json": "{}", "key": b"k"}, "x"
             )
         self.assertEqual(image, Path("/i"))
         tree, label = w.call_args.args
         self.assertEqual(label, "x")
         merged = json.loads((tree / "etc/aember/containers.json").read_text())
         self.assertEqual(merged["bridges"], [{"name": "lxcbr0"}])
+        self.assertTrue(merged["allow_unsigned"])
         # Same name replaced, others kept, new ones last.
         self.assertEqual(
-            merged["containers"], [{"name": "echo"}, {"name": "auth", "new": 1}]
+            merged["containers"],
+            [
+                {"name": "echo"},
+                {"name": "auth", "dependencies": ["echo"]},
+                {"name": "agent"},
+            ],
         )
+        packages = tree / "var/lib/aember/packages"
+        self.assertEqual((packages / "auth.aember").read_bytes(), b"package")
+        out = tmp / "unpacked"
+        config = aember_package.extract(packages / "agent.aember", out)
         self.assertEqual(
-            (tree / "var/lib/aember/auth/auth.squashfs").read_bytes(), b"img"
+            config,
+            {
+                "name": "agent",
+                "command": ["/usr/bin/agent"],
+                "restart_policy": "always",
+            },
         )
+        self.assertIn(
+            "lxc.rootfs.path = dir:/var/lib/aember/containers/agent",
+            (out / "lxc.container.conf").read_text(),
+        )
+        self.assertEqual((out / "image.squashfs").read_bytes(), b"hsqs-img")
         self.assertEqual((tree / "etc/aember/auth/auth.json").read_text(), "{}")
         self.assertEqual((tree / "key").read_bytes(), b"k")
+
+    def test_container_config_from_the_package(self):
+        tmp = Path(tempfile.mkdtemp())
+        d = tmp / "overlay_root" / "var" / "lib" / "aember" / "echo"
+        d.mkdir(parents=True)
+        (d / "config.json").write_text('{"name": "echo", "command": ["/x"]}')
+        system = System(QEMU_PROFILES["x64-poky-linux"], tmp, tmp)
+        self.assertEqual(system.container_config("echo")["command"], ["/x"])
+        self.assertEqual(system.container_config("missing"), {})
 
     def test_configs_from_the_image_without_overlay_root(self):
         tmp = Path(tempfile.mkdtemp())
@@ -294,7 +344,7 @@ class ScenarioTest(unittest.TestCase):
         f.assert_called_once_with("/etc/aember/containers.json")
 
     def test_container_app(self):
-        c = {"container": {"args": ["/bin/sh", "/echo-alpine.sh"]}}
+        c = {"command": ["/bin/sh", "/echo-alpine.sh"]}
         self.assertEqual(_container_app(c), "aember-init /bin/sh /echo-alpine.sh")
 
     def test_boot_timeline_in_order_of_since(self):

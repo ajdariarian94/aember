@@ -12,8 +12,8 @@
 
 #include <aember-libs/mount-manager/mount-manager.h>
 #include <aember-libs/utils/logging/logging.h>
+#include <aember-services/containerd/container-config.h>
 #include <aember-services/containerd/container-entry.h>
-#include <aember-services/containerd/container-parser.h>
 #include <aember-services/containerd/container-state.h>
 
 #include <chrono>
@@ -75,6 +75,10 @@ class ContainerManager {
   // Lifecycle
   // ---------------------------------------------------------------------------
 
+  /// Mounts its root file system and starts it with LXC. Different
+  /// containers may start at the same time from different threads (the
+  /// lock is not held while mounting and starting); the caller never
+  /// starts, stops or restarts one container from two threads at once.
   bool StartContainer(std::string_view name);
   bool StopContainer(std::string_view name);
 
@@ -110,11 +114,8 @@ class ContainerManager {
   [[nodiscard]] ContainerState GetContainerState(std::string_view name) const;
   [[nodiscard]] bool IsRunning(std::string_view name) const;
 
-  /** Returns the host-visible init PID for @p name, or nullopt if not running.
-   */
+  /** The host-visible init PID of @p name while it runs, else nullopt. */
   [[nodiscard]] std::optional<pid_t> GetInitPid(std::string_view name) const;
-
-  std::vector<ContainerConfig> LoadContainers(std::string_view source);
 
   // ---------------------------------------------------------------------------
   // Callbacks
@@ -153,8 +154,6 @@ class ContainerManager {
   mutable std::mutex mutex_;
 
   StateCallback callback_;
-
-  aember::containerd::ContainersConfigParser parser_{};
 
   std::shared_ptr<aember::mount_manager::MountManager> mount_manager_;
 

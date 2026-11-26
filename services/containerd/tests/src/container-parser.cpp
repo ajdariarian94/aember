@@ -1,8 +1,8 @@
 /**
  * @file container-parser.cpp
  * @author Arian Ajdari
- * @brief ContainersConfigParser tests (containers.json) and container
- *        state names.
+ * @brief containers.json (names, dependencies), a package's config.json and
+ * container state names.
  * @version 0.1
  * @date 2026-11-17
  *
@@ -25,97 +25,155 @@
 namespace {
 
 namespace fs = std::filesystem;
-using aember::containerd::ContainersConfigParser;
 using aember::containerd::ContainerState;
 using aember::containerd::ContainerStateToString;
+using aember::containerd::LoadContainerConfig;
+using aember::containerd::ParseBoardContainers;
 using aember::containerd::ParseBridges;
-using aember::utils::config::ConfigError;
+using aember::containerd::ParseContainerConfig;
+using nlohmann::json;
 
-class ContainerParserTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    dir_ = fs::temp_directory_path() /
-           ("aember-container-test-" + std::to_string(::getpid()));
-    fs::create_directories(dir_);
-  }
-  void TearDown() override { fs::remove_all(dir_); }
+// ---------------------------------------------------------------------------
+// containers.json: names and dependencies
+// ---------------------------------------------------------------------------
 
-  bool Parse(const std::string& json) {
-    const auto path = dir_ / "containers.json";
-    std::ofstream{path} << json;
-    error_ = {};
-    bool ok = false;
-    EXPECT_NO_THROW(ok = parser_.ParseFile(path.string(), error_));
-    return ok;
-  }
-
-  bool ParseOne(const std::string& entry) {
-    return Parse(R"({"containers": [)" + entry + "]}");
-  }
-
-  fs::path dir_;
-  ContainersConfigParser parser_;
-  ConfigError error_;
-};
-
-constexpr const char* kValid = R"({
-  "name": "echo",
-  "container": {
-    "squashfs": "/var/lib/aember/echo/echo.squashfs",
-    "rootfs": "/var/lib/aember/containers/echo",
-    "config_path": "/var/lib/aember/echo/lxc.container.conf",
-    "args": ["/bin/sh", "-c", "echo hi"]
-  }
-})";
-
-TEST_F(ContainerParserTest, FullEntry) {
-  ASSERT_TRUE(ParseOne(kValid)) << error_.message;
-  const auto& cs = parser_.GetContainers();
-  ASSERT_EQ(cs.size(), 1u);
-  EXPECT_EQ(cs[0].name, "echo");
-  EXPECT_EQ(cs[0].squashfs, "/var/lib/aember/echo/echo.squashfs");
-  EXPECT_EQ(cs[0].rootfs, "/var/lib/aember/containers/echo");
-  EXPECT_EQ(cs[0].config_path, "/var/lib/aember/echo/lxc.container.conf");
-  EXPECT_EQ(cs[0].args, (std::vector<std::string>{"/bin/sh", "-c", "echo hi"}));
+TEST(BoardContainersTest, NamesAndDependencies) {
+  const auto board = ParseBoardContainers(json::parse(R"({
+    "allow_unsigned": true,
+    "bridges": [{"name": "lxcbr0"}],
+    "containers": [{"name": "stats"},
+                   {"name": "monitor", "dependencies": ["stats"]}]})"));
+  ASSERT_TRUE(board) << board.error();
+  EXPECT_TRUE(board->allow_unsigned);
+  ASSERT_EQ(board->containers.size(), 2U);
+  EXPECT_EQ(board->containers[0].name, "stats");
+  EXPECT_TRUE(board->containers[0].dependencies.empty());
+  EXPECT_EQ(board->containers[1].dependencies,
+            std::vector<std::string>{"stats"});
 }
 
-TEST_F(ContainerParserTest, ArgsAreOptional) {
-  ASSERT_TRUE(ParseOne(R"({"name": "a", "container": {
-    "squashfs": "/s", "rootfs": "/r", "config_path": "/c"}})"));
-  EXPECT_TRUE(parser_.GetContainers().at(0).args.empty());
+TEST(BoardContainersTest, Defaults) {
+  const auto board = ParseBoardContainers(json::object());
+  ASSERT_TRUE(board);
+  EXPECT_FALSE(board->allow_unsigned) << "signed packages only by default";
+  EXPECT_TRUE(board->containers.empty());
 }
 
-TEST_F(ContainerParserTest, EmptyListIsValid) {
-  EXPECT_TRUE(Parse(R"({"containers": []})"));
-  EXPECT_TRUE(parser_.GetContainers().empty());
-}
-
-TEST_F(ContainerParserTest, RejectsBadFiles) {
-  EXPECT_FALSE(Parse(""));
-  EXPECT_FALSE(Parse("not json"));
-  EXPECT_FALSE(Parse("[]"));
-  EXPECT_FALSE(Parse(R"({"processes": []})"));
-  EXPECT_FALSE(Parse(R"({"containers": "echo"})"));
-  ConfigError error;
-  EXPECT_FALSE(parser_.ParseFile("/nonexistent/containers.json", error));
-}
-
-TEST_F(ContainerParserTest, RejectsMissingOrWrongFields) {
-  for (
-      const auto* entry : {
-          R"({"container": {"squashfs": "/s", "rootfs": "/r", "config_path": "/c"}})",
-          R"({"name": "a"})",
-          R"({"name": "a", "container": "x"})",
-          R"({"name": "a", "container": {"rootfs": "/r", "config_path": "/c"}})",
-          R"({"name": "a", "container": {"squashfs": "/s", "config_path": "/c"}})",
-          R"({"name": "a", "container": {"squashfs": "/s", "rootfs": "/r"}})",
-          R"({"name": "a", "container": {"squashfs": 1, "rootfs": "/r", "config_path": "/c"}})",
-          R"({"name": "a", "container": {"squashfs": "/s", "rootfs": "/r", "config_path": "/c", "args": "x"}})",
-          R"({"name": "a", "container": {"squashfs": "/s", "rootfs": "/r", "config_path": "/c", "args": [1]}})",
-      }) {
-    EXPECT_FALSE(ParseOne(entry)) << entry;
-    EXPECT_FALSE(error_.message.empty()) << entry;
+TEST(BoardContainersTest, RejectsMalformed) {
+  for (const char* text : {
+           R"([])",
+           R"({"allow_unsigned": "yes"})",
+           R"({"containers": "x"})",
+           R"({"containers": [1]})",
+           R"({"containers": [{}]})",
+           R"({"containers": [{"name": ""}]})",
+           R"({"containers": [{"name": "../x"}]})",
+           R"({"containers": [{"name": "Upper"}]})",
+           R"({"containers": [{"name": "a", "dependencies": "b"}]})",
+           R"({"containers": [{"name": "a", "dependencies": [1]}]})",
+       }) {
+    EXPECT_FALSE(ParseBoardContainers(json::parse(text))) << text;
   }
+}
+
+TEST(BoardContainersTest, TheOldFormatIsNamedInTheError) {
+  const auto board = ParseBoardContainers(json::parse(R"({"containers": [
+    {"name": "echo", "container": {"squashfs": "/x.squashfs"}}]})"));
+  ASSERT_FALSE(board);
+  EXPECT_NE(board.error().find("before .aember packages"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// config.json (in the package): how to start it
+// ---------------------------------------------------------------------------
+
+constexpr const char* kValid =
+    R"({"name": "echo", "command": ["/bin/sh", "-c", "echo hi"]})";
+
+json With(const char* extra) {
+  auto j = json::parse(kValid);
+  j.merge_patch(json::parse(extra));
+  return j;
+}
+
+TEST(ContainerConfigTest, PathsComeFromTheName) {
+  const auto c = ParseContainerConfig(json::parse(kValid), "/root");
+  ASSERT_TRUE(c) << c.error();
+  EXPECT_EQ(c->name, "echo");
+  EXPECT_EQ(c->squashfs, "/root/echo/image.squashfs");
+  EXPECT_EQ(c->config_path, "/root/echo/lxc.container.conf");
+  EXPECT_EQ(c->rootfs, "/root/containers/echo");
+  EXPECT_EQ(c->args, (std::vector<std::string>{"/bin/sh", "-c", "echo hi"}));
+  const auto standard = ParseContainerConfig(json::parse(kValid));
+  ASSERT_TRUE(standard);
+  EXPECT_EQ(standard->squashfs, "/var/lib/aember/echo/image.squashfs");
+}
+
+TEST(ContainerConfigTest, LifecycleDefaults) {
+  const auto c = ParseContainerConfig(json::parse(kValid));
+  ASSERT_TRUE(c);
+  EXPECT_TRUE(c->init);
+  EXPECT_EQ(c->stop_timeout, std::chrono::seconds{10});
+  EXPECT_EQ(c->restart_policy, aember::containerd::RestartPolicy::kNo);
+  EXPECT_EQ(c->max_restart_attempts, 0U);
+  EXPECT_EQ(c->restart_delay, std::chrono::seconds{5});
+}
+
+TEST(ContainerConfigTest, LifecycleFields) {
+  const auto c =
+      ParseContainerConfig(With(R"({"init": false, "stop_timeout": 30,
+               "restart_policy": "on-failure",
+               "max_restart_attempts": 3, "restart_delay": 7})"));
+  ASSERT_TRUE(c) << c.error();
+  EXPECT_FALSE(c->init);
+  EXPECT_EQ(c->stop_timeout, std::chrono::seconds{30});
+  EXPECT_EQ(c->restart_policy, aember::containerd::RestartPolicy::kOnFailure);
+  EXPECT_EQ(c->max_restart_attempts, 3U);
+  EXPECT_EQ(c->restart_delay, std::chrono::seconds{7});
+  for (const char* policy : {"no", "never", "always"}) {
+    EXPECT_TRUE(ParseContainerConfig(With(
+        (std::string{R"({"restart_policy": ")"} + policy + "\"}").c_str())))
+        << policy;
+  }
+}
+
+TEST(ContainerConfigTest, RejectsMissingOrWrongFields) {
+  for (const char* text : {
+           R"([])",
+           R"({"command": ["/x"]})",
+           R"({"name": "a"})",
+           R"({"name": "a", "command": []})",
+           R"({"name": "a", "command": "x"})",
+           R"({"name": "a", "command": [1]})",
+           R"({"name": "a/b", "command": ["/x"]})",
+       }) {
+    EXPECT_FALSE(ParseContainerConfig(json::parse(text))) << text;
+  }
+  for (const char* extra : {R"({"init": "yes"})",
+                            R"({"stop_timeout": -1})",
+                            R"({"stop_timeout": "10"})",
+                            R"({"restart_policy": "sometimes"})",
+                            R"({"restart_policy": 1})",
+                            R"({"max_restart_attempts": -2})",
+                            R"({"max_restart_attempts": 4294967296})",
+                            R"({"restart_delay": 1.5})"}) {
+    EXPECT_FALSE(ParseContainerConfig(With(extra))) << extra;
+  }
+}
+
+TEST(ContainerConfigTest, LoadedFromTheInstalledPackage) {
+  const auto root = fs::temp_directory_path() /
+                    ("aember-container-config-" + std::to_string(::getpid()));
+  fs::create_directories(root / "echo");
+  std::ofstream{root / "echo" / "config.json"} << kValid;
+  const auto c = LoadContainerConfig("echo", root.string());
+  ASSERT_TRUE(c) << c.error();
+  EXPECT_EQ(c->squashfs, (root / "echo" / "image.squashfs").string());
+  EXPECT_FALSE(LoadContainerConfig("missing", root.string()));
+  fs::create_directories(root / "other");
+  std::ofstream{root / "other" / "config.json"} << kValid;  // names "echo"
+  EXPECT_FALSE(LoadContainerConfig("other", root.string()));
+  fs::remove_all(root);
 }
 
 TEST(ContainerStateTest, NamesAreDistinct) {
@@ -131,52 +189,6 @@ TEST(ContainerStateTest, NamesAreDistinct) {
   }
   EXPECT_EQ(names.size(), 5u);
   EXPECT_EQ(ContainerStateToString(ContainerState::kRunning), "running");
-}
-
-TEST_F(ContainerParserTest, LifecycleDefaults) {
-  ASSERT_TRUE(ParseOne(kValid)) << error_.message;
-  const auto& c = parser_.GetContainers().at(0);
-  EXPECT_TRUE(c.init);
-  EXPECT_EQ(c.stop_timeout, std::chrono::seconds{10});
-  EXPECT_EQ(c.restart_policy, aember::containerd::RestartPolicy::kNo);
-  EXPECT_EQ(c.max_restart_attempts, 0u);
-  EXPECT_EQ(c.restart_delay, std::chrono::seconds{5});
-}
-
-TEST_F(ContainerParserTest, LifecycleFields) {
-  std::string entry = kValid;
-  entry.insert(entry.rfind('}'),
-               R"(, "init": false, "stop_timeout": 30,
-                  "restart_policy": "on-failure",
-                  "max_restart_attempts": 3, "restart_delay": 7)");
-  ASSERT_TRUE(ParseOne(entry)) << error_.message;
-  const auto& c = parser_.GetContainers().at(0);
-  EXPECT_FALSE(c.init);
-  EXPECT_EQ(c.stop_timeout, std::chrono::seconds{30});
-  EXPECT_EQ(c.restart_policy, aember::containerd::RestartPolicy::kOnFailure);
-  EXPECT_EQ(c.max_restart_attempts, 3u);
-  EXPECT_EQ(c.restart_delay, std::chrono::seconds{7});
-
-  for (const char* policy : {"no", "never", "always"}) {
-    std::string e = kValid;
-    e.insert(e.rfind('}'),
-             std::string{R"(, "restart_policy": ")"} + policy + "\"");
-    EXPECT_TRUE(ParseOne(e)) << policy << ": " << error_.message;
-  }
-}
-
-TEST_F(ContainerParserTest, BadLifecycleFieldsAreRejected) {
-  for (const char* extra : {R"(, "init": "yes")",
-                            R"(, "stop_timeout": -1)",
-                            R"(, "stop_timeout": "10")",
-                            R"(, "restart_policy": "sometimes")",
-                            R"(, "restart_policy": 1)",
-                            R"(, "max_restart_attempts": -2)",
-                            R"(, "restart_delay": 1.5)"}) {
-    std::string e = kValid;
-    e.insert(e.rfind('}'), extra);
-    EXPECT_FALSE(ParseOne(e)) << extra;
-  }
 }
 
 // Regression: containerd crashed (uncaught type_error from json::value) on a

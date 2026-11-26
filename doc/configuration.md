@@ -11,7 +11,7 @@ wrap around: 4294967296 restarts meant no limit).
 | File | Read by | What it lists |
 |------|---------|---------------|
 | [`services.json`](#servicesjson) | PID 1 (service-manager) | the services PID 1 starts and supervises |
-| [`containers.json`](#containersjson) | aember-containerd | LXC containers and their bridges |
+| [`containers.json`](#containersjson) | aember-containerd | which containers start (packages), their dependencies, their bridges |
 | [`network.json`](#networkjson) | aember-netd | interfaces, DNS, connectivity check |
 | [`modules.json`](#modulesjson) | PID 1 (module-loader) | kernel modules to load at boot |
 | [`packages.json`](#packagesjson) | `aember app pack` (build time) | opt-in programs from aember-resources |
@@ -54,34 +54,50 @@ entry names them.
 
 ## containers.json
 
+Which containers a board starts and what each one needs first. Everything
+else about a container is in its `.aember` package
+([aember-format.md](aember-format.md)).
+
 ```json
 {
+  "allow_unsigned": false,
   "bridges": [{ "name": "aember-br0", "address": "10.10.0.1/24" }],
   "containers": [
-    {
-      "name": "aember-stats",
-      "container": {
-        "squashfs": "/var/lib/aember/aember-stats/aember-stats.squashfs",
-        "rootfs": "/var/lib/aember/containers/aember-stats",
-        "config_path": "/var/lib/aember/aember-stats/lxc.container.conf"
-      },
-      "restart_policy": "on-failure"
-    }
+    { "name": "aember-stats" },
+    { "name": "aember-monitor", "dependencies": ["aember-stats"] },
+    { "name": "my-app" }
   ]
 }
 ```
 
-aember-build-helper writes the container entries
-(`aember-cli/run.py install`); edit `restart_policy` and the timeouts by
-hand if the defaults don't fit.
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `allow_unsigned` | bool | `false` | install packages without a signature (development boards; aember's own boards say `true`). Signed ones are checked against `/etc/aember/keys/*.pub` |
+| `containers[].name` | string | required | the container; its package is `<name>.aember`, installed at `/var/lib/aember/<name>/` |
+| `containers[].dependencies` | array of names | `[]` | containers that must run before this one starts (and again before a restart) |
+
+**Start order.** Containers that don't depend on each other start at the
+same time, each in its own thread of aember-containerd; one with
+dependencies starts as soon as all of them run. An entry in a dependency
+cycle, behind one, with a dependency that isn't listed, or listed twice is
+not started (logged); the rest are unaffected. At shutdown, dependents stop
+first. The design is checked in [spec/tla/StartGraph.tla](../spec/tla/StartGraph.tla).
+To start everything one after another, make each depend on the one before.
+
+**Packages.** At its start, aember-containerd installs every
+`/var/lib/aember/packages/*.aember` (an update dropped there, a package
+the fleet delivered): checked, unpacked into `/var/lib/aember/<name>/`, the
+previous version kept as `<name>.prev`, the file removed. One it refuses is
+renamed `<name>.aember.rejected`. An image from `aember app pack` has its
+containers installed already.
+
+A container's `config.json` (in its package; aember-build-helper writes it
+from `aember-container.json`):
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `name` | string | required | the LXC container name |
-| `container.squashfs` | string | required | the read-only image |
-| `container.rootfs` | string | required | where containerd mounts image + writable layer |
-| `container.config_path` | string | required | the LXC config |
-| `container.args` | array of strings | `[]` | arguments for the container's init |
+| `name` | string | required | the package's name |
+| `command` | array of strings | required | what runs in the container |
 | `init` | bool | `true` | run the app under aember's init wrapper (reaps zombies, forwards signals) |
 | `stop_timeout` | seconds | `10` | how long a stop waits before killing |
 | `restart_policy` | `"no"`, `"on-failure"`, `"always"` | `"no"` | what happens when the container stops by itself |

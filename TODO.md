@@ -308,8 +308,20 @@ first:
   that isn't an object (`ParseBridges`), the status file left stale for good
   by a string that isn't UTF-8, `/proc/uptime` inf/nan cast to long, a
   "dns" string taken as one address.
-- [ ] Fuzz more: the `.aember` unpacker (when it exists), `lxc.container.conf`
-  handling, the debug shell's input.
+- [x] Fuzz the `.aember` unpacker (`fuzz_package`, 2026-11-26).
+- [x] `.aember` packages for containers and a parallel start graph in
+  containerd (2026-11-26): containers.json lists names and dependencies,
+  each container is a signed package installed once into
+  `/var/lib/aember/<name>/`. x64 KVM boot, everything running: 3.53-3.63 s
+  before, 2.82-3.23 s after (the three containers now come up within
+  ~30 ms of each other instead of ~0.25 s apart).
+- [ ] Services the same way: services.json only names and dependencies,
+  each service's settings in its own folder (`config.json`).
+- [ ] containerd's own dependency on netd (boards' services.json): only
+  containers that need the network need it; with per-container
+  dependencies on services, containers without network could start next
+  to netd (~0.5 s at boot on x64).
+- [ ] Fuzz more: `lxc.container.conf` handling, the debug shell's input.
 - [ ] Past bugs still without a regression test: loopback brought up by
   PID 1 (`AemberInit::BringUpLoopback` is private; a QEMU system test or a
   root test in a private net namespace), containerd's pthread_atfork
