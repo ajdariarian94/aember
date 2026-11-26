@@ -64,12 +64,17 @@ def run_guestfish(script: list[str], what: str, read_only: bool = False) -> str:
     # guestfish reading a script from stdin can exit 0 after a failed command
     # (e.g. copy-in hitting "No space left on device"): treat any libguestfs
     # error as a failure, never ship a half-written image.
-    if result.returncode != 0 or "libguestfs: error" in stderr:
+    stdout = (result.stdout or b"").decode(errors="replace")
+    if (
+        result.returncode != 0
+        or "libguestfs: error" in stderr
+        or MKFS_FAILED in stdout
+    ):
         raise RuntimeError(
             f"guestfish failed building {what} "
-            f"(exit {result.returncode}): {stderr.strip()[-500:]}"
+            f"(exit {result.returncode}): {(stderr or stdout).strip()[-500:]}"
         )
-    return (result.stdout or b"").decode(errors="replace")
+    return stdout
 
 
 def _root_owned(info: tarfile.TarInfo) -> tarfile.TarInfo:
@@ -98,6 +103,30 @@ def tar_in_commands(trees: list[Path], workdir: Path) -> list[str]:
                 tar.add(entry, arcname=entry.name, filter=_root_owned)
         commands.append(f"tar-in {tar_path} /")
     return commands
+
+
+# Printed by mkfs_ext4's command when mke2fs fails; run_guestfish raises.
+MKFS_FAILED = "aember-mkfs-failed"
+
+
+def mkfs_ext4(device: str, label: str | None = None) -> str:
+    """The guestfish command that makes the ext4 root file system.
+
+    Inode tables and the journal are written now (lazy init off): otherwise
+    the device's first boot runs ext4lazyinit, which wrote ~32 MB in the
+    background in its first 30 s on x64 (doc/performance.md). The packed
+    image is less sparse by that much; the board's flash is spared it.
+
+    guestfish's own `mke2fs` ignores lazyitableinit/lazyjournalinit (the
+    groups stay without ITABLE_ZEROED), so this runs the appliance's mke2fs
+    through `debug sh`.
+    """
+    opts = "-E lazy_itable_init=0,lazy_journal_init=0"
+    lab = f" -L {label}" if label else ""
+    return (
+        f'debug sh "mke2fs -F -q -t ext4 {opts}{lab} {device} 2>&1 '
+        f'|| echo {MKFS_FAILED}"'
+    )
 
 
 def rootfs_size_mb(ctx: Context, *trees: Path) -> int:
@@ -135,7 +164,7 @@ def create_rootfs_image(
         f"add {rootfs_img}",
         "run",
         "part-disk /dev/sda mbr",
-        "mkfs ext4 /dev/sda1",
+        mkfs_ext4("/dev/sda1"),
         "mount /dev/sda1 /",
     ]
 
