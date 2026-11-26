@@ -13,6 +13,7 @@
 #include <aember-libs/utils/mount/mount-point.h>
 
 #include <expected>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -102,6 +103,8 @@ class MountManager {
   [[nodiscard]] std::vector<MountPoint> GetInitramfsMounts() const;
   [[nodiscard]] std::vector<MountPoint> GetEarlyMounts() const;
 
+  /// Containerd mounts several containers at once (one thread each).
+  mutable std::mutex mutex_;
   std::vector<std::string> mounted_targets_;
 
   mutable Logger log_{"mount-manager"};

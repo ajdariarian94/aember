@@ -296,6 +296,18 @@ def extract(path: Path, dest: Path) -> dict:
     return json.loads((dest / MEMBERS[0]).read_text())
 
 
+def container_lxc_config(name: str, text: str) -> str:
+    """An old lxc.container.conf for the package of @p name: its root file
+    system where containerd mounts it now (/var/lib/aember/containers/<name>;
+    some boards used another directory name before)."""
+    lines = []
+    for line in text.splitlines():
+        if line.split("=", 1)[0].strip() == "lxc.rootfs.path":
+            line = f"lxc.rootfs.path = dir:/var/lib/aember/containers/{name}"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
 def container_config(name: str, entry: dict) -> dict:
     """A container's config.json from an old containers.json entry (the
     format before packages: paths, args and settings per board)."""
@@ -304,3 +316,31 @@ def container_config(name: str, entry: dict) -> dict:
         if key in entry:
             config[key] = entry[key]
     return config
+
+
+def install(
+    package: Path, root: Path, keys: dict[str, bytes], allow_unsigned: bool
+) -> dict:
+    """
+    Install @p package (<name>.aember) like a device does, into
+    @p root/<name>/: checked against @p keys, its three files and
+    package.json. For images built with their packages installed already
+    (`aember app pack`); returns package.json's content.
+    """
+    name = package.name[: -len(EXTENSION)] if package.name.endswith(EXTENSION) else ""
+    if not name:
+        raise PackageError(f"{package}: not a {EXTENSION} file")
+    signed_by = verify(package, keys, allow_unsigned)
+    dest = root / name
+    if dest.exists():
+        raise PackageError(f"{dest} exists already")
+    config = extract(package, dest)
+    if config.get("name") != name:
+        raise PackageError(f"{package}: config.json's \"name\" is not '{name}'")
+    installed = {
+        "digest": read_footer(package).digest.hex(),
+        "name": name,
+        "signed_by": signed_by,
+    }
+    (dest / "package.json").write_text(json.dumps(installed, indent=2) + "\n")
+    return installed

@@ -179,7 +179,7 @@ machine's network; closing the window ends it and cleans up.
 | `aember analyze` | Static analysis (clang-tidy, cppcheck) against a baseline |
 | `aember mutate -k <unit>` | Mutation testing of one library's or service's tests (weekly in CI for all) |
 | `aember fuzz [-k <target>]` | Fuzz the code that reads input (libFuzzer, ASan, UBSan; `fuzz/`) |
-| `aember systemtest [-k <scenario>]` | System tests: the packed image booted in QEMU (boot, debug shell, service/container restart, power-off, reboot); `--scenarios FILE --input k=v` runs a container repository's own end-to-end tests (e.g. aember-fleet's) |
+| `aember systemtest [-k <scenario>]` | System tests: the packed image booted in QEMU (boot with its timeline, debug shell, service/container restart, power-off, reboot, installing a signed package); `--scenarios FILE --input k=v` runs a container repository's own end-to-end tests (e.g. aember-fleet's) |
 | `aember package keygen\|create\|inspect` | `.aember` packages (one container: image, config.json, lxc.container.conf; signed): keys, make one by hand, check one ([doc/aember-format.md](doc/aember-format.md)) |
 | `aember godbolt [-f FILE]` / `--stop` | Local Compiler Explorer with the SDK's cross compilers (every configured target) and aember's own flags: read the assembly of PID 1's code |
 | `aember rpi image` / `flash` / `launch` | Raspberry Pi 4 SD card image |
@@ -204,7 +204,7 @@ The root filesystem overlay is `resources/<arch>/rootfs/`; aember reads:
 | File | Contents |
 |------|----------|
 | `/etc/aember/services.json` | Services: executable, arguments, dependencies, restart policy, `ipc` |
-| `/etc/aember/containers.json` | Containers (SquashFS image, LXC config, `restart_policy`, `stop_timeout`) and their bridges |
+| `/etc/aember/containers.json` | Which containers start and what each depends on (independent ones start together), their bridges, whether unsigned packages are allowed; each container is a `.aember` package ([doc/aember-format.md](doc/aember-format.md)) |
 | `/etc/aember/network.json` | Interfaces (DHCP or static), DNS, connectivity check (aember-netd) |
 | `/etc/aember/modules.json` | Kernel modules to load |
 | `/etc/aember/packages.json` | Opt-in programs from aember-resources (build time) |
@@ -224,11 +224,14 @@ packs a project into an aember-ready container: add it as a submodule,
 describe the container in `aember-container.json` (from a Dockerfile, a
 Docker image, or a CMake install with the libraries from the aember SDK),
 then its `aember` CLI (`aember-cli/run.py build`, then
-`aember-cli/run.py install <this repo>`) puts the SquashFS image, its LXC
-config and the `containers.json` entry into the board's overlay.
+`aember-cli/run.py install <this repo>`) puts the container's `.aember`
+package (its SquashFS image, `config.json` and `lxc.container.conf`, signed;
+[doc/aember-format.md](doc/aember-format.md)) and its name into the board's
+overlay.
 
 Only what a board lists goes into its image: the services in
-`services.json`, the containers in `containers.json` and the opt-in
+`services.json`, the containers in `containers.json` (installed from their
+packages) and the opt-in
 packages in `packages.json` (SSH, ext4 tools, Wi-Fi client and access
 point; see [doc/packages.md](doc/packages.md)). Remove an entry
 and the next `aember app pack` leaves that program or container image out.

@@ -118,6 +118,7 @@ add_library(
   ${AEMBER_ROOT}/libraries/utils/process/src/process-config-parser.cpp
   ${AEMBER_ROOT}/services/containerd/src/container-parser.cpp
   ${AEMBER_ROOT}/services/containerd/src/control.cpp
+  ${AEMBER_ROOT}/services/containerd/src/start-graph.cpp
   ${AEMBER_ROOT}/services/netd/src/dhcp-client.cpp
   ${AEMBER_ROOT}/services/netd/src/network-manager.cpp
 )

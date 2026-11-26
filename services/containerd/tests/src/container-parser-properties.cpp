@@ -1,8 +1,8 @@
 /**
  * @file container-parser-properties.cpp
  * @author Arian Ajdari
- * @brief Property tests for containers.json (ContainersConfigParser): what
- *        is written comes back, a field of the wrong type is an error (not a
+ * @brief Property tests for a container's config.json (ParseContainerConfig):
+ * what is written comes back, a field of the wrong type is an error (not a
  *        crash or a default), numbers too big for an unsigned are refused.
  *
  * @copyright Copyright (c) 2025, Aember, All rights reserved.
@@ -26,10 +26,9 @@
 namespace {
 
 using aember::containerd::ContainerConfig;
-using aember::containerd::ContainersConfigParser;
+using aember::containerd::ParseContainerConfig;
 using aember::containerd::RestartPolicy;
 using aember::test::Gen;
-using aember::utils::config::ConfigError;
 
 std::string AnyText(Gen& g) {
   static const std::vector<std::string> pieces{
@@ -44,20 +43,16 @@ unsigned AnyUnsigned(Gen& g) {
                        : g.Int<unsigned>(0, 100000);
 }
 
+/// A container's config.json (as in its package) and what it means.
 std::pair<ContainerConfig, nlohmann::json> RandomContainer(Gen& g) {
   ContainerConfig c;
-  c.name = "c" + AnyText(g);
-  c.squashfs = "/var/lib/aember/" + AnyText(g) + ".squashfs";
-  c.rootfs = "/var/lib/aember/containers/" + AnyText(g);
-  c.config_path = "/var/lib/aember/" + AnyText(g) + "/lxc.container.conf";
-  nlohmann::json ctr{{"squashfs", c.squashfs},
-                     {"rootfs", c.rootfs},
-                     {"config_path", c.config_path}};
-  if (g.Chance(0.5)) {
-    for (int i = g.Size(4); i > 0; --i) c.args.push_back(AnyText(g));
-    ctr["args"] = c.args;
-  }
-  nlohmann::json j{{"name", c.name}, {"type", "container"}, {"container", ctr}};
+  c.name = "c" + g.Text("abcdefghijklmnopqrstuvwxyz0123456789._-", 0, 20);
+  if (c.name.ends_with(".new") || c.name.ends_with(".prev")) c.name += "x";
+  c.squashfs = "/var/lib/aember/" + c.name + "/image.squashfs";
+  c.rootfs = "/var/lib/aember/containers/" + c.name;
+  c.config_path = "/var/lib/aember/" + c.name + "/lxc.container.conf";
+  for (int i = g.Int(1, 4); i > 0; --i) c.args.push_back(AnyText(g));
+  nlohmann::json j{{"name", c.name}, {"command", c.args}};
   if (g.Chance(0.5)) j["init"] = c.init = g.Chance(0.5);
   if (g.Chance(0.5)) {
     const auto s = AnyUnsigned(g);
@@ -84,63 +79,37 @@ std::pair<ContainerConfig, nlohmann::json> RandomContainer(Gen& g) {
   return {c, j};
 }
 
-bool ParseText(const std::string& text, ContainersConfigParser& parser,
-               ConfigError& error) {
-  const std::string path =
-      std::filesystem::temp_directory_path() /
-      ("aember-containers-" + std::to_string(::getpid()) + ".json");
-  std::ofstream{path} << text;
-  const bool ok = parser.ParseFile(path, error);
-  std::filesystem::remove(path);
-  return ok;
+/// Parsed from its text, as containerd reads it from the disk.
+bool Parses(const nlohmann::json& j, int indent = -1) {
+  return ParseContainerConfig(nlohmann::json::parse(j.dump(indent)))
+      .has_value();
 }
 
-std::string File(const nlohmann::json& entry) {
-  // Not {{"containers", {entry}}}: a one-element braced list is the element.
-  return nlohmann::json{{"containers", nlohmann::json::array({entry})}}.dump();
-}
-
-TEST(ContainersConfigProperty, WhatIsWrittenComesBack) {
+TEST(ContainerConfigProperty, WhatIsWrittenComesBack) {
   aember::test::ForAll(300, [](Gen& g) {
-    std::vector<ContainerConfig> want;
-    auto list = nlohmann::json::array();
-    for (int i = g.Size(4); i > 0; --i) {
-      auto [c, j] = RandomContainer(g);
-      want.push_back(c);
-      list.push_back(j);
-    }
-    ContainersConfigParser parser;
-    ConfigError error;
-    ASSERT_TRUE(ParseText(
-        nlohmann::json{{"containers", list}}.dump(g.Int(-1, 2)), parser, error))
-        << error.message;
-    ASSERT_EQ(parser.GetContainers().size(), want.size());
-    for (std::size_t i = 0; i < want.size(); ++i) {
-      const auto& got = parser.GetContainers()[i];
-      EXPECT_EQ(got.name, want[i].name);
-      EXPECT_EQ(got.squashfs, want[i].squashfs);
-      EXPECT_EQ(got.rootfs, want[i].rootfs);
-      EXPECT_EQ(got.config_path, want[i].config_path);
-      EXPECT_EQ(got.args, want[i].args);
-      EXPECT_EQ(got.init, want[i].init);
-      EXPECT_EQ(got.stop_timeout, want[i].stop_timeout);
-      EXPECT_EQ(got.restart_policy, want[i].restart_policy);
-      EXPECT_EQ(got.max_restart_attempts, want[i].max_restart_attempts);
-      EXPECT_EQ(got.restart_delay, want[i].restart_delay);
-    }
+    const auto [want, j] = RandomContainer(g);
+    const auto got =
+        ParseContainerConfig(nlohmann::json::parse(j.dump(g.Int(-1, 2))));
+    ASSERT_TRUE(got) << got.error() << ": " << j.dump();
+    EXPECT_EQ(got->name, want.name);
+    EXPECT_EQ(got->squashfs, want.squashfs);
+    EXPECT_EQ(got->rootfs, want.rootfs);
+    EXPECT_EQ(got->config_path, want.config_path);
+    EXPECT_EQ(got->args, want.args);
+    EXPECT_EQ(got->init, want.init);
+    EXPECT_EQ(got->stop_timeout, want.stop_timeout);
+    EXPECT_EQ(got->restart_policy, want.restart_policy);
+    EXPECT_EQ(got->max_restart_attempts, want.max_restart_attempts);
+    EXPECT_EQ(got->restart_delay, want.restart_delay);
   });
 }
 
-TEST(ContainersConfigProperty, AFieldOfTheWrongTypeIsAnError) {
+TEST(ContainerConfigProperty, AFieldOfTheWrongTypeIsAnError) {
   // (path into the entry, what fits there)
   enum class Kind { kText, kTexts, kBool, kUnsigned, kPolicy, kObject };
   const std::vector<std::pair<std::vector<std::string>, Kind>> fields{
       {{"name"}, Kind::kText},
-      {{"container"}, Kind::kObject},
-      {{"container", "squashfs"}, Kind::kText},
-      {{"container", "rootfs"}, Kind::kText},
-      {{"container", "config_path"}, Kind::kText},
-      {{"container", "args"}, Kind::kTexts},
+      {{"command"}, Kind::kTexts},
       {{"init"}, Kind::kBool},
       {{"stop_timeout"}, Kind::kUnsigned},
       {{"restart_policy"}, Kind::kPolicy},
@@ -152,7 +121,7 @@ TEST(ContainersConfigProperty, AFieldOfTheWrongTypeIsAnError) {
       case Kind::kText:
         return v.is_string();
       case Kind::kTexts:
-        return v.is_array();
+        return v.is_array() && !v.empty();
       case Kind::kBool:
         return v.is_boolean();
       case Kind::kUnsigned:
@@ -182,12 +151,8 @@ TEST(ContainersConfigProperty, AFieldOfTheWrongTypeIsAnError) {
     } else {
       do { bad = g.Pick(values); } while (fits(bad, kind));
     }
-    (path.size() == 1 ? j[path[0]] : j[path[0]][path[1]]) = bad;
-    ContainersConfigParser parser;
-    ConfigError error;
-    EXPECT_FALSE(ParseText(File(j), parser, error))
-        << path.back() << " = " << bad.dump();
-    EXPECT_FALSE(error.message.empty());
+    j[path[0]] = bad;
+    EXPECT_FALSE(Parses(j)) << path.back() << " = " << bad.dump();
   });
 }
 
@@ -195,17 +160,14 @@ TEST(ContainersConfigProperty, AFieldOfTheWrongTypeIsAnError) {
 // wrapped: "max_restart_attempts": 4294967296 became 0 (= unlimited),
 // "stop_timeout": 4294967306 became 10 s. Now they are refused. Found by
 // these property tests (the same bug was in services.json).
-TEST(ContainersConfigProperty, NumbersTooBigAreRefusedNotWrapped) {
+TEST(ContainerConfigProperty, NumbersTooBigAreRefusedNotWrapped) {
   const std::vector<std::string> fields{
       "stop_timeout", "max_restart_attempts", "restart_delay"};
   aember::test::ForAll(200, [&](Gen& g) {
     auto j = RandomContainer(g).second;
     const auto field = g.Pick(fields);
     j[field] = g.Int<std::uint64_t>(std::uint64_t{UINT_MAX} + 1, UINT64_MAX);
-    ContainersConfigParser parser;
-    ConfigError error;
-    EXPECT_FALSE(ParseText(File(j), parser, error))
-        << field << " = " << j[field].dump();
+    EXPECT_FALSE(Parses(j)) << field << " = " << j[field].dump();
   });
 }
 

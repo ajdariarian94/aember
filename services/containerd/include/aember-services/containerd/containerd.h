@@ -32,7 +32,18 @@ struct ContainerdOptions {
   std::string log_file = "/var/log/aember-containerd.log";
   /// Control socket (control.h): list/stop/start/restart; empty = none.
   std::string control_socket = "/run/aember-containerd/control.sock";
+  /// Installed packages, one directory per container (doc/aember-format.md).
+  std::string packages_root = "/var/lib/aember";
+  /// .aember files to install at start (then removed).
+  std::string inbox = "/var/lib/aember/packages";
+  /// Public keys (*.pub) packages may be signed with.
+  std::string keys_dir = "/etc/aember/keys";
 };
+
+/// Install every <inbox>/*.aember (signature checked against @p keys_dir;
+/// unsigned ones only if @p allow_unsigned). A package that can't be
+/// installed is renamed <name>.aember.rejected. Returns how many failed.
+int InstallPackages(const ContainerdOptions& options, bool allow_unsigned);
 
 /// Bridges from the "bridges" list of @p containers_json (name, address
 /// CIDR): created if missing, addressed, up. Returns how many failed.

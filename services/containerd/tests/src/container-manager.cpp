@@ -123,26 +123,6 @@ TEST_F(ContainerManagerTest, BrokenContainerFailsCleanly) {
   EXPECT_EQ(transitions_.back().second, State::kFailed);
 }
 
-TEST_F(ContainerManagerTest, LoadContainersFromFile) {
-  const auto path = dir_ / "containers.json";
-  std::ofstream{path} << R"({"containers": [
-    {"name": "one", "container": {"squashfs": "/s1", "rootfs": "/r1",
-                                  "config_path": "/c1"}},
-    {"name": "two", "container": {"squashfs": "/s2", "rootfs": "/r2",
-                                  "config_path": "/c2", "args": ["x"]}}]})";
-  const auto configs = cm_->LoadContainers(path.string());
-  ASSERT_EQ(configs.size(), 2u);
-  EXPECT_EQ(configs[0].name, "one");
-  EXPECT_EQ(configs[1].args, (std::vector<std::string>{"x"}));
-}
-
-TEST_F(ContainerManagerTest, LoadContainersFromBadFileIsEmpty) {
-  const auto path = dir_ / "bad.json";
-  std::ofstream{path} << "{ not json";
-  EXPECT_TRUE(cm_->LoadContainers(path.string()).empty());
-  EXPECT_TRUE(cm_->LoadContainers("/nonexistent.json").empty());
-}
-
 }  // namespace
 
 namespace {

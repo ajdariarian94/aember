@@ -31,6 +31,7 @@ add_executable(
   container-parser-unittest
   src/container-parser.cpp
   src/container-parser-properties.cpp
+  src/start-graph.cpp
 )
 
 target_include_directories(
