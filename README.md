@@ -181,7 +181,7 @@ machine's network; closing the window ends it and cleans up.
 | `aember fuzz [-k <target>]` | Fuzz the code that reads input (libFuzzer, ASan, UBSan; `fuzz/`) |
 | `aember systemtest [-k <scenario>]` | System tests: the packed image booted in QEMU (boot with its timeline, debug shell, service/container restart, power-off, reboot, installing a signed package); `--scenarios FILE --input k=v` runs a container repository's own end-to-end tests (e.g. aember-fleet's) |
 | `aember package keygen\|create\|inspect` | `.aember` packages (one container: image, config.json, lxc.container.conf; signed): keys, make one by hand, check one ([doc/aember-format.md](doc/aember-format.md)) |
-| `aember godbolt [-f FILE]` / `--stop` | Local Compiler Explorer with the SDK's cross compilers (every configured target) and aember's own flags: read the assembly of PID 1's code |
+| `aember godbolt [-f FILE]` / `--stop` | Local Compiler Explorer with the SDK's cross compilers (every configured target) and aember's own flags: read the assembly of PID 1's code. `-f` prints a short link that opens with that file; to link against aember's libraries pick "aember libraries" in the Libraries menu and use Compile to binary (not `-l` in the options box) |
 | `aember rpi image` / `flash` / `launch` | Raspberry Pi 4 SD card image |
 | `aember usb image` / `flash` / `launch` | x86-64 PC USB stick image (UEFI) |
 | `aember fetch-resources` | Download kernel, BusyBox, LXC and SDK only |

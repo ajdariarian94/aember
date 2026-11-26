@@ -911,8 +911,26 @@ same image, `.github/workflows/ci.yml`).
   - Use: paste a function (or `#include` its header and call it), compare
     targets side by side ("Add new > Compiler"), add `-O3` in the options
     box to compare with the speed build (Release is `-Os`); "Compile to binary" (objdump of the SDK)
-    shows the real encoding. `aember godbolt -f file.cpp` prints a link that
-    opens with that file. Execution is off (cross compilers).
+    shows the real encoding. `aember godbolt -f file.cpp` prints a short
+    `/z/<id>` link that opens with that file (stored through CE's
+    shortener, `POST /api/shortener`, in the container's /tmp until it
+    stops; if that fails, the long `/clientstate/` link, which works too:
+    the server runs with `NODE_OPTIONS=--max-http-header-size=1MiB`, node's
+    16 KiB default answered 431 to a whole source file in the URL).
+    Execution is off (cross compilers).
+  - aember's libraries: each compiler has one CE library, "aember
+    libraries (<arch>)" (`libs.aember_<arch>_libs`,
+    `compiler.<id>.supportsLibraries`), from that target's
+    `build/install/<arch>/<type>/` (include, `lib/*.a`, plus vcpkg's
+    `vcpkg_installed/<arch>/lib`). Pick it in the "Libraries" menu, then
+    "Compile to binary": CE links its `staticliblink` list **after** the
+    compiled source. Don't type `-L`/`-l` into the options box: CE puts
+    user options before the source file, so the linker skips the archives
+    (undefined reference). The link order comes from the CMake export files
+    (`lib/cmake/aember-libs/**`: each library before what it needs, then
+    lzma, spdlog, fmt; `EXTERNAL_LINKS` maps third-party targets). Only
+    what's built and installed: build the target first (`aember app build
+    -a <arch>`), a stale install has stale symbols.
   - Measure before optimizing: which functions matter comes from the boot
     timeline, CPU and a size breakdown (doc/performance.md), not from
     reading assembly.
