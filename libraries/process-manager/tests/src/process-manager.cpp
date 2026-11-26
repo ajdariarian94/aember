@@ -243,13 +243,17 @@ TEST(ProcessManagerRegistryTest, UnknownNames) {
 TEST(ProcessManagerRegistryTest, LoadProcessesFromFile) {
   ProcessManager pm;
   EXPECT_TRUE(pm.LoadProcesses("/nonexistent/services.json").empty());
-  const auto path = std::filesystem::temp_directory_path() /
-                    ("pm-test-" + std::to_string(::getpid()) + ".json");
-  std::ofstream{path} << R"({"processes":[{"name":"a","executable":"/bin/true"},
-                                          {"name":"b","executable":"/bin/true",
-                                           "args":["1"]}]})";
-  const auto configs = pm.LoadProcesses(path.string());
-  std::filesystem::remove(path);
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("pm-test-" + std::to_string(::getpid()));
+  std::filesystem::create_directories(dir / "a");
+  std::filesystem::create_directories(dir / "b");
+  std::ofstream{dir / "a" / "config.json"} << R"({"executable":"/bin/true"})";
+  std::ofstream{dir / "b" / "config.json"}
+      << R"({"executable":"/bin/true","args":["1"]})";
+  const auto path = dir / "services.json";
+  std::ofstream{path} << R"({"services":[{"name":"a"},{"name":"b"}]})";
+  const auto configs = pm.LoadProcesses(path.string(), dir.string());
+  std::filesystem::remove_all(dir);
   ASSERT_EQ(configs.size(), 2u);
   EXPECT_EQ(configs[1].args, std::vector<std::string>{"1"});
 }

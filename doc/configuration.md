@@ -22,17 +22,40 @@ entry names them.
 
 ## services.json
 
+Which services PID 1 starts and what each one needs first. Each service's
+settings are in its own folder, `/usr/lib/aember/services/<name>/config.json`:
+aember's own services bring theirs (`services/<dir>/config.json` in the
+repository, installed by `aember app pack`); a board adds its own services
+(an opt-in package's program, a script) as folders in its overlay
+(`resources/<arch>/rootfs/usr/lib/aember/services/<name>/`), which win over
+aember's.
+
 ```json
 {
-  "processes": [
-    {
-      "name": "aember-netd",
-      "executable": "/usr/bin/aember-netd",
-      "ipc": true,
-      "ready_timeout_ms": 120000,
-      "stop_timeout_ms": 10000
-    }
+  "services": [
+    { "name": "aember-netd" },
+    { "name": "aember-containerd", "dependencies": ["aember-netd"] }
   ]
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `services[].name` | string | required | the service; its folder's name |
+| `services[].dependencies` | array of names | `[]` | start after these are running (or ready, with `ipc`); a restart waits for them too |
+
+A service whose folder is missing or whose config.json is invalid isn't
+started (logged), the others are; what depends on it waits.
+
+`usr/lib/aember/services/aember-netd/config.json`:
+
+```json
+{
+  "name": "aember-netd",
+  "executable": "/usr/bin/aember-netd",
+  "ipc": true,
+  "ready_timeout_ms": 120000,
+  "stop_timeout_ms": 10000
 }
 ```
 
@@ -44,7 +67,6 @@ entry names them.
 | `args` | array of strings | `[]` | arguments after the executable |
 | `working_directory` | string | inherited (`/`) | |
 | `environment` | object of strings | `{}` | added to PID 1's environment |
-| `dependencies` | array of names | `[]` | start after these are running (or ready, with `ipc`) |
 | `restart_on_failure` | bool | `true` | restart after a non-zero exit or a signal |
 | `max_restarts` | unsigned | `0` | restarts in a row before giving up; `0` = no limit (a run of 60 s resets the count) |
 | `restart_delay_ms` | unsigned | `1000` | wait between an exit and the restart |

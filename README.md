@@ -203,7 +203,7 @@ The root filesystem overlay is `resources/<arch>/rootfs/`; aember reads:
 
 | File | Contents |
 |------|----------|
-| `/etc/aember/services.json` | Services: executable, arguments, dependencies, restart policy, `ipc` |
+| `/etc/aember/services.json` | Which services start and what each depends on; each service's settings (executable, arguments, restart policy, `ipc`) are its `/usr/lib/aember/services/<name>/config.json` |
 | `/etc/aember/containers.json` | Which containers start and what each depends on (independent ones start together), their bridges, whether unsigned packages are allowed; each container is a `.aember` package ([doc/aember-format.md](doc/aember-format.md)) |
 | `/etc/aember/network.json` | Interfaces (DHCP or static), DNS, connectivity check (aember-netd) |
 | `/etc/aember/modules.json` | Kernel modules to load |
@@ -279,7 +279,8 @@ aember_service(
 )
 ```
 
-With `"ipc": true` in its `services.json` entry it gets a channel to
+Its settings go into `services/<dir>/config.json` and its name into the
+board's `services.json`. With `"ipc": true` in its config.json it gets a channel to
 PID 1 on fd 3: it reports when it is ready, sends events for the
 heartbeat, and is told when a debug shell owns the console. See
 [services/README.md](services/README.md).

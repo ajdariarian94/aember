@@ -29,8 +29,16 @@ class PackServicesTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def write_services(self, executables):
-        processes = [{"name": Path(e).name, "executable": e} for e in executables]
-        (self.etc / "services.json").write_text(json.dumps({"processes": processes}))
+        """services.json with one service per executable, each with its
+        folder in the overlay (usr/lib/aember/services/<name>/)."""
+        names = [Path(e).name for e in executables]
+        (self.etc / "services.json").write_text(
+            json.dumps({"services": [{"name": n} for n in names]})
+        )
+        for name, exe in zip(names, executables):
+            folder = self.etc.parents[1] / "usr/lib/aember/services" / name
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "config.json").write_text(json.dumps({"executable": exe}))
 
     def packed(self):
         return sorted(p.name for p in PackStep().copy_services(self.ctx, self.out))
@@ -55,6 +63,26 @@ class PackServicesTest(unittest.TestCase):
         self.write_services(["/usr/bin/aember-netd"])
         self.assertEqual(self.packed(), ["aember-netd"])
         self.assertFalse((self.out / "usr/bin/aember-extra").exists())
+
+    def test_aembers_own_services_bring_their_folder(self):
+        (self.root / "services" / "netd").mkdir(parents=True)
+        (self.root / "services" / "netd" / "config.json").write_text(
+            json.dumps({"name": "aember-netd", "executable": "/usr/bin/aember-netd"})
+        )
+        (self.etc / "services.json").write_text(
+            json.dumps({"services": [{"name": "aember-netd"}]})
+        )
+        self.assertEqual(self.packed(), ["aember-netd"])
+        config = self.out / "usr/lib/aember/services/aember-netd/config.json"
+        self.assertEqual(
+            json.loads(config.read_text())["executable"], "/usr/bin/aember-netd"
+        )
+
+    def test_the_old_services_json_packs_nothing(self):
+        (self.etc / "services.json").write_text(
+            json.dumps({"processes": [{"name": "a", "executable": "/usr/bin/a"}]})
+        )
+        self.assertEqual(self.packed(), [])
 
     def test_unreadable_services_json_packs_nothing(self):
         (self.etc / "services.json").write_text("{ not json")
