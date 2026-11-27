@@ -230,6 +230,15 @@ Checkouts from before the move to aember-resources may still have:
   in its sub-project `CMakeCache.txt` files (symptom: "LTO version 15.1
   instead of the expected 16.0" at link time): delete that whole dir (not
   just the caches, or ExternalProject skips its configure) and build again.
+- a `build/configure/<arch>/<type>/` configured with an older SDK whose
+  target sysroot had another name (aarch64: `cortexa72-poky-linux`, now
+  `cortexa53-poky-linux`): its cached compiler probe no longer counts the
+  sysroot's `usr/include` as implicit, a package reporting it (FindLibLZMA)
+  adds it as `-isystem` and libstdc++'s `#include_next` fails ("stdlib.h:
+  No such file or directory"). `ConfigureStep` removes such a directory
+  by itself (`stale_probe` in `steps/cmake/configure.py`; the vcpkg binary
+  cache makes the rebuild quick), and `tools/cmake/AemberSysrootCheck.cmake`
+  stops a direct cmake run with the reason.
 
 ## C++ libraries
 
@@ -883,7 +892,10 @@ same image, `.github/workflows/ci.yml`).
   system tests (x64 Release built, packed with `AEMBER_CI_DOCKER=1` so
   pack's guestfish `docker run` reaches the runner's Docker, then
   `aember systemtest --timeout-scale 3`; KVM when the runner has
-  /dev/kvm, else TCG; the consoles are an artifact); valgrind nightly. Job summaries come from `$GITHUB_STEP_SUMMARY`
+  /dev/kvm, else TCG; the consoles are an artifact); cross builds
+  (`aember app build -a <arch>`, build only, one job per target with its
+  own vcpkg cache: aarch64, arm-musl, riscv64 on every PR, all 7 non-x64
+  targets nightly and by hand); valgrind nightly. Job summaries come from `$GITHUB_STEP_SUMMARY`
   (`build/ci-summary.md` inside the container).
 
 - **Compiler Explorer** (`aember godbolt`, `aember-cli/aember/steps/godbolt/`):
