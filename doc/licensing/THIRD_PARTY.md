@@ -63,7 +63,7 @@ customer that wants no GPL in the Wi-Fi stack gets OpenSSL 3 (Apache-2.0,
 
 | Container | Third-party contents | Licences |
 |---|---|---|
-| `aember-echo` / `alpine-echo` | Alpine Linux 3.20.0 minirootfs (BusyBox, musl, apk-tools, ...) | GPL-2.0-only, MIT, others (`lib/apk/db/installed` in the image). **Demo only:** product images should drop it. |
+| `aember-echo` / `alpine-echo` | Alpine Linux 3.20.0 minirootfs (BusyBox, musl, apk-tools, ...) | GPL-2.0-only, MIT, others (`lib/apk/db/installed` in the image). **Removed** from aember's boards (2026-11-27); the entry stays for images that add Alpine containers. |
 | `aember-stats` | glibc/musl, GCC runtime | ours + as base image |
 | `aember-monitor` | Qt 6.10 qtbase (Core, Gui, Network; linuxfb, offscreen), FreeType (FTL), libpng (Libpng), PCRE2-16 (BSD-3), zlib, glibc, GCC runtime | Qt: LGPL-3.0-only (blocker 3), the rest notices |
 | `aember-auth` | wolfSSL 5.8.0 → mbedTLS 3.6 (Apache-2.0) in phase 2, Monocypher 4.0.2 (BSD-2/CC0, after #7), nlohmann/json (MIT) | blocker 1 |

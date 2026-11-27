@@ -8,9 +8,6 @@
   ],
   "containers": [
     {
-      "name": "alpine-echo"
-    },
-    {
       "name": "aember-stats"
     },
     {

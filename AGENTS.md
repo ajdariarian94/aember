@@ -149,7 +149,7 @@ image at all. A crash in them never takes PID 1 down.
   a parent-death signal, which also fires when a subreaper they were
   reparented to dies; they stay PID 1's orphans.
 - LXC forks its monitors from containerd without exec, so they show
-  containerd's command line: `{aember-echo} /usr/bin/aember-containerd`.
+  containerd's command line: `{aember-stats} /usr/bin/aember-containerd`.
   Match `{aember-ctrd}` (containerd's own name), not the command line,
   when you look for or kill containerd.
 

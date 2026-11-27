@@ -188,8 +188,7 @@ BusyBox init / s6 / runit / dinit.
   the list untested.
 - [x] **Container output** (2026-11-19): the init wrapper sends the app's
   output to the container console (it was LXC's `/dev/null`);
-  aember-build-helper keeps it with `lxc.console.logfile`. The overlay's
-  own aember-echo container has no console log file in its LXC config yet.
+  aember-build-helper keeps it with `lxc.console.logfile`.
 
 ## AppImage
 
