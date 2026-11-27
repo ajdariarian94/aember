@@ -20,6 +20,10 @@ if (CMAKE_SYSROOT AND CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
   )
   set(_aember_implicit "")
   foreach (_dir IN LISTS CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+    # GCC lists directories that don't exist (usr/local/include).
+    if (NOT EXISTS "${_dir}")
+      continue()
+    endif ()
     file(
       REAL_PATH
       "${_dir}"
