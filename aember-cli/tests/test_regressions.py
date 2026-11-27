@@ -1,5 +1,5 @@
 """Regression tests for CLI bugs that had none: image building, the
-compile_commands merge, `aember qemu build`."""
+compile_commands merge, `aember qemu build`, stale build directories."""
 
 import json
 import subprocess
@@ -13,6 +13,7 @@ from aember.config.architecture import Architecture
 from aember.config.build_type import BuildType
 from aember.core.context import Context
 from aember.steps.clean.clean import CleanStep
+from aember.steps.cmake import configure
 from aember.steps.packaging import rootfs
 from aember.utils.merge_compile_command import CompileCommandsMerger
 
@@ -89,6 +90,64 @@ class QemuBuildTest(unittest.TestCase):
         self.assertFalse(any(isinstance(s, CleanStep) for s in debug))
         with_tests = self.steps(build_tests=True)
         self.assertTrue(any(isinstance(s, CleanStep) for s in with_tests))
+
+
+def write_probe(directory: Path, *sysroots: str) -> Path:
+    """A CMakeFiles/<v>/CMakeCXXCompiler.cmake listing @p sysroots' usr/include."""
+    sdk = "/aember_ws/aember/build/aember-resources/aarch64-poky-linux/sdk/sysroots"
+    dirs = [f"{sdk}/x86_64-pokysdk-linux/usr/aarch64-poky-linux/include"]
+    dirs += [f"{sdk}/{name}/usr/include" for name in sysroots]
+    probe = directory / "CMakeFiles" / "4.1.0" / "CMakeCXXCompiler.cmake"
+    probe.parent.mkdir(parents=True)
+    probe.write_text(
+        'set(CMAKE_CXX_COMPILER_ID "GNU")\n'
+        f'set(CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES "{";".join(dirs)}")\n'
+    )
+    return probe
+
+
+class StaleBuildDirTest(unittest.TestCase):
+    # Regression: build/configure/aarch64-poky-linux/ was configured with an
+    # older SDK whose sysroot was cortexa72-poky-linux; the current SDK's is
+    # cortexa53. The cached probe no longer counted the sysroot's usr/include
+    # as implicit, FindLibLZMA's -isystem <sysroot>/usr/include broke
+    # libstdc++'s #include_next, and every aarch64 build of utils/package
+    # failed with "stdlib.h: No such file or directory" (2026-11-26).
+    def test_probe_of_another_sysroot_is_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp)
+            probe = write_probe(
+                build / "aember-libs-prefix" / "src" / "aember-libs-build",
+                "cortexa72-poky-linux",
+            )
+            self.assertEqual(
+                configure.stale_probe(build, "cortexa53-poky-linux"), probe
+            )
+            self.assertEqual(
+                configure.probe_sysroots(probe),
+                {"x86_64-pokysdk-linux", "cortexa72-poky-linux"},
+            )
+
+    def test_probe_of_the_current_sysroot_is_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_probe(Path(tmp), "cortexa53-poky-linux")
+            self.assertIsNone(configure.stale_probe(Path(tmp), "cortexa53-poky-linux"))
+            self.assertIsNone(configure.stale_probe(Path(tmp) / "missing", "x"))
+
+    def test_configure_removes_a_stale_build_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctx = Context(architecture="aarch64-poky-linux", build_type="Release")
+            ctx.root = root
+            build = root / "build" / "configure" / "aarch64-poky-linux" / "Release"
+            write_probe(build, "cortexa72-poky-linux")
+            (build / "CMakeCache.txt").write_text("old\n")
+            configure.ConfigureStep().drop_stale_build_dir(ctx)
+            self.assertFalse(build.exists())
+            # a current one stays
+            write_probe(build, "cortexa53-poky-linux")
+            configure.ConfigureStep().drop_stale_build_dir(ctx)
+            self.assertTrue(build.exists())
 
 
 if __name__ == "__main__":
